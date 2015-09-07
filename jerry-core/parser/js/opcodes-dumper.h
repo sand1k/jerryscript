@@ -270,11 +270,9 @@ typedef enum __attr_packed___
   VARG_CALL_EXPR
 } varg_list_type;
 
-jsp_operand_t empty_operand (void);
 jsp_operand_t literal_operand (lit_cpointer_t);
 jsp_operand_t eval_ret_operand (void);
 jsp_operand_t jsp_create_operand_for_in_special_reg (void);
-bool operand_is_empty (jsp_operand_t);
 
 void dumper_init (void);
 void dumper_free (void);

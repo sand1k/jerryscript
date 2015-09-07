@@ -600,12 +600,6 @@ get_diff_from (vm_instr_counter_t oc)
 }
 
 jsp_operand_t
-empty_operand (void)
-{
-  return jsp_operand_t::make_empty_operand ();
-}
-
-jsp_operand_t
 literal_operand (lit_cpointer_t lit_cp)
 {
   return jsp_operand_t::make_lit_operand (lit_cp);
@@ -633,12 +627,6 @@ jsp_create_operand_for_in_special_reg (void)
 {
   return jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME);
 } /* jsp_create_operand_for_in_special_reg */
-
-bool
-operand_is_empty (jsp_operand_t op)
-{
-  return op.is_empty_operand ();
-}
 
 void
 dumper_new_statement (void)
@@ -990,7 +978,7 @@ rewrite_varg_header_set_args_count (size_t args_count)
       om.op.data.func_decl_n.arg_list = (vm_idx_t) args_count;
       serializer_rewrite_op_meta (STACK_TOP (varg_headers), om);
       STACK_DROP (varg_headers, 1);
-      return empty_operand ();
+      return jsp_operand_t::make_empty_operand ();
     }
     case VM_OP_ARRAY_DECL:
     case VM_OP_OBJ_DECL:
@@ -1029,11 +1017,10 @@ dump_call_additional_info (opcode_call_flags_t flags, /**< call flags */
   if (flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
   {
     JERRY_ASSERT (this_arg.is_register_operand ());
-    JERRY_ASSERT (!operand_is_empty (this_arg));
   }
   else
   {
-    JERRY_ASSERT (operand_is_empty (this_arg));
+    JERRY_ASSERT (this_arg.is_empty_operand ());
   }
 
   dump_triple_address (VM_OP_META,
@@ -1938,7 +1925,7 @@ dump_continue_iterations_check (jsp_operand_t op)
   vm_idx_t id1, id2;
   split_instr_counter (next_iteration_target_diff, &id1, &id2);
 
-  if (operand_is_empty (op))
+  if (op.is_empty_operand ())
   {
     dump_double_address (VM_OP_JMP_UP,
                          jsp_operand_t::make_idx_const_operand (id1),

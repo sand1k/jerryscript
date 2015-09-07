@@ -392,7 +392,9 @@ parse_property_assignment (void)
     lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
 
     skip_newlines ();
-    const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand (), NULL);
+    const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR,
+                                                    jsp_operand_t::make_empty_operand (),
+                                                    NULL);
 
     dump_function_end_for_rewrite ();
 
@@ -468,9 +470,9 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
 
       opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
 
-      jsp_operand_t this_arg = empty_operand ();
+      jsp_operand_t this_arg = jsp_operand_t::make_empty_operand ();
       if (this_arg_p != NULL
-          && !operand_is_empty (*this_arg_p))
+          && !this_arg_p->is_empty_operand ())
       {
         call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
 
@@ -521,12 +523,12 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
       {
         if (call_flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
         {
-          JERRY_ASSERT (!operand_is_empty (this_arg));
+          JERRY_ASSERT (!this_arg.is_empty_operand ());
           dump_call_additional_info (call_flags, this_arg);
         }
         else
         {
-          dump_call_additional_info (call_flags, empty_operand ());
+          dump_call_additional_info (call_flags, jsp_operand_t::make_empty_operand ());
         }
       }
 
@@ -730,7 +732,7 @@ parse_function_expression (void)
   {
     lexer_save_token (tok);
     skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, empty_operand (), NULL);
+    res = parse_argument_list (VARG_FUNC_EXPR, jsp_operand_t::make_empty_operand (), NULL);
   }
 
   dump_function_end_for_rewrite ();
@@ -773,7 +775,7 @@ parse_function_expression (void)
 static jsp_operand_t
 parse_array_literal (void)
 {
-  return parse_argument_list (VARG_ARRAY_DECL, empty_operand (), NULL);
+  return parse_argument_list (VARG_ARRAY_DECL, jsp_operand_t::make_empty_operand (), NULL);
 }
 
 /* object_literal
@@ -782,7 +784,7 @@ parse_array_literal (void)
 static jsp_operand_t
 parse_object_literal (void)
 {
-  return parse_argument_list (VARG_OBJ_DECL, empty_operand (), NULL);
+  return parse_argument_list (VARG_OBJ_DECL, jsp_operand_t::make_empty_operand (), NULL);
 }
 
 /* literal
@@ -922,7 +924,7 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
   skip_newlines ();
   while (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT))
   {
-    jsp_operand_t prop = empty_operand ();
+    jsp_operand_t prop = jsp_operand_t::make_empty_operand ();
 
     if (token_is (TOK_OPEN_SQUARE))
     {
@@ -995,7 +997,7 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
 static jsp_operand_t
 parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
 {
-  jsp_operand_t this_arg = empty_operand ();
+  jsp_operand_t this_arg = jsp_operand_t::make_empty_operand ();
   jsp_operand_t expr = parse_member_expression (&this_arg, prop_gl);
   jsp_operand_t prop;
 
@@ -1011,7 +1013,7 @@ parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
   }
 
   expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
-  this_arg = empty_operand ();
+  this_arg = jsp_operand_t::make_empty_operand ();
 
   skip_newlines ();
   while (token_is (TOK_OPEN_PAREN) || token_is (TOK_OPEN_SQUARE)
@@ -1073,7 +1075,7 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
                                                    *          reference - the reference's name;
                                                    *        otherwise - empty jsp_operand_t */
 {
-  jsp_operand_t this_arg = empty_operand (), prop = empty_operand ();
+  jsp_operand_t this_arg = jsp_operand_t::make_empty_operand (), prop = jsp_operand_t::make_empty_operand ();
   jsp_operand_t expr = parse_left_hand_side_expression (&this_arg, &prop);
 
   if (lexer_prev_token ().type == TOK_NEWLINE)
@@ -1087,7 +1089,7 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
 
     const jsp_operand_t res = dump_post_increment_res (expr);
-    if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
+    if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
     {
       dump_prop_setter (this_arg, prop, expr);
     }
@@ -1098,7 +1100,7 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
 
     const jsp_operand_t res = dump_post_decrement_res (expr);
-    if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
+    if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
     {
       dump_prop_setter (this_arg, prop, expr);
     }
@@ -1129,7 +1131,7 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
 static jsp_operand_t
 parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
 {
-  jsp_operand_t expr, this_arg = empty_operand (), prop = empty_operand ();
+  jsp_operand_t expr, this_arg = jsp_operand_t::make_empty_operand (), prop = jsp_operand_t::make_empty_operand ();
   switch (tok.type)
   {
     case TOK_DOUBLE_PLUS:
@@ -1138,7 +1140,7 @@ parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
       expr = parse_unary_expression (&this_arg, &prop);
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
       expr = dump_pre_increment_res (expr);
-      if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
+      if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
       {
         dump_prop_setter (this_arg, prop, expr);
       }
@@ -1150,7 +1152,7 @@ parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
       expr = parse_unary_expression (&this_arg, &prop);
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
       expr = dump_pre_decrement_res (expr);
-      if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
+      if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
       {
         dump_prop_setter (this_arg, prop, expr);
       }
@@ -1986,7 +1988,7 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
 
   if (token_is (TOK_SEMICOLON))
   {
-    dump_continue_iterations_check (empty_operand ());
+    dump_continue_iterations_check (jsp_operand_t::make_empty_operand ());
   }
   else
   {
@@ -2024,7 +2026,7 @@ jsp_parse_for_in_statement_iterator (jsp_operand_t *base_p, /**< out: base value
   {
     skip_newlines ();
 
-    *base_p = empty_operand ();
+    *base_p = jsp_operand_t::make_empty_operand ();
     *identifier_p = parse_variable_declaration ();
 
     return false;
@@ -2039,9 +2041,9 @@ jsp_parse_for_in_statement_iterator (jsp_operand_t *base_p, /**< out: base value
      */
     jsp_operand_t i = parse_left_hand_side_expression (&base, &identifier);
 
-    if (operand_is_empty (base))
+    if (base.is_empty_operand ())
     {
-      *base_p = empty_operand ();
+      *base_p = jsp_operand_t::make_empty_operand ();
       *identifier_p = i;
 
       return false;
@@ -2140,7 +2142,7 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
   }
   else
   {
-    JERRY_ASSERT (operand_is_empty (iterator_base));
+    JERRY_ASSERT (iterator_base.is_empty_operand ());
     dump_variable_assignment (iterator_identifier, for_in_special_reg);
   }
 
