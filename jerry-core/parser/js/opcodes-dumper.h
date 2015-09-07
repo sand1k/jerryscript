@@ -210,30 +210,17 @@ public:
   } /* is_literal_operand */
 
   /**
-   * Get idx for operand
+   * Get register identifier
    *
-   * @return VM_IDX_REWRITE_LITERAL_UID (for jsp_operand_t::LITERAL),
-   *         or register index (for jsp_operand_t::TMP).
+   * @return register idx
    */
   vm_idx_t
   get_idx (void) const
   {
-    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+    JERRY_ASSERT (_type == jsp_operand_t::TMP);
+    JERRY_ASSERT (_data.uid >= VM_REG_FIRST && _data.uid <= VM_REG_LAST);
 
-    if (_type == jsp_operand_t::TMP)
-    {
-      return _data.uid;
-    }
-    else if (_type == jsp_operand_t::LITERAL)
-    {
-      return VM_IDX_REWRITE_LITERAL_UID;
-    }
-    else
-    {
-      JERRY_ASSERT (_type == jsp_operand_t::EMPTY);
-
-      return VM_IDX_EMPTY;
-    }
+    return _data.uid;
   } /* get_idx */
 
   /**
@@ -245,22 +232,9 @@ public:
   lit_cpointer_t
   get_literal (void) const
   {
-    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+    JERRY_ASSERT (_type == jsp_operand_t::LITERAL);
 
-    if (_type == jsp_operand_t::TMP)
-    {
-      return NOT_A_LITERAL;
-    }
-    else if (_type == jsp_operand_t::LITERAL)
-    {
-      return _data.lit_id;
-    }
-    else
-    {
-      JERRY_ASSERT (_type == jsp_operand_t::EMPTY);
-
-      return NOT_A_LITERAL;
-    }
+    return _data.lit_id;
   } /* get_literal */
 
   /**
