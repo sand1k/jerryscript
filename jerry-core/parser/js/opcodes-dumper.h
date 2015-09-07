@@ -32,6 +32,7 @@ public:
   {
     EMPTY, /**< empty operand */
     LITERAL, /**< operand contains literal value */
+    IDENTIFIER, /**< operand contains identifier */
     TMP, /**< operand contains byte-code register index */
     IDX_CONST, /**< operand contains an integer constant that fits vm_idx_t */
     UNKNOWN, /**< operand, representing unknown value that would be rewritten later */
@@ -115,6 +116,24 @@ public:
 
     return ret;
   } /* make_lit_operand */
+
+  /**
+   * Construct identifier operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_identifier_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::IDENTIFIER;
+    ret._data.lit_id = lit_id;
+
+    return ret;
+  } /* make_identifier_operand */
 
   /**
    * Construct register operand
@@ -210,6 +229,19 @@ public:
   } /* is_literal_operand */
 
   /**
+   * Is it identifier operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_identifier_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::IDENTIFIER);
+  } /* is_identifier_operand */
+
+  /**
    * Get register identifier
    *
    * @return register idx
@@ -232,7 +264,8 @@ public:
   lit_cpointer_t
   get_literal (void) const
   {
-    JERRY_ASSERT (_type == jsp_operand_t::LITERAL);
+    JERRY_ASSERT (_type == jsp_operand_t::LITERAL
+                  || _type == jsp_operand_t::IDENTIFIER);
 
     return _data.lit_id;
   } /* get_literal */
@@ -284,7 +317,7 @@ void dumper_finish_scope (void);
 void dumper_start_varg_code_sequence (void);
 void dumper_finish_varg_code_sequence (void);
 
-extern bool dumper_is_eval_literal (jsp_operand_t);
+extern bool dumper_is_eval_identifier (jsp_operand_t);
 
 jsp_operand_t dump_array_hole_assignment_res (void);
 void dump_boolean_assignment (jsp_operand_t, bool);

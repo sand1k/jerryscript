@@ -476,7 +476,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
       {
         call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
 
-        if (this_arg_p->is_literal_operand ())
+        if (this_arg_p->is_identifier_operand ())
         {
           /*
            * FIXME:
@@ -499,7 +499,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
          *          ECMA-262 v5, 15.2.2.1
          */
       }
-      else if (dumper_is_eval_literal (obj))
+      else if (dumper_is_eval_identifier (obj))
       {
         call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
       }
@@ -848,7 +848,7 @@ parse_primary_expression (void)
       {
         scopes_tree_set_eval_used (STACK_TOP (scopes));
       }
-      return jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
+      return jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
     }
     case TOK_OPEN_SQUARE: return parse_array_literal ();
     case TOK_OPEN_BRACE: return parse_object_literal ();
@@ -1235,7 +1235,9 @@ parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
 static jsp_operand_t
 dump_assignment_of_lhs_if_literal (jsp_operand_t lhs)
 {
-  if (lhs.is_literal_operand ())
+  JERRY_ASSERT (!lhs.is_literal_operand ());
+
+  if (lhs.is_identifier_operand ())
   {
     lhs = dump_variable_assignment_res (lhs);
   }

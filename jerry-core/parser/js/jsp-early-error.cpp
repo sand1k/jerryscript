@@ -208,7 +208,8 @@ void jsp_early_error_add_varg (jsp_operand_t op)
 static void
 emit_error_on_eval_and_arguments (jsp_operand_t op, locus loc __attr_unused___)
 {
-  if (op.is_literal_operand ())
+  if (op.is_literal_operand ()
+      || op.is_identifier_operand ())
   {
     if (lit_literal_equal_type_utf8 (lit_get_literal_by_cp (op.get_literal ()),
                                      lit_get_magic_string_utf8 (LIT_MAGIC_STRING_ARGUMENTS),

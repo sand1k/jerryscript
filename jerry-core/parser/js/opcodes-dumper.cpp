@@ -357,7 +357,8 @@ jsp_dmp_gen_instr (vm_op_t opcode, /**< operation code */
     }
     else
     {
-      JERRY_ASSERT (ops[i].is_literal_operand ());
+      JERRY_ASSERT (ops[i].is_literal_operand ()
+                    || ops[i].is_identifier_operand ());
 
       instr.data.raw_args[i] = VM_IDX_REWRITE_LITERAL_UID;
     }
@@ -388,7 +389,8 @@ jsp_dmp_create_op_meta (vm_op_t opcode, /**< opcode */
 
   for (size_t i = 0; i < ops_num; i++)
   {
-    if (ops[i].is_literal_operand ())
+    if (ops[i].is_literal_operand ()
+        || ops[i].is_identifier_operand ())
     {
       ret.lit_id[i] = ops[i].get_literal ();
     }
@@ -694,16 +696,16 @@ dumper_finish_varg_code_sequence (void)
  *         false - otherwise.
  */
 bool
-dumper_is_eval_literal (jsp_operand_t obj) /**< byte-code operand */
+dumper_is_eval_identifier (jsp_operand_t obj) /**< byte-code operand */
 {
   /*
    * FIXME: Switch to corresponding magic string
    */
-  bool is_eval_lit = (obj.is_literal_operand ()
-                      && lit_literal_equal_type_cstr (lit_get_literal_by_cp (obj.get_literal ()), "eval"));
+  bool is_eval_identifier = (obj.is_identifier_operand ()
+                             && lit_literal_equal_type_cstr (lit_get_literal_by_cp (obj.get_literal ()), "eval"));
 
-  return is_eval_lit;
-} /* dumper_is_eval_literal */
+  return is_eval_identifier;
+} /* dumper_is_eval_identifier */
 
 /**
  * Dump assignment of an array-hole simple value to a register
@@ -1316,21 +1318,15 @@ dump_logical_not_res (jsp_operand_t op)
 void
 dump_delete (jsp_operand_t res, jsp_operand_t op, bool is_strict, locus loc)
 {
-  if (op.is_literal_operand ())
+  if (op.is_identifier_operand ())
   {
     literal_t lit = lit_get_literal_by_cp (op.get_literal ());
-    if (lit->get_type () == LIT_STR_T
-        || lit->get_type () == LIT_MAGIC_STR_T
-        || lit->get_type () == LIT_MAGIC_STR_EX_T)
-    {
-      jsp_early_error_check_delete (is_strict, loc);
+    JERRY_ASSERT (lit->get_type () == LIT_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
 
-      dump_double_address (VM_OP_DELETE_VAR, res, op);
-    }
-    else if (lit->get_type ()  == LIT_NUMBER_T)
-    {
-      dump_boolean_assignment (res, true);
-    }
+    jsp_early_error_check_delete (is_strict, loc);
+    dump_double_address (VM_OP_DELETE_VAR, res, op);
   }
   else
   {
