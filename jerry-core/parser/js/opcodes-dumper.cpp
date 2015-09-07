@@ -599,12 +599,6 @@ get_diff_from (vm_instr_counter_t oc)
   return (vm_instr_counter_t) (serializer_get_current_instr_counter () - oc);
 }
 
-jsp_operand_t
-literal_operand (lit_cpointer_t lit_cp)
-{
-  return jsp_operand_t::make_lit_operand (lit_cp);
-}
-
 /**
  * Creates operand for eval's return value
  *

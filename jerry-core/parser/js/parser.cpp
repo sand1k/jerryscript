@@ -295,19 +295,19 @@ parse_property_name (void)
     case TOK_STRING:
     case TOK_NUMBER:
     {
-      return literal_operand (token_data_as_lit_cp ());
+      return jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
     }
     case TOK_SMALL_INT:
     {
       literal_t lit = lit_find_or_create_literal_from_num ((ecma_number_t) token_data ());
-      return literal_operand (lit_cpointer_t::compress (lit));
+      return jsp_operand_t::make_lit_operand (lit_cpointer_t::compress (lit));
     }
     case TOK_KEYWORD:
     {
       const char *s = lexer_keyword_to_string ((keyword) token_data ());
       literal_t lit = lit_find_or_create_literal_from_utf8_string ((const lit_utf8_byte_t *) s,
                                                                    (lit_utf8_size_t)strlen (s));
-      return literal_operand (lit_cpointer_t::compress (lit));
+      return jsp_operand_t::make_lit_operand (lit_cpointer_t::compress (lit));
     }
     case TOK_NULL:
     case TOK_BOOL:
@@ -317,7 +317,7 @@ parse_property_name (void)
                                   : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
       literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
                                                                    lit_get_magic_string_size (id));
-      return literal_operand (lit_cpointer_t::compress (lit));
+      return jsp_operand_t::make_lit_operand (lit_cpointer_t::compress (lit));
     }
     default:
     {
@@ -562,7 +562,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
         || vlt == VARG_FUNC_EXPR)
     {
       current_token_must_be (TOK_NAME);
-      op = literal_operand (token_data_as_lit_cp ());
+      op = jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
       jsp_early_error_add_varg (op);
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (op, is_strict_mode (), tok.loc);
       dump_varg (op);
@@ -655,7 +655,7 @@ parse_function_declaration (void)
   jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
 
   token_after_newlines_must_be (TOK_NAME);
-  const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
+  const jsp_operand_t name = jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
 
   jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
 
@@ -722,7 +722,7 @@ parse_function_expression (void)
   skip_newlines ();
   if (token_is (TOK_NAME))
   {
-    const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
+    const jsp_operand_t name = jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
 
     skip_newlines ();
@@ -848,7 +848,7 @@ parse_primary_expression (void)
       {
         scopes_tree_set_eval_used (STACK_TOP (scopes));
       }
-      return literal_operand (token_data_as_lit_cp ());
+      return jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
     }
     case TOK_OPEN_SQUARE: return parse_array_literal ();
     case TOK_OPEN_BRACE: return parse_object_literal ();
@@ -1832,11 +1832,11 @@ static jsp_operand_t
 parse_variable_declaration (void)
 {
   current_token_must_be (TOK_NAME);
-  const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
+  const jsp_operand_t name = jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
 
   if (!dumper_variable_declaration_exists (token_data_as_lit_cp ()))
   {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (literal_operand (token_data_as_lit_cp ()),
+    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (jsp_operand_t::make_lit_operand (token_data_as_lit_cp ()),
                                                                  is_strict_mode (),
                                                                  tok.loc);
 
@@ -2505,7 +2505,7 @@ parse_catch_clause (void)
 
   token_after_newlines_must_be (TOK_OPEN_PAREN);
   token_after_newlines_must_be (TOK_NAME);
-  const jsp_operand_t exception = literal_operand (token_data_as_lit_cp ());
+  const jsp_operand_t exception = jsp_operand_t::make_lit_operand (token_data_as_lit_cp ());
   jsp_early_error_check_for_eval_and_arguments_in_strict_mode (exception, is_strict_mode (), tok.loc);
   token_after_newlines_must_be (TOK_CLOSE_PAREN);
 
