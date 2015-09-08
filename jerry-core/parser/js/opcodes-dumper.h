@@ -33,6 +33,8 @@ public:
     EMPTY, /**< empty operand */
     LITERAL, /**< operand contains literal value */
     IDENTIFIER, /**< operand contains identifier */
+    PROPERTY_REFERENCE, /**< value-based reference (property reference)
+                         *   See also: ECMA-262 v5, 8.7, IsPropertyReference */
     TMP, /**< operand contains byte-code register index */
     IDX_CONST, /**< operand contains an integer constant that fits vm_idx_t */
     UNKNOWN, /**< operand, representing unknown value that would be rewritten later */
@@ -134,6 +136,24 @@ public:
 
     return ret;
   } /* make_identifier_operand */
+
+  /**
+   * Construct property reference operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_property_reference_operand (jsp_operand_t base, /**< base of reference */
+                                   jsp_operand_t prop) /**< property name */
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::PROPERTY_REFERENCE;
+    ret._data.property_reference.base_uid = base.get_idx ();
+    ret._data.property_reference.prop_uid = prop.get_idx ();
+
+    return ret;
+  } /* make_property_reference_operand */
 
   /**
    * Construct register operand
@@ -242,6 +262,19 @@ public:
   } /* is_identifier_operand */
 
   /**
+   * Is it property reference operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_object_based_ref_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::PROPERTY_REFERENCE);
+  } /* is_object_based_ref_operand */
+
+  /**
    * Get register identifier
    *
    * @return register idx
@@ -271,6 +304,32 @@ public:
   } /* get_literal */
 
   /**
+   * Get base of property reference
+   *
+   * @return index of register with base value
+   */
+  vm_idx_t
+  get_prop_ref_base (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::PROPERTY_REFERENCE);
+
+    return _data.property_reference.base_uid;
+  } /* get_prop_ref_base */
+
+  /**
+   * Get name of property reference
+   *
+   * @return index of register with property name value
+   */
+  vm_idx_t
+  get_prop_ref_name (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::PROPERTY_REFERENCE);
+
+    return _data.property_reference.prop_uid;
+  } /* get_prop_ref_name */
+
+  /**
    * Get constant from idx-constant operand
    *
    * @return an integer
@@ -288,6 +347,18 @@ private:
     vm_idx_t idx_const; /**< idx constant value (for jsp_operand_t::IDX_CONST) */
     vm_idx_t uid; /**< byte-code register index (for jsp_operand_t::TMP) */
     lit_cpointer_t lit_id; /**< literal (for jsp_operand_t::LITERAL) */
+
+    /**
+     * Property reference
+     *
+     * See also:
+     *          jsp_operand_t::PROPERTY_REFERENCE
+     */
+    struct
+    {
+      vm_idx_t base_uid; /**< byte-code register index (base of reference) */
+      vm_idx_t prop_uid; /**< byte-code register index (property name value) */
+    } property_reference;
   } _data;
 
   type_t _type; /**< type of operand */
