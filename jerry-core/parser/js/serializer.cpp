@@ -233,12 +233,6 @@ serializer_count_instrs_in_subscopes (void)
 }
 
 void
-serializer_set_writing_position (vm_instr_counter_t oc)
-{
-  scopes_tree_set_instrs_num (current_scope, oc);
-}
-
-void
 serializer_rewrite_op_meta (const vm_instr_counter_t loc, op_meta op)
 {
   scopes_tree_set_op_meta (current_scope, loc, op);

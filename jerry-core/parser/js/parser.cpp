@@ -1664,6 +1664,8 @@ parse_assignment_expression (bool in_allowed)
     if (tt == TOK_EQ)
     {
       dump_variable_assignment (expr, val);
+
+      expr = val;
     }
     else if (tt == TOK_MULT_EQ)
     {
@@ -1708,10 +1710,9 @@ parse_assignment_expression (bool in_allowed)
     else
     {
       JERRY_ASSERT (tt == TOK_OR_EQ);
+
       dump_bitwise_or (expr, expr, val);
     }
-
-    expr = val;
   }
   else
   {

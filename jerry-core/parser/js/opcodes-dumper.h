@@ -492,20 +492,6 @@ void rewrite_conditional_check (void);
 void dump_jump_to_end_for_rewrite (void);
 void rewrite_jump_to_end (void);
 
-void start_dumping_assignment_expression (void);
-jsp_operand_t dump_prop_setter_or_variable_assignment_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_addition_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_multiplication_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_division_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_remainder_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_substraction_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_left_shift_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_right_shift_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_right_shift_ex_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_bitwise_and_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_bitwise_xor_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_bitwise_or_res (jsp_operand_t, jsp_operand_t);
-
 void dumper_set_break_target (void);
 void dumper_set_continue_target (void);
 void dumper_set_next_interation_target (void);
