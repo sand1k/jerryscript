@@ -1659,57 +1659,59 @@ parse_assignment_expression (bool in_allowed)
     skip_newlines ();
     const jsp_operand_t assign_expr = parse_assignment_expression (in_allowed);
 
+    jsp_operand_t val = dump_evaluate_if_reference (assign_expr);
+
     if (tt == TOK_EQ)
     {
-      jsp_operand_t val = dump_evaluate_if_reference (assign_expr);
       dump_variable_assignment (expr, val);
-      expr = val;
     }
     else if (tt == TOK_MULT_EQ)
     {
-      dump_multiplication (expr, expr, assign_expr);
+      dump_multiplication (expr, expr, val);
     }
     else if (tt == TOK_DIV_EQ)
     {
-      dump_division (expr, expr, assign_expr);
+      dump_division (expr, expr, val);
     }
     else if (tt == TOK_MOD_EQ)
     {
-      dump_remainder (expr, expr, assign_expr);
+      dump_remainder (expr, expr, val);
     }
     else if (tt == TOK_PLUS_EQ)
     {
-      dump_addition (expr, expr, assign_expr);
+      dump_addition (expr, expr, val);
     }
     else if (tt == TOK_MINUS_EQ)
     {
-      dump_substraction (expr, expr, assign_expr);
+      dump_substraction (expr, expr, val);
     }
     else if (tt == TOK_LSHIFT_EQ)
     {
-      dump_left_shift (expr, expr, assign_expr);
+      dump_left_shift (expr, expr, val);
     }
     else if (tt == TOK_RSHIFT_EQ)
     {
-      dump_right_shift (expr, expr, assign_expr);
+      dump_right_shift (expr, expr, val);
     }
     else if (tt == TOK_RSHIFT_EX_EQ)
     {
-      dump_right_shift_ex (expr, expr, assign_expr);
+      dump_right_shift_ex (expr, expr, val);
     }
     else if (tt == TOK_AND_EQ)
     {
-      dump_bitwise_and (expr, expr, assign_expr);
+      dump_bitwise_and (expr, expr, val);
     }
     else if (tt == TOK_XOR_EQ)
     {
-      dump_bitwise_xor (expr, expr, assign_expr);
+      dump_bitwise_xor (expr, expr, val);
     }
     else
     {
       JERRY_ASSERT (tt == TOK_OR_EQ);
-      dump_bitwise_or (expr, expr, assign_expr);
+      dump_bitwise_or (expr, expr, val);
     }
+
+    expr = val;
   }
   else
   {
