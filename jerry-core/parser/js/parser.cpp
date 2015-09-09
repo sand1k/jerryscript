@@ -64,7 +64,7 @@ static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 static void parse_statement (jsp_label_t *outermost_stmt_label_p);
 static jsp_operand_t parse_assignment_expression (bool);
 static void parse_source_element_list (bool, bool);
-static jsp_operand_t parse_argument_list (varg_list_type, jsp_operand_t, jsp_operand_t *);
+static jsp_operand_t parse_argument_list (varg_list_type, jsp_operand_t);
 
 static bool
 token_is (token_type tt)
@@ -393,8 +393,7 @@ parse_property_assignment (void)
 
     skip_newlines ();
     const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR,
-                                                    jsp_operand_t::make_empty_operand (),
-                                                    NULL);
+                                                    jsp_operand_t::make_empty_operand ());
 
     dump_function_end_for_rewrite ();
 
@@ -447,12 +446,10 @@ parse_property_assignment (void)
     For each ALT dumps appropriate bytecode. Uses OBJ during dump if neccesary.
     Result tmp. */
 static jsp_operand_t
-parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_arg_p)
+parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
 {
   token_type close_tt = TOK_CLOSE_PAREN;
   size_t args_num = 0;
-
-  JERRY_ASSERT (!(vlt != VARG_CALL_EXPR && this_arg_p != NULL));
 
   switch (vlt)
   {
@@ -471,26 +468,11 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
       opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
 
       jsp_operand_t this_arg = jsp_operand_t::make_empty_operand ();
-      if (this_arg_p != NULL
-          && !this_arg_p->is_empty_operand ())
+      if (obj.is_property_reference_operand ())
       {
         call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
 
-        if (this_arg_p->is_identifier_operand ())
-        {
-          /*
-           * FIXME:
-           *       Base of CallExpression should be evaluated only once during evaluation of CallExpression
-           *
-           * See also:
-           *          Evaluation of MemberExpression (ECMA-262 v5, 11.2.1)
-           */
-          this_arg = dump_variable_assignment_res (*this_arg_p);
-        }
-        else
-        {
-          this_arg = *this_arg_p;
-        }
+        this_arg = obj.get_prop_ref_base ();
 
         /*
          * Presence of explicit 'this' argument implies that it is not Direct call to Eval
@@ -669,7 +651,7 @@ parse_function_declaration (void)
   lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
 
   jsp_early_error_start_checking_of_vargs ();
-  parse_argument_list (VARG_FUNC_DECL, name, NULL);
+  parse_argument_list (VARG_FUNC_DECL, name);
 
   dump_function_end_for_rewrite ();
 
@@ -726,13 +708,13 @@ parse_function_expression (void)
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
 
     skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, name, NULL);
+    res = parse_argument_list (VARG_FUNC_EXPR, name);
   }
   else
   {
     lexer_save_token (tok);
     skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, jsp_operand_t::make_empty_operand (), NULL);
+    res = parse_argument_list (VARG_FUNC_EXPR, jsp_operand_t::make_empty_operand ());
   }
 
   dump_function_end_for_rewrite ();
@@ -775,7 +757,7 @@ parse_function_expression (void)
 static jsp_operand_t
 parse_array_literal (void)
 {
-  return parse_argument_list (VARG_ARRAY_DECL, jsp_operand_t::make_empty_operand (), NULL);
+  return parse_argument_list (VARG_ARRAY_DECL, jsp_operand_t::make_empty_operand ());
 }
 
 /* object_literal
@@ -784,7 +766,7 @@ parse_array_literal (void)
 static jsp_operand_t
 parse_object_literal (void)
 {
-  return parse_argument_list (VARG_OBJ_DECL, jsp_operand_t::make_empty_operand (), NULL);
+  return parse_argument_list (VARG_OBJ_DECL, jsp_operand_t::make_empty_operand ());
 }
 
 /* literal
@@ -870,59 +852,41 @@ parse_primary_expression (void)
   }
 }
 
-/* member_expression
-  : (primary_expression | function_expression | 'new' LT!* member_expression (LT!* '(' LT!* arguments? LT!* ')')
-      (LT!* member_expression_suffix)*
-  ;
-
-   arguments
-  : assignment_expression (LT!* ',' LT!* assignment_expression)*)?
-  ;
-
-   member_expression_suffix
-  : index_suffix
-  | property_reference_suffix
-  ;
-
-   index_suffix
-  : '[' LT!* expression LT!* ']'
-  ;
-
-   property_reference_suffix
-  : '.' LT!* Identifier
-  ; */
 static jsp_operand_t
-parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
+dump_evaluate_if_reference (jsp_operand_t lhs)
 {
-  jsp_operand_t expr;
-  if (is_keyword (KW_FUNCTION))
-  {
-    expr = parse_function_expression ();
-  }
-  else if (is_keyword (KW_NEW))
-  {
-    skip_newlines ();
-    expr = parse_member_expression (this_arg, prop_gl);
+  JERRY_ASSERT (!lhs.is_literal_operand ());
 
-    skip_newlines ();
-    if (token_is (TOK_OPEN_PAREN))
-    {
-      expr = parse_argument_list (VARG_CONSTRUCT_EXPR, expr, NULL);
-    }
-    else
-    {
-      lexer_save_token (tok);
-      dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, expr);
-      expr = rewrite_varg_header_set_args_count (0);
-    }
+  if (lhs.is_identifier_operand ())
+  {
+    return dump_variable_assignment_res (lhs);
+  }
+  else if (lhs.is_property_reference_operand ())
+  {
+    return dump_prop_getter_res (lhs);
   }
   else
   {
-    expr = parse_primary_expression ();
+    return lhs;
   }
+}
 
-  skip_newlines ();
-  while (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT))
+/**
+ * Parse index part of property accessor
+ *
+ * See also:
+ *          ECMA-262 v5, 11.2.1
+ *
+ * @return property reference operand
+ */
+static jsp_operand_t
+jsp_parse_property_accessor_index (jsp_operand_t base) /**< base of property accessor */
+{
+  JERRY_ASSERT (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT));
+
+  jsp_operand_t expr = base;
+
+  do
   {
     jsp_operand_t prop = jsp_operand_t::make_empty_operand ();
 
@@ -966,15 +930,68 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
     }
     skip_newlines ();
 
-    if (this_arg)
+    expr = dump_evaluate_if_reference (expr);
+    expr = jsp_operand_t::make_property_reference_operand (expr, prop);
+  } while (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT));
+
+  return expr;
+} /* jsp_parse_property_accessor_index */
+
+/* member_expression
+  : (primary_expression | function_expression | 'new' LT!* member_expression (LT!* '(' LT!* arguments? LT!* ')')
+      (LT!* member_expression_suffix)*
+  ;
+
+   arguments
+  : assignment_expression (LT!* ',' LT!* assignment_expression)*)?
+  ;
+
+   member_expression_suffix
+  : index_suffix
+  | property_reference_suffix
+  ;
+
+   index_suffix
+  : '[' LT!* expression LT!* ']'
+  ;
+
+   property_reference_suffix
+  : '.' LT!* Identifier
+  ; */
+static jsp_operand_t
+parse_member_expression (void)
+{
+  jsp_operand_t expr;
+  if (is_keyword (KW_FUNCTION))
+  {
+    expr = parse_function_expression ();
+  }
+  else if (is_keyword (KW_NEW))
+  {
+    skip_newlines ();
+    expr = parse_member_expression ();
+
+    skip_newlines ();
+    if (token_is (TOK_OPEN_PAREN))
     {
-      *this_arg = expr;
+      expr = parse_argument_list (VARG_CONSTRUCT_EXPR, expr);
     }
-    if (prop_gl)
+    else
     {
-      *prop_gl = prop;
+      lexer_save_token (tok);
+      dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, expr);
+      expr = rewrite_varg_header_set_args_count (0);
     }
-    expr = dump_prop_getter_res (expr, prop);
+  }
+  else
+  {
+    expr = parse_primary_expression ();
+  }
+
+  skip_newlines ();
+  if (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT))
+  {
+    expr = jsp_parse_property_accessor_index (expr);
   }
 
   lexer_save_token (tok);
@@ -995,62 +1012,30 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
   : '(' LT!* assignment_expression LT!* (',' LT!* assignment_expression * LT!*)* ')'
   ; */
 static jsp_operand_t
-parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
+parse_call_expression (void)
 {
-  jsp_operand_t this_arg = jsp_operand_t::make_empty_operand ();
-  jsp_operand_t expr = parse_member_expression (&this_arg, prop_gl);
-  jsp_operand_t prop;
+  jsp_operand_t expr = parse_member_expression ();
 
   skip_newlines ();
-  if (!token_is (TOK_OPEN_PAREN))
+  if (token_is (TOK_OPEN_PAREN))
   {
-    lexer_save_token (tok);
-    if (this_arg_gl != NULL)
+    while (token_is (TOK_OPEN_PAREN)
+           || token_is (TOK_OPEN_SQUARE)
+           || token_is (TOK_DOT))
     {
-      *this_arg_gl = this_arg;
-    }
-    return expr;
-  }
-
-  expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
-  this_arg = jsp_operand_t::make_empty_operand ();
-
-  skip_newlines ();
-  while (token_is (TOK_OPEN_PAREN) || token_is (TOK_OPEN_SQUARE)
-         || token_is (TOK_DOT))
-  {
-    if (tok.type == TOK_OPEN_PAREN)
-    {
-      expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
-      skip_newlines ();
-    }
-    else
-    {
-      this_arg = expr;
-      if (tok.type == TOK_OPEN_SQUARE)
+      if (tok.type == TOK_OPEN_PAREN)
       {
+        expr = parse_argument_list (VARG_CALL_EXPR, expr);
         skip_newlines ();
-        prop = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-        next_token_must_be (TOK_CLOSE_SQUARE);
       }
-      else if (tok.type == TOK_DOT)
+      else
       {
-        token_after_newlines_must_be (TOK_NAME);
-        prop = dump_string_assignment_res (token_data_as_lit_cp ());
+        expr = jsp_parse_property_accessor_index (expr);
       }
-      expr = dump_prop_getter_res (expr, prop);
-      skip_newlines ();
     }
   }
   lexer_save_token (tok);
-  if (this_arg_gl != NULL)
-  {
-    *this_arg_gl = this_arg;
-  }
-  if (prop_gl != NULL)
-  {
-    *prop_gl = prop;
-  }
+
   return expr;
 }
 
@@ -1059,24 +1044,18 @@ parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
   | new_expression
   ; */
 static jsp_operand_t
-parse_left_hand_side_expression (jsp_operand_t *this_arg, jsp_operand_t *prop)
+parse_left_hand_side_expression (void)
 {
-  return parse_call_expression (this_arg, prop);
+  return parse_call_expression ();
 }
 
 /* postfix_expression
   : left_hand_side_expression ('++' | '--')?
   ; */
 static jsp_operand_t
-parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if expression evaluates to object-based
-                                                       *          reference - the reference's base;
-                                                       *        otherwise - empty jsp_operand_t */
-                          jsp_operand_t *out_prop_gl_p) /**< out: if expression evaluates to object-based
-                                                   *          reference - the reference's name;
-                                                   *        otherwise - empty jsp_operand_t */
+parse_postfix_expression (void)
 {
-  jsp_operand_t this_arg = jsp_operand_t::make_empty_operand (), prop = jsp_operand_t::make_empty_operand ();
-  jsp_operand_t expr = parse_left_hand_side_expression (&this_arg, &prop);
+  jsp_operand_t expr = parse_left_hand_side_expression ();
 
   if (lexer_prev_token ().type == TOK_NEWLINE)
   {
@@ -1084,41 +1063,22 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
   }
 
   skip_token ();
+
   if (token_is (TOK_DOUBLE_PLUS))
   {
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
 
-    const jsp_operand_t res = dump_post_increment_res (expr);
-    if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
-    {
-      dump_prop_setter (this_arg, prop, expr);
-    }
-    expr = res;
+    expr = dump_post_increment_res (expr);
   }
   else if (token_is (TOK_DOUBLE_MINUS))
   {
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
 
-    const jsp_operand_t res = dump_post_decrement_res (expr);
-    if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
-    {
-      dump_prop_setter (this_arg, prop, expr);
-    }
-    expr = res;
+    expr = dump_post_decrement_res (expr);
   }
   else
   {
     lexer_save_token (tok);
-  }
-
-  if (out_this_arg_gl_p != NULL)
-  {
-    *out_this_arg_gl_p = this_arg;
-  }
-
-  if (out_prop_gl_p != NULL)
-  {
-    *out_prop_gl_p = prop;
   }
 
   return expr;
@@ -1129,60 +1089,53 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
   | ('delete' | 'void' | 'typeof' | '++' | '--' | '+' | '-' | '~' | '!') unary_expression
   ; */
 static jsp_operand_t
-parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
+parse_unary_expression (void)
 {
-  jsp_operand_t expr, this_arg = jsp_operand_t::make_empty_operand (), prop = jsp_operand_t::make_empty_operand ();
+  jsp_operand_t expr;
+
   switch (tok.type)
   {
     case TOK_DOUBLE_PLUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (&this_arg, &prop);
+      expr = parse_unary_expression ();
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
       expr = dump_pre_increment_res (expr);
-      if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
-      {
-        dump_prop_setter (this_arg, prop, expr);
-      }
       break;
     }
     case TOK_DOUBLE_MINUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (&this_arg, &prop);
+      expr = parse_unary_expression ();
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
       expr = dump_pre_decrement_res (expr);
-      if (!this_arg.is_empty_operand () && !prop.is_empty_operand ())
-      {
-        dump_prop_setter (this_arg, prop, expr);
-      }
       break;
     }
     case TOK_PLUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
       expr = dump_unary_plus_res (expr);
       break;
     }
     case TOK_MINUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
       expr = dump_unary_minus_res (expr);
       break;
     }
     case TOK_COMPL:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
       expr = dump_bitwise_not_res (expr);
       break;
     }
     case TOK_NOT:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
       expr = dump_logical_not_res (expr);
       break;
     }
@@ -1193,55 +1146,36 @@ parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
         scopes_tree_set_contains_delete (STACK_TOP (scopes));
 
         skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
+        expr = parse_unary_expression ();
         expr = dump_delete_res (expr, is_strict_mode (), tok.loc);
-        break;
       }
       else if (is_keyword (KW_VOID))
       {
         skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
+        expr = parse_unary_expression ();
         expr = dump_variable_assignment_res (expr);
         dump_undefined_assignment (expr);
-        break;
       }
       else if (is_keyword (KW_TYPEOF))
       {
         skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
+        expr = parse_unary_expression ();
         expr = dump_typeof_res (expr);
-        break;
       }
-      /* FALLTHRU.  */
+      else
+      {
+        expr = parse_postfix_expression ();
+      }
+      break;
     }
     default:
     {
-      expr = parse_postfix_expression (&this_arg, &prop);
+      expr = parse_postfix_expression ();
+      break;
     }
   }
 
-  if (this_arg_gl != NULL)
-  {
-    *this_arg_gl = this_arg;
-  }
-  if (prop_gl != NULL)
-  {
-    *prop_gl = prop;
-  }
-
   return expr;
-}
-
-static jsp_operand_t
-dump_assignment_of_lhs_if_literal (jsp_operand_t lhs)
-{
-  JERRY_ASSERT (!lhs.is_literal_operand ());
-
-  if (lhs.is_identifier_operand ())
-  {
-    lhs = dump_variable_assignment_res (lhs);
-  }
-  return lhs;
 }
 
 /* multiplicative_expression
@@ -1250,7 +1184,7 @@ dump_assignment_of_lhs_if_literal (jsp_operand_t lhs)
 static jsp_operand_t
 parse_multiplicative_expression (void)
 {
-  jsp_operand_t expr = parse_unary_expression (NULL, NULL);
+  jsp_operand_t expr = parse_unary_expression ();
 
   skip_newlines ();
   while (true)
@@ -1259,23 +1193,23 @@ parse_multiplicative_expression (void)
     {
       case TOK_MULT:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
-        expr = dump_multiplication_res (expr, parse_unary_expression (NULL, NULL));
+        expr = dump_multiplication_res (expr, parse_unary_expression ());
         break;
       }
       case TOK_DIV:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
-        expr = dump_division_res (expr, parse_unary_expression (NULL, NULL));
+        expr = dump_division_res (expr, parse_unary_expression ());
         break;
       }
       case TOK_MOD:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
-        expr = dump_remainder_res (expr, parse_unary_expression (NULL, NULL));
+        expr = dump_remainder_res (expr, parse_unary_expression ());
         break;
       }
       default:
@@ -1305,14 +1239,14 @@ parse_additive_expression (void)
     {
       case TOK_PLUS:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_addition_res (expr, parse_multiplicative_expression ());
         break;
       }
       case TOK_MINUS:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_substraction_res (expr, parse_multiplicative_expression ());
         break;
@@ -1344,21 +1278,21 @@ parse_shift_expression (void)
     {
       case TOK_LSHIFT:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_left_shift_res (expr, parse_additive_expression ());
         break;
       }
       case TOK_RSHIFT:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_right_shift_res (expr, parse_additive_expression ());
         break;
       }
       case TOK_RSHIFT_EX:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_right_shift_ex_res (expr, parse_additive_expression ());
         break;
@@ -1390,28 +1324,28 @@ parse_relational_expression (bool in_allowed)
     {
       case TOK_LESS:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_less_than_res (expr, parse_shift_expression ());
         break;
       }
       case TOK_GREATER:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_greater_than_res (expr, parse_shift_expression ());
         break;
       }
       case TOK_LESS_EQ:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_less_or_equal_than_res (expr, parse_shift_expression ());
         break;
       }
       case TOK_GREATER_EQ:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_greater_or_equal_than_res (expr, parse_shift_expression ());
         break;
@@ -1420,7 +1354,7 @@ parse_relational_expression (bool in_allowed)
       {
         if (is_keyword (KW_INSTANCEOF))
         {
-          expr = dump_assignment_of_lhs_if_literal (expr);
+          expr = dump_evaluate_if_reference (expr);
           skip_newlines ();
           expr = dump_instanceof_res (expr, parse_shift_expression ());
           break;
@@ -1429,7 +1363,7 @@ parse_relational_expression (bool in_allowed)
         {
           if (in_allowed)
           {
-            expr = dump_assignment_of_lhs_if_literal (expr);
+            expr = dump_evaluate_if_reference (expr);
             skip_newlines ();
             expr = dump_in_res (expr, parse_shift_expression ());
             break;
@@ -1464,28 +1398,28 @@ parse_equality_expression (bool in_allowed)
     {
       case TOK_DOUBLE_EQ:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_equal_value_res (expr, parse_relational_expression (in_allowed));
         break;
       }
       case TOK_NOT_EQ:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_not_equal_value_res (expr, parse_relational_expression (in_allowed));
         break;
       }
       case TOK_TRIPLE_EQ:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_equal_value_type_res (expr, parse_relational_expression (in_allowed));
         break;
       }
       case TOK_NOT_DOUBLE_EQ:
       {
-        expr = dump_assignment_of_lhs_if_literal (expr);
+        expr = dump_evaluate_if_reference (expr);
         skip_newlines ();
         expr = dump_not_equal_value_type_res (expr, parse_relational_expression (in_allowed));
         break;
@@ -1514,7 +1448,7 @@ parse_bitwise_and_expression (bool in_allowed)
   {
     if (tok.type == TOK_AND)
     {
-      expr = dump_assignment_of_lhs_if_literal (expr);
+      expr = dump_evaluate_if_reference (expr);
       skip_newlines ();
       expr = dump_bitwise_and_res (expr, parse_equality_expression (in_allowed));
     }
@@ -1541,7 +1475,7 @@ parse_bitwise_xor_expression (bool in_allowed)
   {
     if (tok.type == TOK_XOR)
     {
-      expr = dump_assignment_of_lhs_if_literal (expr);
+      expr = dump_evaluate_if_reference (expr);
       skip_newlines ();
       expr = dump_bitwise_xor_res (expr, parse_bitwise_and_expression (in_allowed));
     }
@@ -1568,7 +1502,7 @@ parse_bitwise_or_expression (bool in_allowed)
   {
     if (tok.type == TOK_OR)
     {
-      expr = dump_assignment_of_lhs_if_literal (expr);
+      expr = dump_evaluate_if_reference (expr);
       skip_newlines ();
       expr = dump_bitwise_or_res (expr, parse_bitwise_xor_expression (in_allowed));
     }
@@ -1802,7 +1736,7 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
     skip_newlines ();
     if (token_is (TOK_COMMA))
     {
-      dump_assignment_of_lhs_if_literal (expr);
+      dump_evaluate_if_reference (expr);
 
       skip_newlines ();
       expr = parse_assignment_expression (in_allowed);
@@ -2012,51 +1946,22 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
  * See also:
  *          jsp_parse_for_in_statement
  *
- * @return true - if iterator consists of base and property name,
- *         false - otherwise, iterator consists of an identifier name (without base).
+ * @return iterator operand (identifier or property reference)
  */
-static bool
-jsp_parse_for_in_statement_iterator (jsp_operand_t *base_p, /**< out: base value of member expression, if any,
-                                                       *        empty jsp_operand_t - otherwise */
-                                     jsp_operand_t *identifier_p) /**< out: property name (if base value is not empty),
-                                                             *        identifier - otherwise */
+static jsp_operand_t
+jsp_parse_for_in_statement_iterator (void)
 {
-  JERRY_ASSERT (base_p != NULL);
-  JERRY_ASSERT (identifier_p != NULL);
-
   if (is_keyword (KW_VAR))
   {
     skip_newlines ();
 
-    *base_p = jsp_operand_t::make_empty_operand ();
-    *identifier_p = parse_variable_declaration ();
+    jsp_operand_t name = parse_variable_declaration ();
 
-    return false;
+    return jsp_operand_t::make_identifier_operand (name.get_literal ());
   }
   else
   {
-    jsp_operand_t base, identifier;
-
-    /*
-     * FIXME:
-     *       Remove evaluation of last part of identifier chain
-     */
-    jsp_operand_t i = parse_left_hand_side_expression (&base, &identifier);
-
-    if (base.is_empty_operand ())
-    {
-      *base_p = jsp_operand_t::make_empty_operand ();
-      *identifier_p = i;
-
-      return false;
-    }
-    else
-    {
-      *base_p = base;
-      *identifier_p = identifier;
-
-      return true;
-    }
+    return parse_left_hand_side_expression ();
   }
 } /* jsp_parse_for_in_statement_iterator */
 
@@ -2138,14 +2043,15 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
   jsp_operand_t iterator_base, iterator_identifier, for_in_special_reg;
   for_in_special_reg = jsp_create_operand_for_in_special_reg ();
 
-  if (jsp_parse_for_in_statement_iterator (&iterator_base, &iterator_identifier))
+  jsp_operand_t iterator = jsp_parse_for_in_statement_iterator ();
+
+  if (iterator.is_property_reference_operand ())
   {
-    dump_prop_setter (iterator_base, iterator_identifier, for_in_special_reg);
+    dump_prop_setter (iterator, for_in_special_reg);
   }
   else
   {
-    JERRY_ASSERT (iterator_base.is_empty_operand ());
-    dump_variable_assignment (iterator_identifier, for_in_special_reg);
+    dump_variable_assignment (iterator, for_in_special_reg);
   }
 
   // Body
@@ -2894,7 +2800,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
       lexer_save_token (tok);
       tok = temp;
       jsp_operand_t expr = parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-      dump_assignment_of_lhs_if_literal (expr);
+      dump_evaluate_if_reference (expr);
       insert_semicolon ();
     }
   }

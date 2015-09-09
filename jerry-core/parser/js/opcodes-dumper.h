@@ -267,12 +267,12 @@ public:
    * @return true / false
    */
   bool
-  is_object_based_ref_operand (void) const
+  is_property_reference_operand (void) const
   {
     JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
 
     return (_type == jsp_operand_t::PROPERTY_REFERENCE);
-  } /* is_object_based_ref_operand */
+  } /* is_property_reference_operand */
 
   /**
    * Get register identifier
@@ -306,27 +306,27 @@ public:
   /**
    * Get base of property reference
    *
-   * @return index of register with base value
+   * @return base value operand
    */
-  vm_idx_t
+  jsp_operand_t
   get_prop_ref_base (void) const
   {
     JERRY_ASSERT (_type == jsp_operand_t::PROPERTY_REFERENCE);
 
-    return _data.property_reference.base_uid;
+    return make_reg_operand (_data.property_reference.base_uid);
   } /* get_prop_ref_base */
 
   /**
    * Get name of property reference
    *
-   * @return index of register with property name value
+   * @return property name value operand
    */
-  vm_idx_t
+  jsp_operand_t
   get_prop_ref_name (void) const
   {
     JERRY_ASSERT (_type == jsp_operand_t::PROPERTY_REFERENCE);
 
-    return _data.property_reference.prop_uid;
+    return make_reg_operand (_data.property_reference.prop_uid);
   } /* get_prop_ref_name */
 
   /**
@@ -416,9 +416,8 @@ void dump_varg (jsp_operand_t);
 void dump_prop_name_and_value (jsp_operand_t, jsp_operand_t);
 void dump_prop_getter_decl (jsp_operand_t, jsp_operand_t);
 void dump_prop_setter_decl (jsp_operand_t, jsp_operand_t);
-void dump_prop_getter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_getter_res (jsp_operand_t, jsp_operand_t);
-void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
+jsp_operand_t dump_prop_getter_res (jsp_operand_t);
+void dump_prop_setter (jsp_operand_t, jsp_operand_t);
 
 void dump_function_end_for_rewrite (void);
 void rewrite_function_end ();

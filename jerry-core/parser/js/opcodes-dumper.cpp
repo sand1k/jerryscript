@@ -559,11 +559,13 @@ dump_triple_address_and_prop_setter_res (vm_op_t opcode, /**< opcode of triple a
   const jsp_operand_t obj = create_operand_from_tmp_and_lit (last.op.data.prop_getter.obj, last.lit_id[1]);
   const jsp_operand_t prop = create_operand_from_tmp_and_lit (last.op.data.prop_getter.prop, last.lit_id[2]);
 
-  const jsp_operand_t tmp = dump_prop_getter_res (obj, prop);
+  const jsp_operand_t prop_ref = jsp_operand_t::make_property_reference_operand (obj, prop);
+
+  const jsp_operand_t tmp = dump_prop_getter_res (prop_ref);
 
   dump_triple_address (opcode, tmp, tmp, op);
 
-  dump_prop_setter (obj, prop, tmp);
+  dump_prop_setter (prop_ref, tmp);
 
   return tmp;
 }
@@ -1108,24 +1110,36 @@ dump_prop_setter_decl (jsp_operand_t name, jsp_operand_t func)
                        func);
 }
 
-void
-dump_prop_getter (jsp_operand_t res, jsp_operand_t obj, jsp_operand_t prop)
+static void
+dump_prop_getter (jsp_operand_t res, jsp_operand_t prop_ref)
 {
+  JERRY_ASSERT (prop_ref.is_property_reference_operand ());
+
+  jsp_operand_t obj = prop_ref.get_prop_ref_base ();
+  jsp_operand_t prop = prop_ref.get_prop_ref_name ();
+
   dump_triple_address (VM_OP_PROP_GETTER, res, obj, prop);
 }
 
 jsp_operand_t
-dump_prop_getter_res (jsp_operand_t obj, jsp_operand_t prop)
+dump_prop_getter_res (jsp_operand_t prop_ref)
 {
   const jsp_operand_t res = tmp_operand ();
-  dump_prop_getter (res, obj, prop);
+
+  dump_prop_getter (res, prop_ref);
+
   return res;
 }
 
 void
-dump_prop_setter (jsp_operand_t res, jsp_operand_t obj, jsp_operand_t prop)
+dump_prop_setter (jsp_operand_t prop_ref, jsp_operand_t val)
 {
-  dump_triple_address (VM_OP_PROP_SETTER, res, obj, prop);
+  JERRY_ASSERT (prop_ref.is_property_reference_operand ());
+
+  jsp_operand_t obj = prop_ref.get_prop_ref_base ();
+  jsp_operand_t prop = prop_ref.get_prop_ref_name ();
+
+  dump_triple_address (VM_OP_PROP_SETTER, obj, prop, val);
 }
 
 void
