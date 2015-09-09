@@ -99,6 +99,11 @@ var_to_str (vm_instr_t instr, lit_cpointer_t lit_ids[], vm_instr_counter_t oc, u
 
   if (instr.data.raw_args[current_arg - 1] == VM_IDX_REWRITE_LITERAL_UID)
   {
+    if (lit_ids == NULL)
+    {
+      return "--- unknown in print ---";
+    }
+
     JERRY_ASSERT (lit_ids != NULL);
     JERRY_ASSERT (lit_ids[current_arg - 1].packed_value != MEM_CP_NULL);
 

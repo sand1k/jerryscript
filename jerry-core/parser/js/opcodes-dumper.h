@@ -425,13 +425,9 @@ void rewrite_function_end ();
 void dump_this (jsp_operand_t);
 jsp_operand_t dump_this_res (void);
 
-void dump_post_increment (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_post_increment_res (jsp_operand_t);
-void dump_post_decrement (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_post_decrement_res (jsp_operand_t);
-void dump_pre_increment (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_pre_increment_res (jsp_operand_t);
-void dump_pre_decrement (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_pre_decrement_res (jsp_operand_t);
 void dump_unary_plus (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_unary_plus_res (jsp_operand_t);

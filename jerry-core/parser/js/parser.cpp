@@ -474,6 +474,8 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
 
         this_arg = obj.get_prop_ref_base ();
 
+        obj = dump_prop_getter_res (obj);
+
         /*
          * Presence of explicit 'this' argument implies that it is not Direct call to Eval
          *
@@ -931,6 +933,7 @@ jsp_parse_property_accessor_index (jsp_operand_t base) /**< base of property acc
     skip_newlines ();
 
     expr = dump_evaluate_if_reference (expr);
+    prop = dump_evaluate_if_reference (prop);
     expr = jsp_operand_t::make_property_reference_operand (expr, prop);
   } while (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT));
 
@@ -1654,57 +1657,58 @@ parse_assignment_expression (bool in_allowed)
   {
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
     skip_newlines ();
-    start_dumping_assignment_expression ();
     const jsp_operand_t assign_expr = parse_assignment_expression (in_allowed);
 
     if (tt == TOK_EQ)
     {
-      expr = dump_prop_setter_or_variable_assignment_res (expr, assign_expr);
+      jsp_operand_t val = dump_evaluate_if_reference (assign_expr);
+      dump_variable_assignment (expr, val);
+      expr = val;
     }
     else if (tt == TOK_MULT_EQ)
     {
-      expr = dump_prop_setter_or_multiplication_res (expr, assign_expr);
+      dump_multiplication (expr, expr, assign_expr);
     }
     else if (tt == TOK_DIV_EQ)
     {
-      expr = dump_prop_setter_or_division_res (expr, assign_expr);
+      dump_division (expr, expr, assign_expr);
     }
     else if (tt == TOK_MOD_EQ)
     {
-      expr = dump_prop_setter_or_remainder_res (expr, assign_expr);
+      dump_remainder (expr, expr, assign_expr);
     }
     else if (tt == TOK_PLUS_EQ)
     {
-      expr = dump_prop_setter_or_addition_res (expr, assign_expr);
+      dump_addition (expr, expr, assign_expr);
     }
     else if (tt == TOK_MINUS_EQ)
     {
-      expr = dump_prop_setter_or_substraction_res (expr, assign_expr);
+      dump_substraction (expr, expr, assign_expr);
     }
     else if (tt == TOK_LSHIFT_EQ)
     {
-      expr = dump_prop_setter_or_left_shift_res (expr, assign_expr);
+      dump_left_shift (expr, expr, assign_expr);
     }
     else if (tt == TOK_RSHIFT_EQ)
     {
-      expr = dump_prop_setter_or_right_shift_res (expr, assign_expr);
+      dump_right_shift (expr, expr, assign_expr);
     }
     else if (tt == TOK_RSHIFT_EX_EQ)
     {
-      expr = dump_prop_setter_or_right_shift_ex_res (expr, assign_expr);
+      dump_right_shift_ex (expr, expr, assign_expr);
     }
     else if (tt == TOK_AND_EQ)
     {
-      expr = dump_prop_setter_or_bitwise_and_res (expr, assign_expr);
+      dump_bitwise_and (expr, expr, assign_expr);
     }
     else if (tt == TOK_XOR_EQ)
     {
-      expr = dump_prop_setter_or_bitwise_xor_res (expr, assign_expr);
+      dump_bitwise_xor (expr, expr, assign_expr);
     }
     else
     {
       JERRY_ASSERT (tt == TOK_OR_EQ);
-      expr = dump_prop_setter_or_bitwise_or_res (expr, assign_expr);
+      dump_bitwise_or (expr, expr, assign_expr);
     }
   }
   else
