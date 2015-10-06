@@ -42,7 +42,7 @@ static vm_idx_t jsp_reg_max_for_temps;
  *      so the value, if not equal to VM_IDX_EMPTY, is always greater than jsp_reg_max_for_temps.
  *
  * See also:
- *          dumper_try_replace_var_with_reg
+ *          dumper_try_replace_identifier_name_with_reg
  */
 static vm_idx_t jsp_reg_max_for_local_var;
 
@@ -183,56 +183,27 @@ jsp_alloc_reg_for_temp (void)
  *         false - otherwise.
  */
 bool
-dumper_try_replace_var_with_reg (scopes_tree tree, /**< a function scope, created for
-                                                    *   function declaration or function expresssion */
-                                 op_meta *var_decl_om_p) /**< operation meta of corresponding variable declaration */
+dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function scope, created for
+                                                                *   function declaration or function expresssion */
+                                             op_meta *var_decl_om_p) /**< operation meta of corresponding
+                                                                      *   variable declaration */
 {
   JERRY_ASSERT (tree->type == SCOPE_TYPE_FUNCTION);
 
-  JERRY_ASSERT (var_decl_om_p->op.op_idx == VM_OP_VAR_DECL);
-  JERRY_ASSERT (var_decl_om_p->lit_id[0].packed_value != NOT_A_LITERAL.packed_value);
-  JERRY_ASSERT (var_decl_om_p->lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
-  JERRY_ASSERT (var_decl_om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
+  lit_cpointer_t lit_cp;
 
-  vm_instr_counter_t instr_pos = 0;
-
-  op_meta header_opm = scopes_tree_op_meta (tree, instr_pos++);
-  JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
-
-  while (true)
+  if (var_decl_om_p->op.op_idx == VM_OP_VAR_DECL)
   {
-    op_meta meta_opm = scopes_tree_op_meta (tree, instr_pos++);
-    JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
-
-    opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
-
-    if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
-    {
-      /* marker of function argument list end reached */
-      break;
-    }
-    else
-    {
-      JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
-
-      /* the varg specifies argument name, and so should be a string literal */
-      JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-      JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
-
-      if (meta_opm.lit_id[1].packed_value == var_decl_om_p->lit_id[0].packed_value)
-      {
-        /*
-         * Optimization is not performed, because the variable's name is equal to an argument name,
-         * and the argument's value would be initialized by its name in run-time.
-         *
-         * See also:
-         *          parser_parse_program
-         */
-        return false;
-      }
-    }
+    JERRY_ASSERT (var_decl_om_p->lit_id[0].packed_value != NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (var_decl_om_p->lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (var_decl_om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
   }
+  else
+  {
+    JERRY_ASSERT (var_decl_om_p->op.op_idx == VM_OP_META);
+    JERRY_ASSERT (var_decl_om_p->op.data.meta.type == OPCODE_META_TYPE_VARG);
 
+  }
   if (jsp_reg_max_for_local_var == VM_IDX_EMPTY)
   {
     jsp_reg_max_for_local_var = jsp_reg_max_for_temps;
@@ -320,7 +291,7 @@ dumper_try_replace_var_with_reg (scopes_tree tree, /**< a function scope, create
   }
 
   return true;
-} /* dumper_try_replace_var_with_reg */
+} /* dumper_try_replace_identifier_name_with_reg */
 #endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
 /**
