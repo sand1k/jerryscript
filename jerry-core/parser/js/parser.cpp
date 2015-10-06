@@ -3047,61 +3047,19 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
       /* no subscopes, as no function declarations / eval etc. in the scope */
       JERRY_ASSERT (fe_scope_tree->t.children_num == 0);
 
-      op_meta header_opm = scopes_tree_op_meta (tree, instr_pos++);
-      JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
-
-      bool are_all_args_replaced = true;
-      for (vm_instr_counter_t instr_pos = 0; ; instr_pos++)
-      {
-        op_meta *arg_decl_opm_p = (op_meta *) linked_list_element (fe_scope_tree->instrs, instr_pos++);
-        JERRY_ASSERT (arg_decl_opm_p->op.op_idx == VM_OP_META);
-
-        opcode_meta_type meta_type = (opcode_meta_type) arg_decl_opm_p->op.data.meta.type;
-
-        if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
-        {
-          /* marker of function argument list end reached */
-          break;
-        }
-        else
-        {
-          JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
-
-          /* the varg specifies argument name, and so should be a string literal */
-          JERRY_ASSERT (arg_decl_opm_p->op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-          JERRY_ASSERT (arg_decl_opm_p->lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
-
-          if (!dumper_replace_identifier_name_with_reg (tree, arg_decl_opm_p))
-          {
-            are_all_args_replaced = false;
-          }
-        }
-      }
-
-      bool are_all_vars_replaced = true;
-      for (vm_instr_counter_t var_decl_pos = 0;
-           var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls);
-           var_decl_pos++)
+      vm_instr_counter_t var_decl_pos = 0;
+      while (var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls))
       {
         op_meta *om_p = (op_meta *) linked_list_element (fe_scope_tree->var_decls, var_decl_pos);
 
-        if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
+        if (!dumper_try_replace_var_with_reg (fe_scope_tree, om_p))
         {
-          are_all_vars_replaced = false;
+          var_decl_pos++;
         }
-      }
-
-      if (are_all_vars_replaced)
-      {
-        /*
-         * All local variables were replaced with registers, so variable declarations could be removed.
-         *
-         * TODO:
-         *      Support removal of a particular variable declaration, without removing the whole list.
-         */
-
-        linked_list_free (fe_scope_tree->var_decls);
-        fe_scope_tree->var_decls = linked_list_init (sizeof (op_meta));
+        else
+        {
+          linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+        }
       }
     }
   }
