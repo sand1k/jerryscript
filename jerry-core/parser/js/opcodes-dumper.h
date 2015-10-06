@@ -474,7 +474,6 @@ void rewrite_finally (void);
 void dump_end_try_catch_finally (void);
 void dump_throw (jsp_operand_t);
 
-bool dumper_variable_declaration_exists (lit_cpointer_t);
 void dump_variable_declaration (lit_cpointer_t);
 
 vm_instr_counter_t dump_scope_code_flags_for_rewrite (void);

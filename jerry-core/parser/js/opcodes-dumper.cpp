@@ -2280,27 +2280,6 @@ dump_throw (jsp_operand_t op)
 }
 
 /**
- * Checks if variable is already declared
- *
- * @return true if variable declaration already exists
- *         false otherwise
- */
-bool
-dumper_variable_declaration_exists (lit_cpointer_t lit_id) /**< literal which holds variable's name */
-{
-  vm_instr_counter_t var_decls_count = (vm_instr_counter_t) serializer_get_current_var_decls_counter ();
-  for (vm_instr_counter_t oc = (vm_instr_counter_t) (0); oc < var_decls_count; oc++)
-  {
-    const op_meta var_decl_op_meta = serializer_get_var_decl (oc);
-    if (var_decl_op_meta.lit_id[0].packed_value == lit_id.packed_value)
-    {
-      return true;
-    }
-  }
-  return false;
-} /* dumper_variable_declaration_exists */
-
-/**
  * Dump instruction designating variable declaration
  */
 void

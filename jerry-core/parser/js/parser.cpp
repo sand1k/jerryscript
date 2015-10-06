@@ -1830,18 +1830,19 @@ static jsp_operand_t
 parse_variable_declaration (void)
 {
   current_token_must_be (TOK_NAME);
-  const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
 
-  if (!dumper_variable_declaration_exists (token_data_as_lit_cp ()))
+  const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+  const jsp_operand_t name = literal_operand (lit_cp);
+
+  if (!scopes_tree_variable_declaration_exists (STACK_TOP (scopes), lit_cp))
   {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (literal_operand (token_data_as_lit_cp ()),
-                                                                 is_strict_mode (),
-                                                                 tok.loc);
+    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
 
-    dump_variable_declaration (token_data_as_lit_cp ());
+    dump_variable_declaration (lit_cp);
   }
 
   skip_newlines ();
+
   if (token_is (TOK_EQ))
   {
     skip_newlines ();
