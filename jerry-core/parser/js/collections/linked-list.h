@@ -26,5 +26,6 @@ void linked_list_free (linked_list);
 void *linked_list_element (linked_list, size_t);
 void linked_list_set_element (linked_list, size_t, void *);
 void linked_list_remove_element (linked_list, size_t);
+uint16_t linked_list_get_length (linked_list);
 
 #endif /* LINKED_LIST_H */

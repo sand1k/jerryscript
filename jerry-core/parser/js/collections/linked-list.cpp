@@ -281,3 +281,17 @@ linked_list_remove_element (linked_list list, /**< list */
 
   header_p->list_length--;
 } /* linked_list_remove_element */
+
+/**
+ * Get length of the linked list
+ *
+ * @return length
+ */
+uint16_t
+linked_list_get_length (linked_list list) /**< linked list */
+{
+  ASSERT_LIST (list);
+
+  linked_list_header *header_p = (linked_list_header *) list;
+  return header_p->list_length;
+} /* linked_list_get_length */
