@@ -2472,19 +2472,19 @@ rewrite_reg_var_decl (vm_instr_counter_t reg_var_decl_oc)
     if (jsp_reg_max_for_local_var != VM_IDX_EMPTY)
     {
       JERRY_ASSERT (jsp_reg_max_for_args >= jsp_reg_max_for_local_var);
-      opm.op.data.reg_var_decl.args_num = (vm_idx_t) (jsp_reg_max_for_args - jsp_reg_max_for_local_var);
+      opm.op.data.reg_var_decl.arg_regs_num = (vm_idx_t) (jsp_reg_max_for_args - jsp_reg_max_for_local_var);
     }
     else
     {
       JERRY_ASSERT (jsp_reg_max_for_args >= jsp_reg_max_for_temps);
-      opm.op.data.reg_var_decl.args_num = (vm_idx_t) (jsp_reg_max_for_args - jsp_reg_max_for_temps);
+      opm.op.data.reg_var_decl.arg_regs_num = (vm_idx_t) (jsp_reg_max_for_args - jsp_reg_max_for_temps);
     }
 
     jsp_reg_max_for_args = VM_IDX_EMPTY;
   }
   else
   {
-    opm.op.data.reg_var_decl.args_num = 0;
+    opm.op.data.reg_var_decl.arg_regs_num = 0;
   }
 
   serializer_rewrite_op_meta (reg_var_decl_oc, opm);

@@ -572,6 +572,16 @@ pp_op_meta (const bytecode_data_header_t *bytecode_data_p,
               printf ("[no 'eval'] ");
               scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
             }
+            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS)
+            {
+              printf ("[arguments are placed on registers] ");
+              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
+            }
+            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV)
+            {
+              printf ("[no lexical environment should be created for the scope] ");
+              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
+            }
 
             JERRY_ASSERT (scope_flags == 0);
           }

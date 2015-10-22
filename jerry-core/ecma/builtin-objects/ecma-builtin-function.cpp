@@ -295,25 +295,6 @@ ecma_builtin_function_dispatch_construct (const ecma_value_t *arguments_list_p, 
     else
     {
       JERRY_ASSERT (parse_status == JSP_STATUS_OK);
-      bool is_strict = false;
-      bool do_instantiate_arguments_object = true;
-
-      opcode_scope_code_flags_t scope_flags = vm_get_scope_flags (bytecode_data_p->instrs_p,
-                                                                  0);
-
-      if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_STRICT)
-      {
-        is_strict = true;
-      }
-
-      if ((scope_flags & OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER)
-          && (scope_flags & OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER))
-      {
-        /* the code doesn't use 'arguments' identifier
-         * and doesn't perform direct call to eval,
-         * so Arguments object can't be referenced */
-        do_instantiate_arguments_object = false;
-      }
 
       /* 11. */
       ecma_object_t *glob_lex_env_p = ecma_get_global_environment ();
@@ -324,10 +305,9 @@ ecma_builtin_function_dispatch_construct (const ecma_value_t *arguments_list_p, 
 
       ecma_object_t *func_obj_p = ecma_op_create_function_object (formal_params_collection_p,
                                                                   glob_lex_env_p,
-                                                                  is_strict,
-                                                                  do_instantiate_arguments_object,
+                                                                  false,
                                                                   bytecode_data_p,
-                                                                  1);
+                                                                  0);
 
       ecma_deref_object (glob_lex_env_p);
 

@@ -27,7 +27,7 @@ extern ecma_completion_value_t vm_run_eval (const bytecode_data_header_t *, bool
 
 extern ecma_completion_value_t vm_loop (vm_frame_ctx_t *, vm_run_scope_t *);
 extern ecma_completion_value_t vm_run_from_pos (const bytecode_data_header_t *, vm_instr_counter_t,
-                                                ecma_value_t, ecma_object_t *, bool, bool);
+                                                ecma_value_t, ecma_object_t *, bool, bool, ecma_collection_header_t *);
 
 extern vm_instr_t vm_get_instr (const vm_instr_t *, vm_instr_counter_t);
 extern opcode_scope_code_flags_t vm_get_scope_flags (const vm_instr_t *, vm_instr_counter_t);

@@ -3019,8 +3019,6 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
     scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
   }
 
-  rewrite_scope_code_flags (scope_code_flags_oc, scope_flags);
-
 #ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
   if (is_try_replace_local_vars_with_regs
       && fe_scope_tree->type == SCOPE_TYPE_FUNCTION)
@@ -3120,10 +3118,10 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
 
       if (dumper_start_move_of_args_to_regs (args_num))
       {
-        scope_flags |= OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS;
+        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
 
         JERRY_ASSERT (linked_list_get_length (fe_scope_tree->var_decls) == 0);
-        scope_flags |= OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV;
+        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
 
         /* at this point all arguments can be moved to registers */
         if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
@@ -3205,6 +3203,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
             scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
 
             reg_var_decl_oc--;
+            scope_code_flags_oc--;
             dumper_decrement_function_end_pos ();
           }
         }
@@ -3215,6 +3214,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
   (void) is_try_replace_local_vars_with_regs;
 #endif /* !CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
+  rewrite_scope_code_flags (scope_code_flags_oc, scope_flags);
   rewrite_reg_var_decl (reg_var_decl_oc);
   dumper_finish_scope ();
 } /* parse_source_element_list */
