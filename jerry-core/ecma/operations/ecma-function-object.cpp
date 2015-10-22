@@ -306,9 +306,13 @@ ecma_op_create_function_object (ecma_collection_header_t *formal_params_collecti
   ECMA_SET_POINTER (scope_prop_p->u.internal_property.value, scope_p);
 
   // 10., 11.
-  ecma_property_t *formal_parameters_prop_p = ecma_create_internal_property (f,
-                                                                             ECMA_INTERNAL_PROPERTY_FORMAL_PARAMETERS);
-  ECMA_SET_POINTER (formal_parameters_prop_p->u.internal_property.value, formal_params_collection_p);
+  if (formal_params_collection_p != NULL
+      && formal_params_collection_p->unit_number != 0)
+  {
+    ecma_property_t *formal_params_prop_p = ecma_create_internal_property (f,
+                                                                           ECMA_INTERNAL_PROPERTY_FORMAL_PARAMETERS);
+    ECMA_SET_POINTER (formal_params_prop_p->u.internal_property.value, formal_params_collection_p);
+  }
 
   // 12.
   ecma_property_t *bytecode_prop_p = ecma_create_internal_property (f, ECMA_INTERNAL_PROPERTY_CODE_BYTECODE);
@@ -403,12 +407,43 @@ ecma_op_function_try_lazy_instantiate_property (ecma_object_t *obj_p, /**< the f
     // 14
     ecma_number_t *len_p = ecma_alloc_number ();
 
-    ecma_property_t *formal_parameters_prop_p = ecma_get_internal_property (obj_p,
-                                                                            ECMA_INTERNAL_PROPERTY_FORMAL_PARAMETERS);
-    ecma_collection_header_t *formal_parameters_p;
-    formal_parameters_p = ECMA_GET_POINTER (ecma_collection_header_t,
-                                            formal_parameters_prop_p->u.internal_property.value);
-    *len_p = ecma_uint32_to_number (formal_parameters_p != NULL ? formal_parameters_p->unit_number : 0);
+    ecma_property_t *formal_parameters_prop_p = ecma_find_internal_property (obj_p,
+                                                                             ECMA_INTERNAL_PROPERTY_FORMAL_PARAMETERS);
+    if (formal_parameters_prop_p == NULL)
+    {
+      ecma_property_t *bytecode_prop_p = ecma_get_internal_property (obj_p, ECMA_INTERNAL_PROPERTY_CODE_BYTECODE);
+      ecma_property_t *code_prop_p = ecma_get_internal_property (obj_p, ECMA_INTERNAL_PROPERTY_CODE_FLAGS_AND_OFFSET);
+
+      uint32_t code_prop_value = code_prop_p->u.internal_property.value;
+
+      bool is_strict;
+      bool do_instantiate_args_obj;
+      bool is_arguments_moved_to_regs;
+      bool is_no_lex_env;
+
+      const bytecode_data_header_t *bytecode_header_p;
+      bytecode_header_p = MEM_CP_GET_POINTER (const bytecode_data_header_t, bytecode_prop_p->u.internal_property.value);
+
+      vm_instr_counter_t code_first_instr_pos = ecma_unpack_code_internal_property_value (code_prop_value,
+                                                                                          &is_strict,
+                                                                                          &do_instantiate_args_obj,
+                                                                                          &is_arguments_moved_to_regs,
+                                                                                          &is_no_lex_env);
+
+      JERRY_ASSERT (is_arguments_moved_to_regs);
+      const vm_instr_t *instrs_p = bytecode_header_p->instrs_p;
+      const vm_instr_t *reg_var_decl_instr_p = &instrs_p[code_first_instr_pos];
+      JERRY_ASSERT (reg_var_decl_instr_p->op_idx == VM_OP_REG_VAR_DECL);
+
+      *len_p = reg_var_decl_instr_p->data.reg_var_decl.arg_regs_num;
+    }
+    else
+    {
+      ecma_collection_header_t *formal_parameters_p;
+      formal_parameters_p = ECMA_GET_NON_NULL_POINTER (ecma_collection_header_t,
+                                                       formal_parameters_prop_p->u.internal_property.value);
+      *len_p = ecma_uint32_to_number (formal_parameters_p->unit_number);
+    }
 
     // 15
     ecma_property_t *length_prop_p = ecma_create_named_data_property (obj_p,
@@ -591,14 +626,16 @@ ecma_function_call_setup_args_variables (ecma_object_t *func_obj_p, /**< Functio
                                                                                 *   Arguments object should be
                                                                                 *   instantiated */
 {
-  ecma_property_t *formal_parameters_prop_p = ecma_get_internal_property (func_obj_p,
-                                                                          ECMA_INTERNAL_PROPERTY_FORMAL_PARAMETERS);
-  ecma_collection_header_t *formal_parameters_p;
-  formal_parameters_p = ECMA_GET_POINTER (ecma_collection_header_t,
-                                          formal_parameters_prop_p->u.internal_property.value);
+  ecma_collection_header_t *formal_parameters_p = NULL;
 
-  if (formal_parameters_p != NULL)
+  ecma_property_t *formal_parameters_prop_p = ecma_find_internal_property (func_obj_p,
+                                                                           ECMA_INTERNAL_PROPERTY_FORMAL_PARAMETERS);
+
+  if (formal_parameters_prop_p != NULL)
   {
+    formal_parameters_p = ECMA_GET_POINTER (ecma_collection_header_t,
+                                            formal_parameters_prop_p->u.internal_property.value);
+
     ecma_length_t formal_parameters_count = formal_parameters_p->unit_number;
 
     ecma_collection_iterator_t arguments_iterator, formal_params_iterator;
