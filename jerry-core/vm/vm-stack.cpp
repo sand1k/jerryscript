@@ -96,12 +96,12 @@ vm_stack_add_frame (vm_stack_frame_t *frame_p, /**< frame to initialize */
 
   JERRY_ASSERT (regs_num >= VM_SPECIAL_REGS_NUMBER);
 
-  for (uint32_t i = 0; i < regs_num - local_vars_regs_num; i++)
+  for (uint32_t i = 0; i < regs_num - local_vars_regs_num - arg_regs_num; i++)
   {
     regs_p[i] = ecma_make_simple_value (ECMA_SIMPLE_VALUE_EMPTY);
   }
 
-  for (uint32_t i = regs_num - local_vars_regs_num;
+  for (uint32_t i = regs_num - local_vars_regs_num - arg_regs_num;
        i < regs_num;
        i++)
   {
@@ -110,8 +110,6 @@ vm_stack_add_frame (vm_stack_frame_t *frame_p, /**< frame to initialize */
 
   if (arg_regs_num != 0)
   {
-    JERRY_ASSERT (arguments_p != NULL);
-
     ecma_collection_iterator_t args_iterator;
     ecma_collection_iterator_init (&args_iterator, arguments_p);
 
