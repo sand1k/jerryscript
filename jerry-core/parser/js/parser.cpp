@@ -2979,7 +2979,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
 
   check_directive_prologue_for_use_strict ();
 
-  dump_reg_var_decl_for_rewrite ();
+  vm_instr_counter_t reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
 
   if (inside_eval
       && !inside_function)
@@ -3048,14 +3048,16 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
       /* no subscopes, as no function declarations / eval etc. in the scope */
       JERRY_ASSERT (fe_scope_tree->t.children_num == 0);
 
-      vm_instr_counter_t instr_pos = 0;
+      vm_instr_counter_t instr_pos = 0u;
 
-      op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos++);
+      const vm_instr_counter_t header_oc = instr_pos++;
+      op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, header_oc);
       JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
 
+      vm_instr_counter_t function_end_pos = instr_pos;
       while (true)
       {
-        op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos);
+        op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, function_end_pos);
         JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
 
         opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
@@ -3069,33 +3071,137 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
         {
           JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
 
-          /* the varg specifies argument name, and so should be a string literal */
-          JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-          JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
-
-          if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm))
-          {
-            instr_pos++;
-          }
-          else
-          {
-            scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
-          }
+          function_end_pos++;
         }
       }
 
+      uint32_t args_num = (uint32_t) (function_end_pos - instr_pos);
+
+      dumper_start_move_of_vars_to_regs ();
+
+      /* remove declarations of variables with names equal to an argument's name */
       vm_instr_counter_t var_decl_pos = 0;
       while (var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls))
       {
         op_meta *om_p = (op_meta *) linked_list_element (fe_scope_tree->var_decls, var_decl_pos);
+        bool is_removed = false;
 
-        if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
+        for (vm_instr_counter_t arg_index = instr_pos;
+             arg_index < function_end_pos;
+             arg_index++)
         {
-          var_decl_pos++;
+          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, arg_index);
+          JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+          JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
+          JERRY_ASSERT (om_p->op.data.var_decl.variable_name == VM_IDX_REWRITE_LITERAL_UID);
+
+          if (meta_opm.lit_id[1].packed_value == om_p->lit_id[0].packed_value)
+          {
+            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+
+            is_removed = true;
+            break;
+          }
+        }
+
+        if (!is_removed)
+        {
+          if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
+          {
+            var_decl_pos++;
+          }
+          else
+          {
+            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+          }
+        }
+      }
+
+      if (dumper_start_move_of_args_to_regs (args_num))
+      {
+        /* at this point all arguments can be moved to registers */
+        if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
+        {
+          header_opm.op.data.func_expr_n.arg_list = 0;
         }
         else
         {
-          linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+          JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
+
+          header_opm.op.data.func_decl_n.arg_list = 0;
+        }
+
+        scopes_tree_set_op_meta (fe_scope_tree, header_oc, header_opm);
+
+        /*
+         * Mark duplicated arguments names as empty,
+         * leaving only last declaration for each duplicated
+         * argument name
+         */
+        for (vm_instr_counter_t arg1_index = instr_pos;
+             arg1_index < function_end_pos;
+             arg1_index++)
+        {
+          op_meta meta_opm1 = scopes_tree_op_meta (fe_scope_tree, arg1_index);
+          JERRY_ASSERT (meta_opm1.op.op_idx == VM_OP_META);
+
+          for (vm_instr_counter_t arg2_index = (vm_instr_counter_t) (arg1_index + 1u);
+               arg2_index < function_end_pos;
+               arg2_index++)
+          {
+            op_meta meta_opm2 = scopes_tree_op_meta (fe_scope_tree, arg2_index);
+            JERRY_ASSERT (meta_opm2.op.op_idx == VM_OP_META);
+
+            if (meta_opm1.lit_id[1].packed_value == meta_opm2.lit_id[1].packed_value)
+            {
+              meta_opm1.op.data.meta.data_1 = VM_IDX_EMPTY;
+              meta_opm1.lit_id[1] = NOT_A_LITERAL;
+
+              scopes_tree_set_op_meta (fe_scope_tree, arg1_index, meta_opm1);
+
+              break;
+            }
+          }
+        }
+
+        while (true)
+        {
+          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos);
+          JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+          opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
+
+          if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
+          {
+            /* marker of function argument list end reached */
+            break;
+          }
+          else
+          {
+            JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+
+            if (meta_opm.op.data.meta.data_1 == VM_IDX_EMPTY)
+            {
+              JERRY_ASSERT (meta_opm.lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
+
+              dumper_alloc_reg_for_unused_arg ();
+            }
+            else
+            {
+              /* the varg specifies argument name, and so should be a string literal */
+              JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
+              JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
+
+              bool is_replaced = dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm);
+              JERRY_ASSERT (is_replaced);
+            }
+
+            scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
+
+            reg_var_decl_oc--;
+            dumper_decrement_function_end_pos ();
+          }
         }
       }
     }
@@ -3104,7 +3210,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
   (void) is_try_replace_local_vars_with_regs;
 #endif /* !CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
-  rewrite_reg_var_decl ();
+  rewrite_reg_var_decl (reg_var_decl_oc);
   dumper_finish_scope ();
 } /* parse_source_element_list */
 
