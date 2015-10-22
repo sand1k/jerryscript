@@ -185,25 +185,29 @@ jsp_alloc_reg_for_temp (void)
 bool
 dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function scope, created for
                                                                 *   function declaration or function expresssion */
-                                             op_meta *var_decl_om_p) /**< operation meta of corresponding
-                                                                      *   variable declaration */
+                                             op_meta *om_p) /**< operation meta of corresponding
+                                                             *   variable declaration */
 {
   JERRY_ASSERT (tree->type == SCOPE_TYPE_FUNCTION);
 
   lit_cpointer_t lit_cp;
 
-  if (var_decl_om_p->op.op_idx == VM_OP_VAR_DECL)
+  if (om_p->op.op_idx == VM_OP_VAR_DECL)
   {
-    JERRY_ASSERT (var_decl_om_p->lit_id[0].packed_value != NOT_A_LITERAL.packed_value);
-    JERRY_ASSERT (var_decl_om_p->lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
-    JERRY_ASSERT (var_decl_om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (om_p->lit_id[0].packed_value != NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (om_p->lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
   }
   else
   {
-    JERRY_ASSERT (var_decl_om_p->op.op_idx == VM_OP_META);
-    JERRY_ASSERT (var_decl_om_p->op.data.meta.type == OPCODE_META_TYPE_VARG);
+    JERRY_ASSERT (om_p->op.op_idx == VM_OP_META);
 
+    JERRY_ASSERT (om_p->op.data.meta.type == OPCODE_META_TYPE_VARG);
+    JERRY_ASSERT (om_p->lit_id[0].packed_value == NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (om_p->lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
   }
+
   if (jsp_reg_max_for_local_var == VM_IDX_EMPTY)
   {
     jsp_reg_max_for_local_var = jsp_reg_max_for_temps;
@@ -218,7 +222,7 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
 
   vm_idx_t reg = ++jsp_reg_max_for_local_var;
 
-  lit_cpointer_t lit_cp = var_decl_om_p->lit_id[0];
+  lit_cpointer_t lit_cp = om_p->lit_id[0];
 
   for (vm_instr_counter_t instr_pos = 0;
        instr_pos < tree->instrs_count;
