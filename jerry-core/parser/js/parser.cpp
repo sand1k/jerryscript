@@ -3048,12 +3048,48 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
       /* no subscopes, as no function declarations / eval etc. in the scope */
       JERRY_ASSERT (fe_scope_tree->t.children_num == 0);
 
+      vm_instr_counter_t instr_pos = 0;
+
+      op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos++);
+      JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
+
+      while (true)
+      {
+        op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos);
+        JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+        opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
+
+        if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
+        {
+          /* marker of function argument list end reached */
+          break;
+        }
+        else
+        {
+          JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+
+          /* the varg specifies argument name, and so should be a string literal */
+          JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
+          JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
+
+          if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm))
+          {
+            instr_pos++;
+          }
+          else
+          {
+            scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
+          }
+        }
+      }
+
       vm_instr_counter_t var_decl_pos = 0;
       while (var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls))
       {
         op_meta *om_p = (op_meta *) linked_list_element (fe_scope_tree->var_decls, var_decl_pos);
 
-        if (!dumper_try_replace_var_with_reg (fe_scope_tree, om_p))
+        if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
         {
           var_decl_pos++;
         }

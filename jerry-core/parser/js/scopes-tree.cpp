@@ -118,6 +118,20 @@ scopes_tree_var_decl (scopes_tree tree, /**< scope, from which variable declarat
   return *(op_meta *) linked_list_element (tree->var_decls, oc);
 } /* scopes_tree_var_decl */
 
+/**
+ * Remove specified instruction from scopes tree node's instructions list
+ */
+void
+scopes_tree_remove_op_meta (scopes_tree tree, /**< scopes tree node */
+                            vm_instr_counter_t oc) /**< position of instruction to remove */
+{
+  assert_tree (tree);
+  JERRY_ASSERT (oc < tree->instrs_count);
+
+  linked_list_remove_element (tree->instrs, oc);
+  tree->instrs_count--;
+} /* scopes_tree_remove_op_meta */
+
 vm_instr_counter_t
 scopes_tree_count_instructions (scopes_tree t)
 {

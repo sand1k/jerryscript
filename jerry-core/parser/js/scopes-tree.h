@@ -90,6 +90,7 @@ void scopes_tree_set_op_meta (scopes_tree, vm_instr_counter_t, op_meta);
 void scopes_tree_set_instrs_num (scopes_tree, vm_instr_counter_t);
 op_meta scopes_tree_op_meta (scopes_tree, vm_instr_counter_t);
 op_meta scopes_tree_var_decl (scopes_tree, vm_instr_counter_t);
+void scopes_tree_remove_op_meta (scopes_tree tree, vm_instr_counter_t oc);
 size_t scopes_tree_count_literals_in_blocks (scopes_tree);
 vm_instr_counter_t scopes_tree_count_instructions (scopes_tree);
 bool scopes_tree_variable_declaration_exists (scopes_tree, lit_cpointer_t);

@@ -197,6 +197,8 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
     JERRY_ASSERT (om_p->lit_id[0].packed_value != NOT_A_LITERAL.packed_value);
     JERRY_ASSERT (om_p->lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
     JERRY_ASSERT (om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
+
+    lit_cp = om_p->lit_id[0];
   }
   else
   {
@@ -206,6 +208,8 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
     JERRY_ASSERT (om_p->lit_id[0].packed_value == NOT_A_LITERAL.packed_value);
     JERRY_ASSERT (om_p->lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
     JERRY_ASSERT (om_p->lit_id[2].packed_value == NOT_A_LITERAL.packed_value);
+
+    lit_cp = om_p->lit_id[1];
   }
 
   if (jsp_reg_max_for_local_var == VM_IDX_EMPTY)
@@ -221,8 +225,6 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
   JERRY_ASSERT (jsp_reg_max_for_local_var < VM_REG_GENERAL_LAST);
 
   vm_idx_t reg = ++jsp_reg_max_for_local_var;
-
-  lit_cpointer_t lit_cp = om_p->lit_id[0];
 
   for (vm_instr_counter_t instr_pos = 0;
        instr_pos < tree->instrs_count;
