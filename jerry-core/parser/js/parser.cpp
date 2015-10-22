@@ -3120,6 +3120,11 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
 
       if (dumper_start_move_of_args_to_regs (args_num))
       {
+        scope_flags |= OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS;
+
+        JERRY_ASSERT (linked_list_get_length (fe_scope_tree->var_decls) == 0);
+        scope_flags |= OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV;
+
         /* at this point all arguments can be moved to registers */
         if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
         {

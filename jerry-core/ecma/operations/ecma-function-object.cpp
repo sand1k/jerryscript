@@ -45,14 +45,21 @@ static uint32_t
 ecma_pack_code_internal_property_value (bool is_strict, /**< is code strict? */
                                         bool do_instantiate_args_obj, /**< should an Arguments object be
                                                                        *   instantiated for the code */
+                                        bool is_arguments_moved_to_regs, /**< values of the function's arguments
+                                                                       *   are placed on registers */
+                                        bool is_no_lex_env, /**< the function needs no lexical environment */
                                         vm_instr_counter_t instr_oc) /**< position of first instruction */
 {
   uint32_t value = instr_oc;
   const uint32_t is_strict_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 1);
   const uint32_t do_instantiate_arguments_object_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 2);
+  const uint32_t arguments_moved_to_regs_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 3);
+  const uint32_t no_lex_env_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 4);
 
   JERRY_ASSERT (((value) & (1u << is_strict_bit_offset)) == 0);
   JERRY_ASSERT (((value) & (1u << do_instantiate_arguments_object_bit_offset)) == 0);
+  JERRY_ASSERT (((value) & (1u << arguments_moved_to_regs_bit_offset)) == 0);
+  JERRY_ASSERT (((value) & (1u << no_lex_env_bit_offset)) == 0);
 
   if (is_strict)
   {
@@ -62,6 +69,16 @@ ecma_pack_code_internal_property_value (bool is_strict, /**< is code strict? */
   if (do_instantiate_args_obj)
   {
     value |= (1u << do_instantiate_arguments_object_bit_offset);
+  }
+
+  if (is_arguments_moved_to_regs)
+  {
+    value |= (1u << arguments_moved_to_regs_bit_offset);
+  }
+
+  if (is_no_lex_env)
+  {
+    value |= (1u << no_lex_env_bit_offset);
   }
 
   return value;
@@ -76,18 +93,31 @@ ecma_pack_code_internal_property_value (bool is_strict, /**< is code strict? */
 static vm_instr_counter_t
 ecma_unpack_code_internal_property_value (uint32_t value, /**< packed value */
                                           bool* out_is_strict_p, /**< out: is code strict? */
-                                          bool* out_do_instantiate_args_obj_p) /**< should an Arguments object be
+                                          bool* out_do_instantiate_args_obj_p, /**< should an Arguments object be
                                                                                 *   instantiated for the code */
+                                          bool* out_is_arguments_moved_to_regs_p, /**< values of the function's
+                                                                                   *   arguments are placed
+                                                                                   *   on registers */
+                                          bool* out_is_no_lex_env_p) /**< the function needs no lexical environment */
 {
   JERRY_ASSERT (out_is_strict_p != NULL);
   JERRY_ASSERT (out_do_instantiate_args_obj_p != NULL);
+  JERRY_ASSERT (out_is_arguments_moved_to_regs_p != NULL);
+  JERRY_ASSERT (out_is_no_lex_env_p != NULL);
 
   const uint32_t is_strict_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 1);
   const uint32_t do_instantiate_arguments_object_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 2);
+  const uint32_t is_arguments_moved_to_regs_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 3);
+  const uint32_t is_no_lex_env_bit_offset = (uint32_t) (sizeof (value) * JERRY_BITSINBYTE - 4);
 
   *out_is_strict_p = ((value & (1u << is_strict_bit_offset)) != 0);
   *out_do_instantiate_args_obj_p = ((value & (1u << do_instantiate_arguments_object_bit_offset)) != 0);
-  value &= ~((1u << is_strict_bit_offset) | (1u << do_instantiate_arguments_object_bit_offset));
+  *out_is_arguments_moved_to_regs_p = ((value & (1u << is_arguments_moved_to_regs_bit_offset)) != 0);
+  *out_is_no_lex_env_p = ((value & (1u << is_no_lex_env_bit_offset)) != 0);
+  value &= ~((1u << is_strict_bit_offset)
+             | (1u << do_instantiate_arguments_object_bit_offset);
+             | (1u << is_arguments_moved_to_regs_bit_offset);
+             | (1u << is_no_lex_env_bit_offset));
 
   return (vm_instr_counter_t) value;
 } /* ecma_unpack_code_internal_property_value */
