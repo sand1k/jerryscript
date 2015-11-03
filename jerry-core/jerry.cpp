@@ -71,12 +71,12 @@ static bool jerry_api_available;
 /**
  * Verbosity level of logging
  */
-int jerry_debug_level = 0;
+int jerry_debug_level = 3;
 
 /**
  * File, used for logging
  */
-FILE *jerry_log_file = NULL;
+FILE *jerry_log_file = stdout;
 #endif /* JERRY_ENABLE_LOG */
 
 /**
