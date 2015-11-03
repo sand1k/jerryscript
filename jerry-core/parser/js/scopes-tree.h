@@ -41,7 +41,6 @@ typedef struct tree_header
 {
   struct tree_header *parent;
   linked_list children;
-  uint8_t children_num;
 } tree_header;
 
 /**

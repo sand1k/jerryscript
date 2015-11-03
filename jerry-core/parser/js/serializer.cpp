@@ -88,6 +88,12 @@ serializer_get_literal_cp_by_uid (uint8_t id, /**< literal idx */
   return lit_id_hash_table_lookup (lit_id_hash, id, oc);
 } /* serializer_get_literal_cp_by_uid */
 
+scopes_tree
+serializer_get_scope (void)
+{
+  return current_scope;
+}
+
 void
 serializer_set_scope (scopes_tree new_scope)
 {
@@ -128,10 +134,15 @@ serializer_dump_subscope (scopes_tree tree) /**< scope to dump */
     op_meta *om_p = (op_meta *) linked_list_element (tree->var_decls, var_decl_pos);
     scopes_tree_add_op_meta (current_scope, *om_p);
   }
-  for (uint8_t child_id = 0; child_id < tree->t.children_num; child_id++)
+
+  if (tree->t.children != null_list)
   {
-    serializer_dump_subscope (*(scopes_tree *) linked_list_element (tree->t.children, child_id));
+    for (uint8_t child_id = 0; child_id < linked_list_get_length (tree->t.children); child_id++)
+    {
+      serializer_dump_subscope (*(scopes_tree *) linked_list_element (tree->t.children, child_id));
+    }
   }
+
   for (; instr_pos < tree->instrs_count; instr_pos++)
   {
     op_meta *om_p = (op_meta *) linked_list_element (tree->instrs, instr_pos);

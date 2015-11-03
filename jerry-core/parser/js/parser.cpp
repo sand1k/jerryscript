@@ -17,7 +17,6 @@
 #include "ecma-helpers.h"
 #include "hash-table.h"
 #include "jrt-libc-includes.h"
-#include "jsp-label.h"
 #include "jsp-mm.h"
 #include "opcodes.h"
 #include "opcodes-dumper.h"
@@ -47,29 +46,98 @@ typedef enum
 } jsp_eval_ret_store_t;
 
 static token tok;
-static bool inside_eval = false;
-static bool inside_function = false;
 static bool parser_show_instrs = false;
-
-enum
-{
-  scopes_global_size
-};
-STATIC_STACK (scopes, scopes_tree)
 
 #define EMIT_ERROR(type, MESSAGE) PARSE_ERROR(type, MESSAGE, tok.loc)
 #define EMIT_ERROR_VARG(type, MESSAGE, ...) PARSE_ERROR_VARG(type, MESSAGE, tok.loc, __VA_ARGS__)
 
-static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
-static void parse_statement (jsp_label_t *outermost_stmt_label_p);
-static jsp_operand_t parse_assignment_expression (bool);
-static void parse_source_element_list (bool, bool);
-static jsp_operand_t parse_argument_list (varg_list_type, jsp_operand_t, jsp_operand_t *);
+typedef enum __attr_packed___
+{
+  /* ECMA-262 v5 expression types */
+  JSP_STATE_EXPR__BEGIN,
+
+  JSP_STATE_EXPR_EMPTY,               /**< no expression yet (at start) */
+  JSP_STATE_EXPR_FUNCTION,            /**< FunctionExpression (11.2.5) */
+  JSP_STATE_EXPR_MEMBER,              /**< MemberExpression (11.2) */
+  JSP_STATE_EXPR_CALL,                /**< CallExpression (11.2) */
+  JSP_STATE_EXPR_LEFTHANDSIDE,        /**< LeftHandSideExpression (11.2) */
+  JSP_STATE_EXPR_UNARY,               /**< UnaryExpression (11.4) */
+  JSP_STATE_EXPR_MULTIPLICATIVE,      /**< MultiplicativeExpression (11.5) */
+  JSP_STATE_EXPR_ADDITIVE,            /**< AdditiveExpression (11.6) */
+  JSP_STATE_EXPR_SHIFT,               /**< ShiftExpression (11.7) */
+  JSP_STATE_EXPR_RELATIONAL,          /**< RelationalExpression (11.8) */
+  JSP_STATE_EXPR_EQUALITY,            /**< EqualityExpression (11.9) */
+  JSP_STATE_EXPR_BITWISE_AND,         /**< BitwiseAndExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_XOR,         /**< BitwiseXorExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_OR,          /**< BitwiseOrExpression (11.10) */
+  JSP_STATE_EXPR_LOGICAL_AND,         /**< LogicalAndExpression (11.11) */
+  JSP_STATE_EXPR_LOGICAL_OR,          /**< LogicalOrExpression (11.11) */
+  JSP_STATE_EXPR_CONDITION,           /**< ConditionalExpression (11.12) */
+  JSP_STATE_EXPR_ASSIGNMENT,          /**< AssignmentExpression (11.13) */
+  JSP_STATE_EXPR_EXPRESSION,          /**< Expression (11.14) */
+
+  JSP_STATE_EXPR_ARRAY_LITERAL,       /**< ArrayLiteral (11.1.4) */
+  JSP_STATE_EXPR_OBJECT_LITERAL,      /**< ObjectLiteral (11.1.5) */
+
+  JSP_STATE_EXPR_DATA_PROP_DECL,      /**< a data property (ObjectLiteral, 11.1.5) */
+  JSP_STATE_EXPR_ACCESSOR_PROP_DECL,  /**< an accessor's property getter / setter (ObjectLiteral, 11.1.5) */
+
+  JSP_STATE_EXPR__END,
+
+  JSP_STATE_STAT_EMPTY,              /**< no statement yet (at start) */
+  JSP_STATE_STAT_IF_BRANCH_START,    /**< IfStatement branch start */
+  JSP_STATE_STAT_IF_BRANCH_END,      /**< IfStatement branch start */
+  JSP_STATE_STAT_STATEMENT,          /**< Statement */
+  JSP_STATE_STAT_STATEMENT_LIST,     /**< Statement list */
+  JSP_STATE_STAT_VAR_DECL,           /**< VariableStatement */
+  JSP_STATE_STAT_VAR_DECL_FINISH,
+  JSP_STATE_STAT_DO_WHILE,           /**< IterationStatement */
+  JSP_STATE_STAT_WHILE,
+  JSP_STATE_STAT_FOR_INIT_END,
+  JSP_STATE_STAT_FOR_INCREMENT,
+  JSP_STATE_STAT_FOR_COND,
+  JSP_STATE_STAT_FOR_FINISH,
+  JSP_STATE_STAT_FOR_IN,
+  JSP_STATE_STAT_FOR_IN_EXPR,
+  JSP_STATE_STAT_FOR_IN_FINISH,
+  JSP_STATE_STAT_ITER_FINISH,
+  JSP_STATE_STAT_SWITCH,
+  JSP_STATE_STAT_SWITCH_BRANCH_EXPR,
+  JSP_STATE_STAT_SWITCH_BRANCH,
+  JSP_STATE_STAT_SWITCH_FINISH,
+  JSP_STATE_STAT_TRY,
+  JSP_STATE_STAT_CATCH_FINISH,
+  JSP_STATE_STAT_FINALLY_FINISH,
+  JSP_STATE_STAT_TRY_FINISH,
+  JSP_STATE_STAT_WITH,
+  JSP_STATE_STAT_EXPRESSION,
+  JSP_STATE_STAT_RETURN,
+  JSP_STATE_STAT_THROW,
+
+  JSP_STATE_FUNC_DECL_FINISH,
+  JSP_STATE_SOURCE_ELEMENT_LIST,
+
+  JSP_STATE_SOURCE_ELEMENTS_INIT,
+  JSP_STATE_SOURCE_ELEMENTS,
+
+  JSP_STATE_STAT_BLOCK,
+
+  JSP_STATE_STAT_NAMED_LABEL
+} jsp_state_expr_t;
+
+static void jsp_parse_source_element_list (void);
+static void skip_case_clause_body (void);
 
 static bool
-token_is (token_type tt)
+is_strict_mode (void)
 {
-  return tok.type == tt;
+  return scopes_tree_strict_mode (serializer_get_scope ());
+}
+
+static bool
+token_is (jsp_token_type_t tt)
+{
+  return (lexer_get_token_type (tok) == tt);
 }
 
 static uint16_t
@@ -95,7 +163,7 @@ token_data_as_lit_cp (void)
 static void
 skip_token (void)
 {
-  tok = lexer_next_token (false);
+  tok = lexer_next_token (false, is_strict_mode ());
 }
 
 /**
@@ -105,78 +173,51 @@ static void
 rescan_regexp_token (void)
 {
   lexer_seek (tok.loc);
-  tok = lexer_next_token (true);
+  tok = lexer_next_token (true, is_strict_mode ());
 } /* rescan_regexp_token */
 
 static void
-assert_keyword (keyword kw)
+seek_token (locus loc)
 {
-  if (!token_is (TOK_KEYWORD) || token_data () != kw)
+  lexer_seek (loc);
+
+  skip_token ();
+}
+
+static bool
+is_keyword (jsp_token_type_t tt)
+{
+  return (tt >= TOKEN_TYPE__KEYWORD_BEGIN && tt <= TOKEN_TYPE__KEYWORD_END);
+}
+
+static void
+assert_keyword (jsp_token_type_t kw)
+{
+  if (!token_is (kw))
   {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected keyword '%s'", lexer_keyword_to_string (kw));
+    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected keyword '%s'", lexer_token_type_to_string (kw));
     JERRY_UNREACHABLE ();
   }
 }
 
-static bool
-is_keyword (keyword kw)
-{
-  return token_is (TOK_KEYWORD) && token_data () == kw;
-}
-
 static void
-current_token_must_be (token_type tt)
+current_token_must_be_check_and_skip_it (jsp_token_type_t tt)
 {
   if (!token_is (tt))
   {
     EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected '%s' token", lexer_token_type_to_string (tt));
   }
-}
 
-static void
-skip_newlines (void)
-{
-  do
-  {
-    skip_token ();
-  }
-  while (token_is (TOK_NEWLINE));
-}
-
-static void
-next_token_must_be (token_type tt)
-{
   skip_token ();
+}
+
+static void
+current_token_must_be (jsp_token_type_t tt)
+{
   if (!token_is (tt))
   {
     EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected '%s' token", lexer_token_type_to_string (tt));
   }
-}
-
-static void
-token_after_newlines_must_be (token_type tt)
-{
-  skip_newlines ();
-  if (!token_is (tt))
-  {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected '%s' token", lexer_token_type_to_string (tt));
-  }
-}
-
-static void
-token_after_newlines_must_be_keyword (keyword kw)
-{
-  skip_newlines ();
-  if (!is_keyword (kw))
-  {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected keyword '%s'", lexer_keyword_to_string (kw));
-  }
-}
-
-static bool
-is_strict_mode (void)
-{
-  return scopes_tree_strict_mode (STACK_TOP (scopes));
 }
 
 /**
@@ -190,11 +231,11 @@ is_strict_mode (void)
  *      token when the routine is called
  */
 static void
-jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
+jsp_skip_braces (jsp_token_type_t brace_type) /**< type of the opening brace */
 {
   current_token_must_be (brace_type);
 
-  token_type closing_bracket_type;
+  jsp_token_type_t closing_bracket_type;
 
   if (brace_type == TOK_OPEN_PAREN)
   {
@@ -210,7 +251,7 @@ jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
     closing_bracket_type = TOK_CLOSE_SQUARE;
   }
 
-  skip_newlines ();
+  skip_token ();
 
   while (!token_is (closing_bracket_type)
          && !token_is (TOK_EOF))
@@ -219,10 +260,10 @@ jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
         || token_is (TOK_OPEN_BRACE)
         || token_is (TOK_OPEN_SQUARE))
     {
-      jsp_skip_braces (tok.type);
+      jsp_skip_braces (lexer_get_token_type (tok));
     }
 
-    skip_newlines ();
+    skip_token ();
   }
 
   current_token_must_be (closing_bracket_type);
@@ -240,13 +281,11 @@ jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
  *         false - otherwise (in the case, lexer locus points to end_loc).
  */
 static bool
-jsp_find_next_token_before_the_locus (token_type token_to_find, /**< token to search for
-                                                                 *   (except TOK_NEWLINE and TOK_EOF) */
+jsp_find_next_token_before_the_locus (jsp_token_type_t token_to_find, /**< token to search for (except TOK_EOF) */
                                       locus end_loc, /**< location to search before */
                                       bool skip_brace_blocks) /**< skip blocks, surrounded with { and } braces */
 {
-  JERRY_ASSERT (token_to_find != TOK_NEWLINE
-                && token_to_find != TOK_EOF);
+  JERRY_ASSERT (token_to_find != TOK_EOF);
 
   while (lit_utf8_iterator_pos_cmp (tok.loc, end_loc) < 0)
   {
@@ -257,12 +296,11 @@ jsp_find_next_token_before_the_locus (token_type token_to_find, /**< token to se
         jsp_skip_braces (TOK_OPEN_BRACE);
 
         JERRY_ASSERT (token_is (TOK_CLOSE_BRACE));
-        skip_newlines ();
+        skip_token ();
 
         if (lit_utf8_iterator_pos_cmp (tok.loc, end_loc) >= 0)
         {
-          lexer_seek (end_loc);
-          tok = lexer_next_token (false);
+          seek_token (end_loc);
 
           return false;
         }
@@ -282,12 +320,77 @@ jsp_find_next_token_before_the_locus (token_type token_to_find, /**< token to se
       JERRY_ASSERT (!token_is (TOK_EOF));
     }
 
-    skip_newlines ();
+    skip_token ();
   }
 
   JERRY_ASSERT (lit_utf8_iterator_pos_cmp (tok.loc, end_loc) == 0);
   return false;
 } /* jsp_find_next_token_before_the_locus */
+
+/*
+ * FIXME:
+ *       Move the functionality to dumper
+ */
+static jsp_operand_t
+dump_get_value_if_value_based_ref (jsp_operand_t obj,
+                                   jsp_operand_t prop_name,
+                                   bool is_value_based_reference)
+{
+  if (is_value_based_reference)
+  {
+    JERRY_ASSERT (!prop_name.is_empty_operand ());
+
+    jsp_operand_t reg = tmp_operand ();
+
+    dump_prop_getter (reg, obj, prop_name);
+
+    return reg;
+  }
+  else
+  {
+    JERRY_ASSERT (prop_name.is_empty_operand ());
+
+    return obj;
+  }
+}
+
+static jsp_operand_t
+dump_get_value_if_ref (jsp_operand_t obj,
+                       jsp_operand_t prop_name,
+                       bool is_value_based_reference)
+{
+  if (is_value_based_reference)
+  {
+    JERRY_ASSERT (!prop_name.is_empty_operand ());
+
+    jsp_operand_t reg = tmp_operand ();
+
+    dump_prop_getter (reg, obj, prop_name);
+
+    return reg;
+  }
+  else if (obj.is_identifier_operand ())
+  {
+    jsp_operand_t reg = tmp_operand ();
+
+    dump_variable_assignment (reg, obj);
+
+    return reg;
+  }
+  else if (obj.is_register_operand ()
+           && !(obj.get_idx () >= VM_REG_GENERAL_FIRST && obj.get_idx () <= VM_REG_GENERAL_LAST))
+  {
+    jsp_operand_t general_reg = tmp_operand ();
+
+    dump_variable_assignment (general_reg, obj);
+
+    return general_reg;
+  }
+  else
+  {
+    return obj;
+  }
+}
 
 /* property_name
   : Identifier
@@ -299,2676 +402,64 @@ jsp_find_next_token_before_the_locus (token_type token_to_find, /**< token to se
 static jsp_operand_t
 parse_property_name (void)
 {
-  switch (tok.type)
+  jsp_token_type_t tt = lexer_get_token_type (tok);
+
+  if (is_keyword (tt))
   {
-    case TOK_NAME:
-    case TOK_STRING:
-    {
-      return literal_operand (token_data_as_lit_cp ());
-    }
-    case TOK_NUMBER:
-    case TOK_SMALL_INT:
-    {
-      ecma_number_t num;
-
-      if (tok.type == TOK_NUMBER)
-      {
-        literal_t num_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
-        JERRY_ASSERT (num_lit->get_type () == LIT_NUMBER_T);
-        num = lit_charset_literal_get_number (num_lit);
-      }
-      else
-      {
-        num = ((ecma_number_t) token_data ());
-      }
-
-      lit_utf8_byte_t buff[ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER];
-      lit_utf8_size_t sz = ecma_number_to_utf8_string (num, buff, sizeof (buff));
-      JERRY_ASSERT (sz <= ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER);
-
-      literal_t str_lit = lit_find_or_create_literal_from_utf8_string (buff, sz);
-      return literal_operand (lit_cpointer_t::compress (str_lit));
-    }
-    case TOK_KEYWORD:
-    {
-      const char *s = lexer_keyword_to_string ((keyword) token_data ());
-      literal_t lit = lit_find_or_create_literal_from_utf8_string ((const lit_utf8_byte_t *) s,
-                                                                   (lit_utf8_size_t)strlen (s));
-      return literal_operand (lit_cpointer_t::compress (lit));
-    }
-    case TOK_NULL:
-    case TOK_BOOL:
-    {
-      lit_magic_string_id_t id = (token_is (TOK_NULL)
-                                  ? LIT_MAGIC_STRING_NULL
-                                  : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
-      literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
-                                                                   lit_get_magic_string_size (id));
-      return literal_operand (lit_cpointer_t::compress (lit));
-    }
-    default:
-    {
-      EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Wrong property name type: %s", lexer_token_type_to_string (tok.type));
-    }
-  }
-}
-
-/* property_name_and_value
-  : property_name LT!* ':' LT!* assignment_expression
-  ; */
-static void
-parse_property_name_and_value (void)
-{
-  const jsp_operand_t name = parse_property_name ();
-  token_after_newlines_must_be (TOK_COLON);
-  skip_newlines ();
-  const jsp_operand_t value = parse_assignment_expression (true);
-  dump_prop_name_and_value (name, value);
-  jsp_early_error_add_prop_name (name, PROP_DATA);
-}
-
-/* property_assignment
-  : property_name_and_value
-  | get LT!* property_name LT!* '(' LT!* ')' LT!* '{' LT!* function_body LT!* '}'
-  | set LT!* property_name LT!* '(' identifier ')' LT!* '{' LT!* function_body LT!* '}'
-  ; */
-static void
-parse_property_assignment (void)
-{
-  if (token_is (TOK_NAME))
-  {
-    bool is_setter;
-
-    if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "get"))
-    {
-      is_setter = false;
-    }
-    else if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "set"))
-    {
-      is_setter = true;
-    }
-    else
-    {
-      parse_property_name_and_value ();
-
-      return;
-    }
-
-    const token temp = tok;
-    skip_newlines ();
-    if (token_is (TOK_COLON))
-    {
-      lexer_save_token (tok);
-      tok = temp;
-
-      parse_property_name_and_value ();
-
-      return;
-    }
-
-    STACK_DECLARE_USAGE (scopes);
-
-    const jsp_operand_t name = parse_property_name ();
-    jsp_early_error_add_prop_name (name, is_setter ? PROP_SET : PROP_GET);
-
-    scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-    STACK_PUSH (scopes, scopes_tree_init (NULL, SCOPE_TYPE_FUNCTION));
-    serializer_set_scope (STACK_TOP (scopes));
-    scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-    lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-    jsp_early_error_start_checking_of_vargs ();
-
-    skip_newlines ();
-    const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand (), NULL);
-
-    dump_function_end_for_rewrite ();
-
-    token_after_newlines_must_be (TOK_OPEN_BRACE);
-    skip_newlines ();
-
-    bool was_in_function = inside_function;
-    inside_function = true;
-
-    jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-    parse_source_element_list (false, true);
-
-    jsp_label_restore_set (masked_label_set_p);
-
-    token_after_newlines_must_be (TOK_CLOSE_BRACE);
-
-    dump_ret ();
-    rewrite_function_end ();
-
-    inside_function = was_in_function;
-
-    jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-    scopes_tree fe_scope_tree = STACK_TOP (scopes);
-
-    STACK_DROP (scopes, 1);
-    serializer_set_scope (STACK_TOP (scopes));
-    lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-    serializer_dump_subscope (fe_scope_tree);
-    scopes_tree_free (fe_scope_tree);
-
-    STACK_CHECK_USAGE (scopes);
-
-    if (is_setter)
-    {
-      dump_prop_setter_decl (name, func);
-    }
-    else
-    {
-      dump_prop_getter_decl (name, func);
-    }
+    const char *s = lexer_token_type_to_string (lexer_get_token_type (tok));
+    literal_t lit = lit_find_or_create_literal_from_utf8_string ((const lit_utf8_byte_t *) s,
+                                                                 (lit_utf8_size_t)strlen (s));
+    return literal_operand (lit_cpointer_t::compress (lit));
   }
   else
   {
-    parse_property_name_and_value ();
-  }
-}
-
-/** Parse list of identifiers, assigment expressions or properties, splitted by comma.
-    For each ALT dumps appropriate bytecode. Uses OBJ during dump if neccesary.
-    Result tmp. */
-static jsp_operand_t
-parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_arg_p)
-{
-  token_type close_tt = TOK_CLOSE_PAREN;
-  size_t args_num = 0;
-
-  JERRY_ASSERT (!(vlt != VARG_CALL_EXPR && this_arg_p != NULL));
-
-  switch (vlt)
-  {
-    case VARG_FUNC_DECL:
-    case VARG_FUNC_EXPR:
-    case VARG_CONSTRUCT_EXPR:
+    switch (tt)
     {
-      current_token_must_be (TOK_OPEN_PAREN);
-      dump_varg_header_for_rewrite (vlt, obj);
-      break;
-    }
-    case VARG_CALL_EXPR:
-    {
-      current_token_must_be (TOK_OPEN_PAREN);
-
-      opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
-
-      jsp_operand_t this_arg = empty_operand ();
-      if (this_arg_p != NULL
-          && !operand_is_empty (*this_arg_p))
+      case TOK_NAME:
+      case TOK_STRING:
       {
-        call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
+        return literal_operand (token_data_as_lit_cp ());
+      }
+      case TOK_NUMBER:
+      case TOK_SMALL_INT:
+      {
+        ecma_number_t num;
 
-        if (this_arg_p->is_literal_operand ())
+        if (lexer_get_token_type (tok) == TOK_NUMBER)
         {
-          /*
-           * FIXME:
-           *       Base of CallExpression should be evaluated only once during evaluation of CallExpression
-           *
-           * See also:
-           *          Evaluation of MemberExpression (ECMA-262 v5, 11.2.1)
-           */
-          this_arg = dump_variable_assignment_res (*this_arg_p);
+          literal_t num_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
+          JERRY_ASSERT (num_lit->get_type () == LIT_NUMBER_T);
+          num = lit_charset_literal_get_number (num_lit);
         }
         else
         {
-          this_arg = *this_arg_p;
+          num = ((ecma_number_t) token_data ());
         }
 
-        /*
-         * Presence of explicit 'this' argument implies that it is not Direct call to Eval
-         *
-         * See also:
-         *          ECMA-262 v5, 15.2.2.1
-         */
+        lit_utf8_byte_t buff[ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER];
+        lit_utf8_size_t sz = ecma_number_to_utf8_string (num, buff, sizeof (buff));
+        JERRY_ASSERT (sz <= ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER);
+
+        literal_t str_lit = lit_find_or_create_literal_from_utf8_string (buff, sz);
+        return literal_operand (lit_cpointer_t::compress (str_lit));
       }
-      else if (dumper_is_eval_literal (obj))
-      {
-        call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
-      }
-      else
-      {
-        /*
-         * Note:
-         *      If function is called through Identifier, then the obj should be an Identifier reference,
-         *      not register variable.
-         *      Otherwise, if function is called immediately, without reference (for example, through anonymous
-         *      function expression), the obj should be a register variable.
-         *
-         * See also:
-         *          vm_helper_call_get_call_flags_and_this_arg
-         */
-      }
-
-      dump_varg_header_for_rewrite (vlt, obj);
-
-      if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
-      {
-        if (call_flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
-        {
-          JERRY_ASSERT (!operand_is_empty (this_arg));
-          dump_call_additional_info (call_flags, this_arg);
-        }
-        else
-        {
-          dump_call_additional_info (call_flags, empty_operand ());
-        }
-      }
-
-      break;
-    }
-    case VARG_ARRAY_DECL:
-    {
-      current_token_must_be (TOK_OPEN_SQUARE);
-      close_tt = TOK_CLOSE_SQUARE;
-      dump_varg_header_for_rewrite (vlt, obj);
-      break;
-    }
-    case VARG_OBJ_DECL:
-    {
-      current_token_must_be (TOK_OPEN_BRACE);
-      close_tt = TOK_CLOSE_BRACE;
-      dump_varg_header_for_rewrite (vlt, obj);
-      jsp_early_error_start_checking_of_prop_names ();
-      break;
-    }
-  }
-
-  skip_newlines ();
-  while (!token_is (close_tt))
-  {
-    dumper_start_varg_code_sequence ();
-
-    jsp_operand_t op;
-
-    if (vlt == VARG_FUNC_DECL
-        || vlt == VARG_FUNC_EXPR)
-    {
-      current_token_must_be (TOK_NAME);
-      op = literal_operand (token_data_as_lit_cp ());
-      jsp_early_error_add_varg (op);
-      dump_varg (op);
-      skip_newlines ();
-    }
-    else if (vlt == VARG_CONSTRUCT_EXPR
-             || vlt == VARG_CALL_EXPR)
-    {
-      op = parse_assignment_expression (true);
-      dump_varg (op);
-      skip_newlines ();
-    }
-    else if (vlt == VARG_ARRAY_DECL)
-    {
-      if (token_is (TOK_COMMA))
-      {
-        op = dump_array_hole_assignment_res ();
-        dump_varg (op);
-      }
-      else
-      {
-        op = parse_assignment_expression (true);
-        dump_varg (op);
-        skip_newlines ();
-      }
-    }
-    else
-    {
-      JERRY_ASSERT (vlt == VARG_OBJ_DECL);
-
-      parse_property_assignment ();
-      skip_newlines ();
-    }
-
-    if (token_is (TOK_COMMA))
-    {
-      skip_newlines ();
-    }
-    else
-    {
-      current_token_must_be (close_tt);
-    }
-
-    args_num++;
-
-    dumper_finish_varg_code_sequence ();
-  }
-
-  jsp_operand_t res;
-  switch (vlt)
-  {
-    case VARG_FUNC_DECL:
-    case VARG_FUNC_EXPR:
-    {
-      res = rewrite_varg_header_set_args_count (args_num);
-      break;
-    }
-    case VARG_CONSTRUCT_EXPR:
-    case VARG_ARRAY_DECL:
-    case VARG_CALL_EXPR:
-    {
-      /* Intrinsics are already processed.  */
-      res = rewrite_varg_header_set_args_count (args_num);
-      break;
-    }
-    case VARG_OBJ_DECL:
-    {
-      jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
-      res = rewrite_varg_header_set_args_count (args_num);
-      break;
-    }
-  }
-  return res;
-}
-
-/* function_declaration
-  : 'function' LT!* Identifier LT!*
-    '(' (LT!* Identifier (LT!* ',' LT!* Identifier)*) ? LT!* ')' LT!* function_body
-  ;
-
-   function_body
-  : '{' LT!* sourceElements LT!* '}' */
-static void
-parse_function_declaration (void)
-{
-  STACK_DECLARE_USAGE (scopes);
-
-  assert_keyword (KW_FUNCTION);
-
-  jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-  scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-  STACK_PUSH (scopes, scopes_tree_init (STACK_TOP (scopes), SCOPE_TYPE_FUNCTION));
-  serializer_set_scope (STACK_TOP (scopes));
-  scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-  token_after_newlines_must_be (TOK_NAME);
-
-  const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
-
-  skip_newlines ();
-
-  jsp_early_error_start_checking_of_vargs ();
-  parse_argument_list (VARG_FUNC_DECL, name, NULL);
-
-  dump_function_end_for_rewrite ();
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-
-  bool was_in_function = inside_function;
-  inside_function = true;
-
-  parse_source_element_list (false, true);
-
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  dump_ret ();
-  rewrite_function_end ();
-
-  inside_function = was_in_function;
-
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
-  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-  STACK_DROP (scopes, 1);
-  serializer_set_scope (STACK_TOP (scopes));
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-  jsp_label_restore_set (masked_label_set_p);
-
-  STACK_CHECK_USAGE (scopes);
-}
-
-/* function_expression
-  : 'function' LT!* Identifier? LT!* '(' formal_parameter_list? LT!* ')' LT!* function_body
-  ; */
-static jsp_operand_t
-parse_function_expression (void)
-{
-  STACK_DECLARE_USAGE (scopes);
-  assert_keyword (KW_FUNCTION);
-
-  jsp_operand_t res;
-
-  jsp_early_error_start_checking_of_vargs ();
-
-  scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-  STACK_PUSH (scopes, scopes_tree_init (NULL, SCOPE_TYPE_FUNCTION));
-  serializer_set_scope (STACK_TOP (scopes));
-  scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-  skip_newlines ();
-
-  jsp_operand_t name = empty_operand ();
-  if (token_is (TOK_NAME))
-  {
-    name = literal_operand (token_data_as_lit_cp ());
-
-    skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, name, NULL);
-  }
-  else
-  {
-    lexer_save_token (tok);
-    skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, empty_operand (), NULL);
-  }
-
-  dump_function_end_for_rewrite ();
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-
-  bool was_in_function = inside_function;
-  inside_function = true;
-
-  jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-  parse_source_element_list (false, true);
-
-  jsp_label_restore_set (masked_label_set_p);
-
-
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  dump_ret ();
-  rewrite_function_end ();
-
-  inside_function = was_in_function;
-
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
-  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-  serializer_set_scope (STACK_HEAD (scopes, 2));
-  serializer_dump_subscope (STACK_TOP (scopes));
-  scopes_tree_free (STACK_TOP (scopes));
-  STACK_DROP (scopes, 1);
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-  STACK_CHECK_USAGE (scopes);
-  return res;
-} /* parse_function_expression */
-
-/* array_literal
-  : '[' LT!* assignment_expression? (LT!* ',' (LT!* assignment_expression)?)* LT!* ']' LT!*
-  ; */
-static jsp_operand_t
-parse_array_literal (void)
-{
-  return parse_argument_list (VARG_ARRAY_DECL, empty_operand (), NULL);
-}
-
-/* object_literal
-  : '{' LT!* property_assignment (LT!* ',' LT!* property_assignment)* LT!* '}'
-  ; */
-static jsp_operand_t
-parse_object_literal (void)
-{
-  return parse_argument_list (VARG_OBJ_DECL, empty_operand (), NULL);
-}
-
-/* literal
-  : 'null'
-  | 'true'
-  | 'false'
-  | number_literal
-  | string_literal
-  | regexp_literal
-  ; */
-static jsp_operand_t
-parse_literal (void)
-{
-  switch (tok.type)
-  {
-    case TOK_NUMBER: return dump_number_assignment_res (token_data_as_lit_cp ());
-    case TOK_STRING: return dump_string_assignment_res (token_data_as_lit_cp ());
-    case TOK_REGEXP: return dump_regexp_assignment_res (token_data_as_lit_cp ());
-    case TOK_NULL: return dump_null_assignment_res ();
-    case TOK_BOOL: return dump_boolean_assignment_res ((bool) token_data ());
-    case TOK_SMALL_INT: return dump_smallint_assignment_res ((vm_idx_t) token_data ());
-    default:
-    {
-      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected literal");
-    }
-  }
-}
-
-/* primary_expression
-  : 'this'
-  | Identifier
-  | literal
-  | 'undefined'
-  | '[' LT!* array_literal LT!* ']'
-  | '{' LT!* object_literal LT!* '}'
-  | '(' LT!* expression LT!* ')'
-  ; */
-static jsp_operand_t
-parse_primary_expression (void)
-{
-  if (is_keyword (KW_THIS))
-  {
-    return dump_this_res ();
-  }
-
-  switch (tok.type)
-  {
-    case TOK_DIV:
-    case TOK_DIV_EQ:
-    {
-      // must be a regexp literal so rescan the token
-      rescan_regexp_token ();
-      /* FALLTHRU */
-    }
-    case TOK_NULL:
-    case TOK_BOOL:
-    case TOK_SMALL_INT:
-    case TOK_NUMBER:
-    case TOK_REGEXP:
-    case TOK_STRING: return parse_literal ();
-    case TOK_NAME:
-    {
-      if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
-      {
-        scopes_tree_set_arguments_used (STACK_TOP (scopes));
-      }
-      if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "eval"))
-      {
-        scopes_tree_set_eval_used (STACK_TOP (scopes));
-      }
-      return literal_operand (token_data_as_lit_cp ());
-    }
-    case TOK_OPEN_SQUARE: return parse_array_literal ();
-    case TOK_OPEN_BRACE: return parse_object_literal ();
-    case TOK_OPEN_PAREN:
-    {
-      skip_newlines ();
-      if (!token_is (TOK_CLOSE_PAREN))
-      {
-        jsp_operand_t res = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-        token_after_newlines_must_be (TOK_CLOSE_PAREN);
-        return res;
-      }
-      /* FALLTHRU */
-    }
-    default:
-    {
-      EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Unknown token %s", lexer_token_type_to_string (tok.type));
-    }
-  }
-}
-
-/* member_expression
-  : (primary_expression | function_expression | 'new' LT!* member_expression (LT!* '(' LT!* arguments? LT!* ')')
-      (LT!* member_expression_suffix)*
-  ;
-
-   arguments
-  : assignment_expression (LT!* ',' LT!* assignment_expression)*)?
-  ;
-
-   member_expression_suffix
-  : index_suffix
-  | property_reference_suffix
-  ;
-
-   index_suffix
-  : '[' LT!* expression LT!* ']'
-  ;
-
-   property_reference_suffix
-  : '.' LT!* Identifier
-  ; */
-static jsp_operand_t
-parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
-{
-  jsp_operand_t expr;
-  if (is_keyword (KW_FUNCTION))
-  {
-    expr = parse_function_expression ();
-  }
-  else if (is_keyword (KW_NEW))
-  {
-    skip_newlines ();
-    expr = parse_member_expression (this_arg, prop_gl);
-
-    skip_newlines ();
-    if (token_is (TOK_OPEN_PAREN))
-    {
-      expr = parse_argument_list (VARG_CONSTRUCT_EXPR, expr, NULL);
-    }
-    else
-    {
-      lexer_save_token (tok);
-      dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, expr);
-      expr = rewrite_varg_header_set_args_count (0);
-    }
-  }
-  else
-  {
-    expr = parse_primary_expression ();
-  }
-
-  skip_newlines ();
-  while (token_is (TOK_OPEN_SQUARE) || token_is (TOK_DOT))
-  {
-    jsp_operand_t prop = empty_operand ();
-
-    if (token_is (TOK_OPEN_SQUARE))
-    {
-      skip_newlines ();
-      prop = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-      next_token_must_be (TOK_CLOSE_SQUARE);
-    }
-    else if (token_is (TOK_DOT))
-    {
-      skip_newlines ();
-      if (token_is (TOK_NAME))
-      {
-        prop = dump_string_assignment_res (token_data_as_lit_cp ());
-      }
-      else if (token_is (TOK_KEYWORD))
-      {
-        const char *s = lexer_keyword_to_string ((keyword) token_data ());
-        literal_t lit = lit_find_or_create_literal_from_utf8_string ((lit_utf8_byte_t *) s,
-                                                                     (lit_utf8_size_t) strlen (s));
-        if (lit == NULL)
-        {
-          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected identifier");
-        }
-        prop = dump_string_assignment_res (lit_cpointer_t::compress (lit));
-      }
-      else if (token_is (TOK_BOOL) || token_is (TOK_NULL))
+      case TOK_NULL:
+      case TOK_BOOL:
       {
         lit_magic_string_id_t id = (token_is (TOK_NULL)
                                     ? LIT_MAGIC_STRING_NULL
                                     : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
         literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
                                                                      lit_get_magic_string_size (id));
-        prop = dump_string_assignment_res (lit_cpointer_t::compress (lit));
-      }
-      else
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected identifier");
-      }
-    }
-    skip_newlines ();
-
-    if (this_arg)
-    {
-      *this_arg = expr;
-    }
-    if (prop_gl)
-    {
-      *prop_gl = prop;
-    }
-    expr = dump_prop_getter_res (expr, prop);
-  }
-
-  lexer_save_token (tok);
-  return expr;
-}
-
-/* call_expression
-  : member_expression LT!* arguments (LT!* call_expression_suffix)*
-  ;
-
-   call_expression_suffix
-  : arguments
-  | index_suffix
-  | property_reference_suffix
-  ;
-
-   arguments
-  : '(' LT!* assignment_expression LT!* (',' LT!* assignment_expression * LT!*)* ')'
-  ; */
-static jsp_operand_t
-parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
-{
-  jsp_operand_t this_arg = empty_operand ();
-  jsp_operand_t expr = parse_member_expression (&this_arg, prop_gl);
-  jsp_operand_t prop;
-
-  skip_newlines ();
-  if (!token_is (TOK_OPEN_PAREN))
-  {
-    lexer_save_token (tok);
-    if (this_arg_gl != NULL)
-    {
-      *this_arg_gl = this_arg;
-    }
-    return expr;
-  }
-
-  expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
-  this_arg = empty_operand ();
-
-  skip_newlines ();
-  while (token_is (TOK_OPEN_PAREN) || token_is (TOK_OPEN_SQUARE)
-         || token_is (TOK_DOT))
-  {
-    if (tok.type == TOK_OPEN_PAREN)
-    {
-      expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
-      skip_newlines ();
-    }
-    else
-    {
-      this_arg = expr;
-      if (tok.type == TOK_OPEN_SQUARE)
-      {
-        skip_newlines ();
-        prop = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-        next_token_must_be (TOK_CLOSE_SQUARE);
-      }
-      else if (tok.type == TOK_DOT)
-      {
-        token_after_newlines_must_be (TOK_NAME);
-        prop = dump_string_assignment_res (token_data_as_lit_cp ());
-      }
-      expr = dump_prop_getter_res (expr, prop);
-      skip_newlines ();
-    }
-  }
-  lexer_save_token (tok);
-  if (this_arg_gl != NULL)
-  {
-    *this_arg_gl = this_arg;
-  }
-  if (prop_gl != NULL)
-  {
-    *prop_gl = prop;
-  }
-  return expr;
-}
-
-/* left_hand_side_expression
-  : call_expression
-  | new_expression
-  ; */
-static jsp_operand_t
-parse_left_hand_side_expression (jsp_operand_t *this_arg, jsp_operand_t *prop)
-{
-  return parse_call_expression (this_arg, prop);
-}
-
-/* postfix_expression
-  : left_hand_side_expression ('++' | '--')?
-  ; */
-static jsp_operand_t
-parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if expression evaluates to object-based
-                                                       *          reference - the reference's base;
-                                                       *        otherwise - empty jsp_operand_t */
-                          jsp_operand_t *out_prop_gl_p) /**< out: if expression evaluates to object-based
-                                                   *          reference - the reference's name;
-                                                   *        otherwise - empty jsp_operand_t */
-{
-  jsp_operand_t this_arg = empty_operand (), prop = empty_operand ();
-  jsp_operand_t expr = parse_left_hand_side_expression (&this_arg, &prop);
-
-  if (lexer_prev_token ().type == TOK_NEWLINE)
-  {
-    return expr;
-  }
-
-  skip_token ();
-  if (token_is (TOK_DOUBLE_PLUS))
-  {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-
-    const jsp_operand_t res = dump_post_increment_res (expr);
-    if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-    {
-      dump_prop_setter (this_arg, prop, expr);
-    }
-    expr = res;
-  }
-  else if (token_is (TOK_DOUBLE_MINUS))
-  {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-
-    const jsp_operand_t res = dump_post_decrement_res (expr);
-    if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-    {
-      dump_prop_setter (this_arg, prop, expr);
-    }
-    expr = res;
-  }
-  else
-  {
-    lexer_save_token (tok);
-  }
-
-  if (out_this_arg_gl_p != NULL)
-  {
-    *out_this_arg_gl_p = this_arg;
-  }
-
-  if (out_prop_gl_p != NULL)
-  {
-    *out_prop_gl_p = prop;
-  }
-
-  return expr;
-} /* parse_postfix_expression */
-
-/* unary_expression
-  : postfix_expression
-  | ('delete' | 'void' | 'typeof' | '++' | '--' | '+' | '-' | '~' | '!') unary_expression
-  ; */
-static jsp_operand_t
-parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
-{
-  jsp_operand_t expr, this_arg = empty_operand (), prop = empty_operand ();
-  switch (tok.type)
-  {
-    case TOK_DOUBLE_PLUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression (&this_arg, &prop);
-      jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-      expr = dump_pre_increment_res (expr);
-      if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-      {
-        dump_prop_setter (this_arg, prop, expr);
-      }
-      break;
-    }
-    case TOK_DOUBLE_MINUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression (&this_arg, &prop);
-      jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-      expr = dump_pre_decrement_res (expr);
-      if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-      {
-        dump_prop_setter (this_arg, prop, expr);
-      }
-      break;
-    }
-    case TOK_PLUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
-      expr = dump_unary_plus_res (expr);
-      break;
-    }
-    case TOK_MINUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
-      expr = dump_unary_minus_res (expr);
-      break;
-    }
-    case TOK_COMPL:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
-      expr = dump_bitwise_not_res (expr);
-      break;
-    }
-    case TOK_NOT:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
-      expr = dump_logical_not_res (expr);
-      break;
-    }
-    case TOK_KEYWORD:
-    {
-      if (is_keyword (KW_DELETE))
-      {
-        scopes_tree_set_contains_delete (STACK_TOP (scopes));
-
-        skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
-        expr = dump_delete_res (expr, is_strict_mode (), tok.loc);
-        break;
-      }
-      else if (is_keyword (KW_VOID))
-      {
-        skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
-        expr = dump_variable_assignment_res (expr);
-        dump_undefined_assignment (expr);
-        break;
-      }
-      else if (is_keyword (KW_TYPEOF))
-      {
-        skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
-        expr = dump_typeof_res (expr);
-        break;
-      }
-      /* FALLTHRU.  */
-    }
-    default:
-    {
-      expr = parse_postfix_expression (&this_arg, &prop);
-    }
-  }
-
-  if (this_arg_gl != NULL)
-  {
-    *this_arg_gl = this_arg;
-  }
-  if (prop_gl != NULL)
-  {
-    *prop_gl = prop;
-  }
-
-  return expr;
-}
-
-static jsp_operand_t
-dump_assignment_of_lhs_if_literal (jsp_operand_t lhs)
-{
-  if (lhs.is_literal_operand ())
-  {
-    lhs = dump_variable_assignment_res (lhs);
-  }
-  return lhs;
-}
-
-/* multiplicative_expression
-  : unary_expression (LT!* ('*' | '/' | '%') LT!* unary_expression)*
-  ; */
-static jsp_operand_t
-parse_multiplicative_expression (void)
-{
-  jsp_operand_t expr = parse_unary_expression (NULL, NULL);
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_MULT:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_multiplication_res (expr, parse_unary_expression (NULL, NULL));
-        break;
-      }
-      case TOK_DIV:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_division_res (expr, parse_unary_expression (NULL, NULL));
-        break;
-      }
-      case TOK_MOD:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_remainder_res (expr, parse_unary_expression (NULL, NULL));
-        break;
+        return literal_operand (lit_cpointer_t::compress (lit));
       }
       default:
       {
-        lexer_save_token (tok);
-        goto done;
+        EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                         "Wrong property name type: %s",
+                         lexer_token_type_to_string (lexer_get_token_type (tok)));
       }
     }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* additive_expression
-  : multiplicative_expression (LT!* ('+' | '-') LT!* multiplicative_expression)*
-  ; */
-static jsp_operand_t
-parse_additive_expression (void)
-{
-  jsp_operand_t expr = parse_multiplicative_expression ();
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_PLUS:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_addition_res (expr, parse_multiplicative_expression ());
-        break;
-      }
-      case TOK_MINUS:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_substraction_res (expr, parse_multiplicative_expression ());
-        break;
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* shift_expression
-  : additive_expression (LT!* ('<<' | '>>' | '>>>') LT!* additive_expression)*
-  ; */
-static jsp_operand_t
-parse_shift_expression (void)
-{
-  jsp_operand_t expr = parse_additive_expression ();
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_LSHIFT:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_left_shift_res (expr, parse_additive_expression ());
-        break;
-      }
-      case TOK_RSHIFT:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_right_shift_res (expr, parse_additive_expression ());
-        break;
-      }
-      case TOK_RSHIFT_EX:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_right_shift_ex_res (expr, parse_additive_expression ());
-        break;
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* relational_expression
-  : shift_expression (LT!* ('<' | '>' | '<=' | '>=' | 'instanceof' | 'in') LT!* shift_expression)*
-  ; */
-static jsp_operand_t
-parse_relational_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_shift_expression ();
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_LESS:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_less_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_GREATER:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_greater_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_LESS_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_less_or_equal_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_GREATER_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_greater_or_equal_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_KEYWORD:
-      {
-        if (is_keyword (KW_INSTANCEOF))
-        {
-          expr = dump_assignment_of_lhs_if_literal (expr);
-          skip_newlines ();
-          expr = dump_instanceof_res (expr, parse_shift_expression ());
-          break;
-        }
-        else if (is_keyword (KW_IN))
-        {
-          if (in_allowed)
-          {
-            expr = dump_assignment_of_lhs_if_literal (expr);
-            skip_newlines ();
-            expr = dump_in_res (expr, parse_shift_expression ());
-            break;
-          }
-        }
-        /* FALLTHROUGH */
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* equality_expression
-  : relational_expression (LT!* ('==' | '!=' | '===' | '!==') LT!* relational_expression)*
-  ; */
-static jsp_operand_t
-parse_equality_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_relational_expression (in_allowed);
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_DOUBLE_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_equal_value_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      case TOK_NOT_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_not_equal_value_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      case TOK_TRIPLE_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_equal_value_type_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      case TOK_NOT_DOUBLE_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_not_equal_value_type_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* bitwise_and_expression
-  : equality_expression (LT!* '&' LT!* equality_expression)*
-  ; */
-static jsp_operand_t
-parse_bitwise_and_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_equality_expression (in_allowed);
-  skip_newlines ();
-  while (true)
-  {
-    if (tok.type == TOK_AND)
-    {
-      expr = dump_assignment_of_lhs_if_literal (expr);
-      skip_newlines ();
-      expr = dump_bitwise_and_res (expr, parse_equality_expression (in_allowed));
-    }
-    else
-    {
-      lexer_save_token (tok);
-      goto done;
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* bitwise_xor_expression
-  : bitwise_and_expression (LT!* '^' LT!* bitwise_and_expression)*
-  ; */
-static jsp_operand_t
-parse_bitwise_xor_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_bitwise_and_expression (in_allowed);
-  skip_newlines ();
-  while (true)
-  {
-    if (tok.type == TOK_XOR)
-    {
-      expr = dump_assignment_of_lhs_if_literal (expr);
-      skip_newlines ();
-      expr = dump_bitwise_xor_res (expr, parse_bitwise_and_expression (in_allowed));
-    }
-    else
-    {
-      lexer_save_token (tok);
-      goto done;
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* bitwise_or_expression
-  : bitwise_xor_expression (LT!* '|' LT!* bitwise_xor_expression)*
-  ; */
-static jsp_operand_t
-parse_bitwise_or_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_bitwise_xor_expression (in_allowed);
-  skip_newlines ();
-  while (true)
-  {
-    if (tok.type == TOK_OR)
-    {
-      expr = dump_assignment_of_lhs_if_literal (expr);
-      skip_newlines ();
-      expr = dump_bitwise_or_res (expr, parse_bitwise_xor_expression (in_allowed));
-    }
-    else
-    {
-      lexer_save_token (tok);
-      goto done;
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
-/* logical_and_expression
-  : bitwise_or_expression (LT!* '&&' LT!* bitwise_or_expression)*
-  ; */
-static jsp_operand_t
-parse_logical_and_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_bitwise_or_expression (in_allowed), tmp;
-  skip_newlines ();
-  if (token_is (TOK_DOUBLE_AND))
-  {
-    tmp = dump_variable_assignment_res (expr);
-    start_dumping_logical_and_checks ();
-    dump_logical_and_check_for_rewrite (tmp);
-  }
-  else
-  {
-    lexer_save_token (tok);
-    return expr;
-  }
-  while (token_is (TOK_DOUBLE_AND))
-  {
-    skip_newlines ();
-    expr = parse_bitwise_or_expression (in_allowed);
-    dump_variable_assignment (tmp, expr);
-    skip_newlines ();
-    if (token_is (TOK_DOUBLE_AND))
-    {
-      dump_logical_and_check_for_rewrite (tmp);
-    }
-  }
-  lexer_save_token (tok);
-  rewrite_logical_and_checks ();
-  return tmp;
-}
-
-/* logical_or_expression
-  : logical_and_expression (LT!* '||' LT!* logical_and_expression)*
-  ; */
-static jsp_operand_t
-parse_logical_or_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_logical_and_expression (in_allowed), tmp;
-  skip_newlines ();
-  if (token_is (TOK_DOUBLE_OR))
-  {
-    tmp = dump_variable_assignment_res (expr);
-    start_dumping_logical_or_checks ();
-    dump_logical_or_check_for_rewrite (tmp);
-  }
-  else
-  {
-    lexer_save_token (tok);
-    return expr;
-  }
-  while (token_is (TOK_DOUBLE_OR))
-  {
-    skip_newlines ();
-    expr = parse_logical_and_expression (in_allowed);
-    dump_variable_assignment (tmp, expr);
-    skip_newlines ();
-    if (token_is (TOK_DOUBLE_OR))
-    {
-      dump_logical_or_check_for_rewrite (tmp);
-    }
-  }
-  lexer_save_token (tok);
-  rewrite_logical_or_checks ();
-  return tmp;
-}
-
-/* conditional_expression
-  : logical_or_expression (LT!* '?' LT!* assignment_expression LT!* ':' LT!* assignment_expression)?
-  ; */
-static jsp_operand_t
-parse_conditional_expression (bool in_allowed, bool *is_conditional)
-{
-  jsp_operand_t expr = parse_logical_or_expression (in_allowed);
-  skip_newlines ();
-  if (token_is (TOK_QUERY))
-  {
-    dump_conditional_check_for_rewrite (expr);
-    skip_newlines ();
-    expr = parse_assignment_expression (in_allowed);
-    jsp_operand_t tmp = dump_variable_assignment_res (expr);
-    token_after_newlines_must_be (TOK_COLON);
-    dump_jump_to_end_for_rewrite ();
-    rewrite_conditional_check ();
-    skip_newlines ();
-    expr = parse_assignment_expression (in_allowed);
-    dump_variable_assignment (tmp, expr);
-    rewrite_jump_to_end ();
-    if (is_conditional != NULL)
-    {
-      *is_conditional = true;
-    }
-    return tmp;
-  }
-  else
-  {
-    lexer_save_token (tok);
-    return expr;
-  }
-}
-
-/* assignment_expression
-  : conditional_expression
-  | left_hand_side_expression LT!* assignment_operator LT!* assignment_expression
-  ; */
-static jsp_operand_t
-parse_assignment_expression (bool in_allowed)
-{
-  bool is_conditional = false;
-  locus loc_expr = tok.loc;
-  jsp_operand_t expr = parse_conditional_expression (in_allowed, &is_conditional);
-  if (is_conditional)
-  {
-    return expr;
-  }
-
-  skip_newlines ();
-
-  token_type tt = tok.type;
-
-  if (tt == TOK_EQ
-      || tt == TOK_MULT_EQ
-      || tt == TOK_DIV_EQ
-      || tt == TOK_MOD_EQ
-      || tt == TOK_PLUS_EQ
-      || tt == TOK_MINUS_EQ
-      || tt == TOK_LSHIFT_EQ
-      || tt == TOK_RSHIFT_EQ
-      || tt == TOK_RSHIFT_EX_EQ
-      || tt == TOK_AND_EQ
-      || tt == TOK_XOR_EQ
-      || tt == TOK_OR_EQ)
-  {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-    skip_newlines ();
-    start_dumping_assignment_expression (expr, loc_expr);
-    const jsp_operand_t assign_expr = parse_assignment_expression (in_allowed);
-
-    if (tt == TOK_EQ)
-    {
-      expr = dump_prop_setter_or_variable_assignment_res (expr, assign_expr);
-    }
-    else if (tt == TOK_MULT_EQ)
-    {
-      expr = dump_prop_setter_or_multiplication_res (expr, assign_expr);
-    }
-    else if (tt == TOK_DIV_EQ)
-    {
-      expr = dump_prop_setter_or_division_res (expr, assign_expr);
-    }
-    else if (tt == TOK_MOD_EQ)
-    {
-      expr = dump_prop_setter_or_remainder_res (expr, assign_expr);
-    }
-    else if (tt == TOK_PLUS_EQ)
-    {
-      expr = dump_prop_setter_or_addition_res (expr, assign_expr);
-    }
-    else if (tt == TOK_MINUS_EQ)
-    {
-      expr = dump_prop_setter_or_substraction_res (expr, assign_expr);
-    }
-    else if (tt == TOK_LSHIFT_EQ)
-    {
-      expr = dump_prop_setter_or_left_shift_res (expr, assign_expr);
-    }
-    else if (tt == TOK_RSHIFT_EQ)
-    {
-      expr = dump_prop_setter_or_right_shift_res (expr, assign_expr);
-    }
-    else if (tt == TOK_RSHIFT_EX_EQ)
-    {
-      expr = dump_prop_setter_or_right_shift_ex_res (expr, assign_expr);
-    }
-    else if (tt == TOK_AND_EQ)
-    {
-      expr = dump_prop_setter_or_bitwise_and_res (expr, assign_expr);
-    }
-    else if (tt == TOK_XOR_EQ)
-    {
-      expr = dump_prop_setter_or_bitwise_xor_res (expr, assign_expr);
-    }
-    else
-    {
-      JERRY_ASSERT (tt == TOK_OR_EQ);
-      expr = dump_prop_setter_or_bitwise_or_res (expr, assign_expr);
-    }
-  }
-  else
-  {
-    lexer_save_token (tok);
-  }
-
-  return expr;
-}
-
-/**
- * Parse an expression
- *
- * expression
- *  : assignment_expression (LT!* ',' LT!* assignment_expression)*
- *  ;
- *
- * @return jsp_operand_t which holds result of expression
- */
-static jsp_operand_t
-parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
-                  jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
-                                                             *   result code store should be dumped */
-{
-  jsp_operand_t expr = parse_assignment_expression (in_allowed);
-
-  while (true)
-  {
-    skip_newlines ();
-    if (token_is (TOK_COMMA))
-    {
-      dump_assignment_of_lhs_if_literal (expr);
-
-      skip_newlines ();
-      expr = parse_assignment_expression (in_allowed);
-    }
-    else
-    {
-      lexer_save_token (tok);
-      break;
-    }
-  }
-
-  if (inside_eval
-      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
-      && !inside_function)
-  {
-    dump_variable_assignment (eval_ret_operand () , expr);
-  }
-
-  return expr;
-} /* parse_expression */
-
-/* variable_declaration
-  : Identifier LT!* initialiser?
-  ;
-   initialiser
-  : '=' LT!* assignment_expression
-  ; */
-static jsp_operand_t
-parse_variable_declaration (void)
-{
-  current_token_must_be (TOK_NAME);
-
-  const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
-  const jsp_operand_t name = literal_operand (lit_cp);
-
-  if (!scopes_tree_variable_declaration_exists (STACK_TOP (scopes), lit_cp))
-  {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
-
-    dump_variable_declaration (lit_cp);
-  }
-
-  skip_newlines ();
-
-  if (token_is (TOK_EQ))
-  {
-    skip_newlines ();
-    const jsp_operand_t expr = parse_assignment_expression (true);
-    dump_variable_assignment (name, expr);
-  }
-  else
-  {
-    lexer_save_token (tok);
-  }
-
-  return name;
-} /* parse_variable_declaration */
-
-/* variable_declaration_list
-  : variable_declaration
-    (LT!* ',' LT!* variable_declaration)*
-  ; */
-static void
-parse_variable_declaration_list (void)
-{
-  JERRY_ASSERT (is_keyword (KW_VAR));
-
-  while (true)
-  {
-    skip_newlines ();
-
-    parse_variable_declaration ();
-
-    skip_newlines ();
-    if (!token_is (TOK_COMMA))
-    {
-      lexer_save_token (tok);
-      break;
-    }
-  }
-}
-
-/**
- * Parse for statement
- *
- * See also:
- *          ECMA-262 v5, 12.6.3
- *
- * Note:
- *      Syntax:
- *               Initializer                      Condition     Increment     Body      LoopEnd
- *       - for ([ExpressionNoIn];                [Expression]; [Expression]) Statement
- *       - for (var VariableDeclarationListNoIn; [Expression]; [Expression]) Statement
- *
- * Note:
- *      Layout of generated byte-code is the following:
- *                        Initializer ([ExpressionNoIn] / VariableDeclarationListNoIn)
- *                        Jump -> ConditionCheck
- *        NextIteration:
- *                        Body (Statement)
- *        ContinueTarget:
- *                        Increment ([Expression])
- *        ConditionCheck:
- *                        Condition ([Expression])
- *                        If Condition is evaluted to true, jump -> NextIteration
- */
-static void
-jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (first) label, corresponding to
-                                                               *   the statement (or NULL, if there are no named
-                                                               *   labels associated with the statement) */
-                         locus for_body_statement_loc) /**< locus of loop body statement */
-{
-  current_token_must_be (TOK_OPEN_PAREN);
-  skip_newlines ();
-
-  // Initializer
-  if (is_keyword (KW_VAR))
-  {
-    parse_variable_declaration_list ();
-    skip_token ();
-  }
-  else if (!token_is (TOK_SEMICOLON))
-  {
-    parse_expression (false, JSP_EVAL_RET_STORE_NOT_DUMP);
-    skip_token ();
-  }
-  else
-  {
-    // Initializer is empty
-  }
-
-  // Jump -> ConditionCheck
-  dump_jump_to_end_for_rewrite ();
-
-  dumper_set_next_interation_target ();
-
-  current_token_must_be (TOK_SEMICOLON);
-  skip_token ();
-
-  // Save Condition locus
-  const locus condition_loc = tok.loc;
-
-  if (!jsp_find_next_token_before_the_locus (TOK_SEMICOLON,
-                                             for_body_statement_loc,
-                                             true))
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid for statement");
-  }
-
-  current_token_must_be (TOK_SEMICOLON);
-  skip_token ();
-
-  // Save Increment locus
-  const locus increment_loc = tok.loc;
-
-  // Body
-  lexer_seek (for_body_statement_loc);
-  skip_newlines ();
-
-  parse_statement (NULL);
-
-  // Save LoopEnd locus
-  const locus loop_end_loc = tok.loc;
-
-  // Setup ContinueTarget
-  jsp_label_setup_continue_target (outermost_stmt_label_p,
-                                   serializer_get_current_instr_counter ());
-
-  // Increment
-  lexer_seek (increment_loc);
-  skip_newlines ();
-
-  if (!token_is (TOK_CLOSE_PAREN))
-  {
-    parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-  }
-
-  current_token_must_be (TOK_CLOSE_PAREN);
-
-  // Setup ConditionCheck
-  rewrite_jump_to_end ();
-
-  // Condition
-  lexer_seek (condition_loc);
-  skip_newlines ();
-
-  if (token_is (TOK_SEMICOLON))
-  {
-    dump_continue_iterations_check (empty_operand ());
-  }
-  else
-  {
-    jsp_operand_t cond = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-    dump_continue_iterations_check (cond);
-  }
-
-  lexer_seek (loop_end_loc);
-  skip_newlines ();
-  if (tok.type != TOK_CLOSE_BRACE)
-  {
-    lexer_save_token (tok);
-  }
-} /* jsp_parse_for_statement */
-
-/**
- * Parse VariableDeclarationNoIn / LeftHandSideExpression (iterator part) of for-in statement
- *
- * See also:
- *          jsp_parse_for_in_statement
- *
- * @return true - if iterator consists of base and property name,
- *         false - otherwise, iterator consists of an identifier name (without base).
- */
-static bool
-jsp_parse_for_in_statement_iterator (jsp_operand_t *base_p, /**< out: base value of member expression, if any,
-                                                       *        empty jsp_operand_t - otherwise */
-                                     jsp_operand_t *identifier_p) /**< out: property name (if base value is not empty),
-                                                             *        identifier - otherwise */
-{
-  JERRY_ASSERT (base_p != NULL);
-  JERRY_ASSERT (identifier_p != NULL);
-
-  if (is_keyword (KW_VAR))
-  {
-    skip_newlines ();
-
-    *base_p = empty_operand ();
-    *identifier_p = parse_variable_declaration ();
-
-    return false;
-  }
-  else
-  {
-    jsp_operand_t base, identifier;
-
-    /*
-     * FIXME:
-     *       Remove evaluation of last part of identifier chain
-     */
-    jsp_operand_t i = parse_left_hand_side_expression (&base, &identifier);
-
-    if (operand_is_empty (base))
-    {
-      *base_p = empty_operand ();
-      *identifier_p = i;
-
-      return false;
-    }
-    else
-    {
-      *base_p = base;
-      *identifier_p = identifier;
-
-      return true;
-    }
-  }
-} /* jsp_parse_for_in_statement_iterator */
-
-/**
- * Parse for-in statement
- *
- * See also:
- *          ECMA-262 v5, 12.6.4
- *
- * Note:
- *      Syntax:
- *                     Iterator                 Collection   Body     LoopEnd
- *       - for (    LeftHandSideExpression  in Expression) Statement
- *       - for (var VariableDeclarationNoIn in Expression) Statement
- *
- * Note:
- *      Layout of generate byte-code is the following:
- *                        tmp <- Collection (Expression)
- *                        for_in instruction (tmp, instruction counter of for-in end mark)
- *                         {
- *                          Assignment of VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME to
- *                          Iterator (VariableDeclarationNoIn / LeftHandSideExpression)
- *                         }
- *                         Body (Statement)
- *        ContinueTarget:
- *                        meta (OPCODE_META_TYPE_END_FOR_IN)
- */
-static void
-jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (first) label,
-                                                                  *   corresponding to the statement
-                                                                  *   (or NULL, if there are no name
-                                                                  *   labels associated with the statement) */
-                            locus for_body_statement_loc) /**< locus of loop body statement */
-{
-  bool is_raised = jsp_label_raise_nested_jumpable_border ();
-
-  current_token_must_be (TOK_OPEN_PAREN);
-  skip_newlines ();
-
-  // Save Iterator location
-  locus iterator_loc = tok.loc;
-
-  while (lit_utf8_iterator_pos_cmp (tok.loc, for_body_statement_loc) < 0)
-  {
-    if (jsp_find_next_token_before_the_locus (TOK_KEYWORD,
-                                              for_body_statement_loc,
-                                              true))
-    {
-      if (is_keyword (KW_IN))
-      {
-        break;
-      }
-      else
-      {
-        skip_token ();
-      }
-    }
-    else
-    {
-      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid for statement");
-    }
-  }
-
-  JERRY_ASSERT (is_keyword (KW_IN));
-  skip_newlines ();
-
-  // Collection
-  jsp_operand_t collection = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-  current_token_must_be (TOK_CLOSE_PAREN);
-  skip_token ();
-
-  // Dump for-in instruction
-  vm_instr_counter_t for_in_oc = dump_for_in_for_rewrite (collection);
-
-  // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
-  lexer_seek (iterator_loc);
-  tok = lexer_next_token (false);
-
-  jsp_operand_t iterator_base, iterator_identifier, for_in_special_reg;
-  for_in_special_reg = jsp_create_operand_for_in_special_reg ();
-
-  if (jsp_parse_for_in_statement_iterator (&iterator_base, &iterator_identifier))
-  {
-    dump_prop_setter (iterator_base, iterator_identifier, for_in_special_reg);
-  }
-  else
-  {
-    JERRY_ASSERT (operand_is_empty (iterator_base));
-    dump_variable_assignment (iterator_identifier, for_in_special_reg);
-  }
-
-  // Body
-  lexer_seek (for_body_statement_loc);
-  tok = lexer_next_token (false);
-
-  parse_statement (NULL);
-
-  // Save LoopEnd locus
-  const locus loop_end_loc = tok.loc;
-
-  // Setup ContinueTarget
-  jsp_label_setup_continue_target (outermost_stmt_label_p,
-                                   serializer_get_current_instr_counter ());
-
-  // Write position of for-in end to for_in instruction
-  rewrite_for_in (for_in_oc);
-
-  // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
-  dump_for_in_end ();
-
-  lexer_seek (loop_end_loc);
-  tok = lexer_next_token (false);
-  if (tok.type != TOK_CLOSE_BRACE)
-  {
-    lexer_save_token (tok);
-  }
-
-  if (is_raised)
-  {
-    jsp_label_remove_nested_jumpable_border ();
-  }
-} /* jsp_parse_for_in_statement */
-
-/**
- * Parse for/for-in statements
- *
- * See also:
- *          ECMA-262 v5, 12.6.3 and 12.6.4
- */
-static void
-jsp_parse_for_or_for_in_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) label,
-                                                                         *   corresponding to the statement
-                                                                         *   (or NULL, if there are no name
-                                                                         *   labels associated with the statement) */
-{
-  assert_keyword (KW_FOR);
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
-
-  locus for_open_paren_loc, for_body_statement_loc;
-
-  for_open_paren_loc = tok.loc;
-
-  jsp_skip_braces (TOK_OPEN_PAREN);
-  skip_newlines ();
-
-  for_body_statement_loc = tok.loc;
-
-  lexer_seek (for_open_paren_loc);
-  tok = lexer_next_token (false);
-
-  bool is_plain_for = jsp_find_next_token_before_the_locus (TOK_SEMICOLON,
-                                                            for_body_statement_loc,
-                                                            true);
-  lexer_seek (for_open_paren_loc);
-  tok = lexer_next_token (false);
-
-  if (is_plain_for)
-  {
-    jsp_parse_for_statement (outermost_stmt_label_p, for_body_statement_loc);
-  }
-  else
-  {
-    jsp_parse_for_in_statement (outermost_stmt_label_p, for_body_statement_loc);
-  }
-} /* jsp_parse_for_or_for_in_statement */
-
-static jsp_operand_t
-parse_expression_inside_parens (void)
-{
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
-  skip_newlines ();
-  const jsp_operand_t res = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-  token_after_newlines_must_be (TOK_CLOSE_PAREN);
-  return res;
-}
-
-/* statement_list
-  : statement (LT!* statement)*
-  ; */
-static void
-parse_statement_list (void)
-{
-  while (true)
-  {
-    parse_statement (NULL);
-
-    skip_newlines ();
-    while (token_is (TOK_SEMICOLON))
-    {
-      skip_newlines ();
-    }
-    if (token_is (TOK_CLOSE_BRACE))
-    {
-      lexer_save_token (tok);
-      break;
-    }
-    if (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
-    {
-      lexer_save_token (tok);
-      break;
-    }
-  }
-}
-
-/* if_statement
-  : 'if' LT!* '(' LT!* expression LT!* ')' LT!* statement (LT!* 'else' LT!* statement)?
-  ; */
-static void
-parse_if_statement (void)
-{
-  assert_keyword (KW_IF);
-
-  const jsp_operand_t cond = parse_expression_inside_parens ();
-  dump_conditional_check_for_rewrite (cond);
-
-  skip_newlines ();
-  parse_statement (NULL);
-
-  skip_newlines ();
-  if (is_keyword (KW_ELSE))
-  {
-    dump_jump_to_end_for_rewrite ();
-    rewrite_conditional_check ();
-
-    skip_newlines ();
-    parse_statement (NULL);
-
-    rewrite_jump_to_end ();
-  }
-  else
-  {
-    lexer_save_token (tok);
-    rewrite_conditional_check ();
-  }
-}
-
-/* do_while_statement
-  : 'do' LT!* statement LT!* 'while' LT!* '(' expression ')' (LT | ';')!
-  ; */
-static void
-parse_do_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) label, corresponding to
-                                                                *   the statement (or NULL, if there are no named
-                                                                *   labels associated with the statement) */
-{
-  assert_keyword (KW_DO);
-
-  dumper_set_next_interation_target ();
-
-  skip_newlines ();
-  parse_statement (NULL);
-
-  jsp_label_setup_continue_target (outermost_stmt_label_p,
-                                   serializer_get_current_instr_counter ());
-
-  token_after_newlines_must_be_keyword (KW_WHILE);
-  const jsp_operand_t cond = parse_expression_inside_parens ();
-  dump_continue_iterations_check (cond);
-}
-
-/* while_statement
-  : 'while' LT!* '(' LT!* expression LT!* ')' LT!* statement
-  ; */
-static void
-parse_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) label, corresponding to
-                                                             *   the statement (or NULL, if there are no named
-                                                             *   labels associated with the statement) */
-{
-  assert_keyword (KW_WHILE);
-
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
-  const locus cond_loc = tok.loc;
-  jsp_skip_braces (TOK_OPEN_PAREN);
-
-  dump_jump_to_end_for_rewrite ();
-
-  dumper_set_next_interation_target ();
-
-  skip_newlines ();
-  parse_statement (NULL);
-
-  jsp_label_setup_continue_target (outermost_stmt_label_p,
-                                   serializer_get_current_instr_counter ());
-
-  rewrite_jump_to_end ();
-
-  const locus end_loc = tok.loc;
-  lexer_seek (cond_loc);
-  const jsp_operand_t cond = parse_expression_inside_parens ();
-  dump_continue_iterations_check (cond);
-
-  lexer_seek (end_loc);
-  skip_token ();
-}
-
-/* with_statement
-  : 'with' LT!* '(' LT!* expression LT!* ')' LT!* statement
-  ; */
-static void
-parse_with_statement (void)
-{
-  assert_keyword (KW_WITH);
-  if (is_strict_mode ())
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
-  }
-  const jsp_operand_t expr = parse_expression_inside_parens ();
-
-  scopes_tree_set_contains_with (STACK_TOP (scopes));
-
-  bool is_raised = jsp_label_raise_nested_jumpable_border ();
-
-  vm_instr_counter_t with_begin_oc = dump_with_for_rewrite (expr);
-  skip_newlines ();
-  parse_statement (NULL);
-  rewrite_with (with_begin_oc);
-  dump_with_end ();
-
-  if (is_raised)
-  {
-    jsp_label_remove_nested_jumpable_border ();
-  }
-}
-
-static void
-skip_case_clause_body (void)
-{
-  while (!is_keyword (KW_CASE)
-         && !is_keyword (KW_DEFAULT)
-         && !token_is (TOK_CLOSE_BRACE))
-  {
-    if (token_is (TOK_OPEN_BRACE))
-    {
-      jsp_skip_braces (TOK_OPEN_BRACE);
-    }
-    skip_newlines ();
-  }
-}
-
-/* switch_statement
-  : 'switch' LT!* '(' LT!* expression LT!* ')' LT!* '{' LT!* case_block LT!* '}'
-  ;
-   case_block
-  : '{' LT!* case_clause* LT!* '}'
-  | '{' LT!* case_clause* LT!* default_clause LT!* case_clause* LT!* '}'
-  ;
-   case_clause
-  : 'case' LT!* expression LT!* ':' LT!* statement*
-  ; */
-static void
-parse_switch_statement (void)
-{
-  assert_keyword (KW_SWITCH);
-
-  const jsp_operand_t switch_expr = dump_assignment_of_lhs_if_literal (parse_expression_inside_parens ());
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-
-  start_dumping_case_clauses ();
-  const locus start_loc = tok.loc;
-  bool was_default = false;
-  size_t default_body_index = 0;
-  array_list body_locs = array_list_init (sizeof (locus));
-
-  // First, generate table of jumps
-  skip_newlines ();
-  while (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
-  {
-    if (is_keyword (KW_CASE))
-    {
-      skip_newlines ();
-      const jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-      next_token_must_be (TOK_COLON);
-      dump_case_clause_check_for_rewrite (switch_expr, case_expr);
-      skip_newlines ();
-      body_locs = array_list_append (body_locs, (void*) &tok.loc);
-      skip_case_clause_body ();
-    }
-    else if (is_keyword (KW_DEFAULT))
-    {
-      if (was_default)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Duplication of 'default' clause");
-      }
-      was_default = true;
-      token_after_newlines_must_be (TOK_COLON);
-      skip_newlines ();
-      default_body_index = array_list_len (body_locs);
-      body_locs = array_list_append (body_locs, (void*) &tok.loc);
-      skip_case_clause_body ();
-    }
-  }
-  current_token_must_be (TOK_CLOSE_BRACE);
-
-  dump_default_clause_check_for_rewrite ();
-
-  lexer_seek (start_loc);
-  next_token_must_be (TOK_OPEN_BRACE);
-
-  jsp_label_t label;
-  jsp_label_push (&label,
-                  JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                  TOKEN_EMPTY_INITIALIZER);
-
-  // Second, parse case clauses' bodies and rewrite jumps
-  skip_newlines ();
-  for (size_t i = 0; i < array_list_len (body_locs); i++)
-  {
-    locus loc = * (locus*) array_list_element (body_locs, i);
-    lexer_seek (loc);
-    skip_newlines ();
-    if (was_default && default_body_index == i)
-    {
-      rewrite_default_clause ();
-      if (is_keyword (KW_CASE))
-      {
-        continue;
-      }
-    }
-    else
-    {
-      rewrite_case_clause ();
-      if (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
-      {
-        continue;
-      }
-    }
-    parse_statement_list ();
-    skip_newlines ();
-  }
-
-  if (!was_default)
-  {
-    rewrite_default_clause ();
-  }
-
-  current_token_must_be (TOK_CLOSE_BRACE);
-
-  jsp_label_rewrite_jumps_and_pop (&label,
-                                   serializer_get_current_instr_counter ());
-
-  finish_dumping_case_clauses ();
-  array_list_free (body_locs);
-}
-
-/* catch_clause
-  : 'catch' LT!* '(' LT!* Identifier LT!* ')' LT!* '{' LT!* statement_list LT!* '}'
-  ; */
-static void
-parse_catch_clause (void)
-{
-  assert_keyword (KW_CATCH);
-
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
-  token_after_newlines_must_be (TOK_NAME);
-  const jsp_operand_t exception = literal_operand (token_data_as_lit_cp ());
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (exception, is_strict_mode (), tok.loc);
-  token_after_newlines_must_be (TOK_CLOSE_PAREN);
-
-  dump_catch_for_rewrite (exception);
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-  parse_statement_list ();
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  rewrite_catch ();
-}
-
-/* finally_clause
-  : 'finally' LT!* '{' LT!* statement_list LT!* '}'
-  ; */
-static void
-parse_finally_clause (void)
-{
-  assert_keyword (KW_FINALLY);
-
-  dump_finally_for_rewrite ();
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-  parse_statement_list ();
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  rewrite_finally ();
-}
-
-/* try_statement
-  : 'try' LT!* '{' LT!* statement_list LT!* '}' LT!* (finally_clause | catch_clause (LT!* finally_clause)?)
-  ; */
-static void
-parse_try_statement (void)
-{
-  assert_keyword (KW_TRY);
-
-  scopes_tree_set_contains_try (STACK_TOP (scopes));
-
-  bool is_raised = jsp_label_raise_nested_jumpable_border ();
-
-  dump_try_for_rewrite ();
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-  parse_statement_list ();
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  rewrite_try ();
-
-  token_after_newlines_must_be (TOK_KEYWORD);
-  if (is_keyword (KW_CATCH))
-  {
-    parse_catch_clause ();
-
-    skip_newlines ();
-    if (is_keyword (KW_FINALLY))
-    {
-      parse_finally_clause ();
-    }
-    else
-    {
-      lexer_save_token (tok);
-    }
-  }
-  else if (is_keyword (KW_FINALLY))
-  {
-    parse_finally_clause ();
-  }
-  else
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either 'catch' or 'finally' token");
-  }
-
-  dump_end_try_catch_finally ();
-
-  if (is_raised)
-  {
-    jsp_label_remove_nested_jumpable_border ();
-  }
-}
-
-static void
-insert_semicolon (void)
-{
-  // We cannot use tok, since we may use lexer_save_token
-  skip_token ();
-
-  bool is_new_line_occured = (token_is (TOK_NEWLINE) || lexer_prev_token ().type == TOK_NEWLINE);
-  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
-
-  if (is_new_line_occured || is_close_brace_or_eof)
-  {
-    lexer_save_token (tok);
-  }
-  else if (!token_is (TOK_SEMICOLON) && !token_is (TOK_EOF))
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
-  }
-}
-
-/**
- * iteration_statement
- *  : do_while_statement
- *  | while_statement
- *  | for_statement
- *  | for_in_statement
- *  ;
- */
-static void
-parse_iterational_statement (jsp_label_t *outermost_named_stmt_label_p) /**< outermost (first) named label,
-                                                                         *   corresponding to the statement
-                                                                         *   (or NULL, if there are no named
-                                                                         *    labels associated with the statement) */
-{
-  jsp_label_t label;
-  jsp_label_push (&label,
-                  (jsp_label_type_flag_t) (JSP_LABEL_TYPE_UNNAMED_BREAKS | JSP_LABEL_TYPE_UNNAMED_CONTINUES),
-                  TOKEN_EMPTY_INITIALIZER);
-
-  jsp_label_t *outermost_stmt_label_p = (outermost_named_stmt_label_p != NULL ? outermost_named_stmt_label_p : &label);
-
-  if (is_keyword (KW_DO))
-  {
-    parse_do_while_statement (outermost_stmt_label_p);
-  }
-  else if (is_keyword (KW_WHILE))
-  {
-    parse_while_statement (outermost_stmt_label_p);
-  }
-  else
-  {
-    JERRY_ASSERT (is_keyword (KW_FOR));
-    jsp_parse_for_or_for_in_statement (outermost_stmt_label_p);
-  }
-
-  jsp_label_rewrite_jumps_and_pop (&label,
-                                   serializer_get_current_instr_counter ());
-} /* parse_iterational_statement */
-
-/* statement
-  : statement_block
-  | variable_statement
-  | empty_statement
-  | if_statement
-  | iteration_statement
-  | continue_statement
-  | break_statement
-  | return_statement
-  | with_statement
-  | labelled_statement
-  | switch_statement
-  | throw_statement
-  | try_statement
-  | expression_statement
-  ;
-
-   statement_block
-  : '{' LT!* statement_list? LT!* '}'
-  ;
-
-   variable_statement
-  : 'var' LT!* variable_declaration_list (LT | ';')!
-  ;
-
-   empty_statement
-  : ';'
-  ;
-
-   expression_statement
-  : expression (LT | ';')!
-  ;
-
-   iteration_statement
-  : do_while_statement
-  | while_statement
-  | for_statement
-  | for_in_statement
-  ;
-
-   continue_statement
-  : 'continue' Identifier? (LT | ';')!
-  ;
-
-   break_statement
-  : 'break' Identifier? (LT | ';')!
-  ;
-
-   return_statement
-  : 'return' expression? (LT | ';')!
-  ;
-
-   switchStatement
-  : 'switch' LT!* '(' LT!* expression LT!* ')' LT!* caseBlock
-  ;
-
-   throw_statement
-  : 'throw' expression (LT | ';')!
-  ;
-
-   try_statement
-  : 'try' LT!* '{' LT!* statement_list LT!* '}' LT!* (finally_clause | catch_clause (LT!* finally_clause)?)
-  ;*/
-static void
-parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) label, corresponding to the statement
-                                                       *   (or NULL, if there are no named labels associated
-                                                       *    with the statement) */
-{
-  dumper_new_statement ();
-
-  if (token_is (TOK_CLOSE_BRACE))
-  {
-    lexer_save_token (tok);
-    return;
-  }
-  if (token_is (TOK_OPEN_BRACE))
-  {
-    skip_newlines ();
-    if (!token_is (TOK_CLOSE_BRACE))
-    {
-      parse_statement_list ();
-      next_token_must_be (TOK_CLOSE_BRACE);
-    }
-    return;
-  }
-  if (is_keyword (KW_VAR))
-  {
-    parse_variable_declaration_list ();
-    if (token_is (TOK_SEMICOLON))
-    {
-      skip_newlines ();
-    }
-    else
-    {
-      insert_semicolon ();
-    }
-    return;
-  }
-  if (is_keyword (KW_FUNCTION))
-  {
-    parse_function_declaration ();
-    return;
-  }
-  if (token_is (TOK_SEMICOLON))
-  {
-    return;
-  }
-  if (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
-  {
-    return;
-  }
-  if (is_keyword (KW_IF))
-  {
-    parse_if_statement ();
-    return;
-  }
-  if (is_keyword (KW_DO)
-      || is_keyword (KW_WHILE)
-      || is_keyword (KW_FOR))
-  {
-    parse_iterational_statement (outermost_stmt_label_p);
-    return;
-  }
-  if (is_keyword (KW_CONTINUE)
-      || is_keyword (KW_BREAK))
-  {
-    bool is_break = is_keyword (KW_BREAK);
-
-    skip_token ();
-
-    jsp_label_t *label_p;
-    bool is_simply_jumpable = true;
-    if (token_is (TOK_NAME))
-    {
-      /* break or continue on a label */
-      label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, tok, &is_simply_jumpable);
-
-      if (label_p == NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label not found");
-      }
-    }
-    else if (is_break)
-    {
-      label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                                TOKEN_EMPTY_INITIALIZER,
-                                &is_simply_jumpable);
-
-      if (label_p == NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the break");
-      }
-    }
-    else
-    {
-      JERRY_ASSERT (!is_break);
-
-      label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_CONTINUES,
-                                TOKEN_EMPTY_INITIALIZER,
-                                &is_simply_jumpable);
-
-      if (label_p == NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the continue");
-      }
-    }
-
-    if (token_is (TOK_CLOSE_BRACE))
-    {
-      lexer_save_token (tok);
-    }
-
-    JERRY_ASSERT (label_p != NULL);
-
-    jsp_label_add_jump (label_p, is_simply_jumpable, is_break);
-
-    return;
-  }
-  if (is_keyword (KW_RETURN))
-  {
-    if (!inside_function)
-    {
-      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Return is illegal");
-    }
-
-    skip_token ();
-    if (!token_is (TOK_SEMICOLON) && !token_is (TOK_NEWLINE) && !token_is (TOK_CLOSE_BRACE))
-    {
-      const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-      dump_retval (op);
-      insert_semicolon ();
-      return;
-    }
-    else
-    {
-      dump_ret ();
-
-      if (token_is (TOK_CLOSE_BRACE))
-      {
-        lexer_save_token (tok);
-      }
-      return;
-    }
-  }
-  if (is_keyword (KW_WITH))
-  {
-    parse_with_statement ();
-    return;
-  }
-  if (is_keyword (KW_SWITCH))
-  {
-    parse_switch_statement ();
-    return;
-  }
-  if (is_keyword (KW_THROW))
-  {
-    skip_token ();
-    const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-    insert_semicolon ();
-    dump_throw (op);
-    return;
-  }
-  if (is_keyword (KW_TRY))
-  {
-    parse_try_statement ();
-    return;
-  }
-  if (token_is (TOK_NAME))
-  {
-    const token temp = tok;
-    skip_newlines ();
-    if (token_is (TOK_COLON))
-    {
-      skip_newlines ();
-
-      jsp_label_t *label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, temp, NULL);
-      if (label_p != NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
-      }
-
-      jsp_label_t label;
-      jsp_label_push (&label, JSP_LABEL_TYPE_NAMED, temp);
-
-      parse_statement (outermost_stmt_label_p != NULL ? outermost_stmt_label_p : &label);
-
-      jsp_label_rewrite_jumps_and_pop (&label,
-                                       serializer_get_current_instr_counter ());
-    }
-    else
-    {
-      lexer_save_token (tok);
-      tok = temp;
-      jsp_operand_t expr = parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-      dump_assignment_of_lhs_if_literal (expr);
-      insert_semicolon ();
-    }
-  }
-  else
-  {
-    parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-    insert_semicolon ();
-  }
-}
-
-/* source_element
-  : function_declaration
-  | statement
-  ; */
-static void
-parse_source_element (void)
-{
-  if (is_keyword (KW_FUNCTION))
-  {
-    parse_function_declaration ();
-  }
-  else
-  {
-    parse_statement (NULL);
   }
 }
 
@@ -2976,7 +467,7 @@ parse_source_element (void)
  * Check for "use strict" in directive prologue
  */
 static void
-check_directive_prologue_for_use_strict ()
+jsp_parse_directive_prologue ()
 {
   const locus start_loc = tok.loc;
 
@@ -2988,93 +479,667 @@ check_directive_prologue_for_use_strict ()
     if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "use strict")
         && lexer_is_no_escape_sequences_in_token_string (tok))
     {
-      scopes_tree_set_strict_mode (STACK_TOP (scopes), true);
-      lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
+      scopes_tree_set_strict_mode (serializer_get_scope (), true);
       break;
     }
 
-    skip_newlines ();
+    skip_token ();
 
     if (token_is (TOK_SEMICOLON))
     {
-      skip_newlines ();
+      skip_token ();
     }
   }
 
-  if (lit_utf8_iterator_pos_cmp (start_loc, tok.loc) != 0)
+  seek_token (start_loc);
+} /* jsp_parse_directive_prologue */
+
+static jsp_operand_t
+jsp_start_parse_function_scope (jsp_operand_t func_name,
+                                bool is_function_expression,
+                                size_t *out_formal_parameters_num_p)
+{
+  scopes_tree parent_scope = serializer_get_scope ();
+  scopes_tree_set_contains_functions (parent_scope);
+
+  scopes_tree func_scope = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
+
+  serializer_set_scope (func_scope);
+  scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
+
+  /* parse formal parameters list */
+  size_t formal_parameters_num = 0;
+
+  current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
+
+  JERRY_ASSERT (func_name.is_empty_operand () || func_name.is_literal_operand ());
+
+  varg_list_type vlt = is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL;
+
+  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (vlt, func_name);
+
+  locus formal_parameters_list_loc = tok.loc;
+
+  while (!token_is (TOK_CLOSE_PAREN))
   {
-    lexer_seek (start_loc);
+    current_token_must_be (TOK_NAME);
+    jsp_operand_t formal_parameter_name = literal_operand (token_data_as_lit_cp ());
+    skip_token ();
+
+    dump_varg (formal_parameter_name);
+
+    formal_parameters_num++;
+
+    if (token_is (TOK_COMMA))
+    {
+      skip_token ();
+    }
+    else
+    {
+      current_token_must_be (TOK_CLOSE_PAREN);
+    }
+  }
+
+  skip_token ();
+
+  const jsp_operand_t func = is_function_expression ? tmp_operand () : empty_operand ();
+
+  rewrite_varg_header_set_args_count (func, formal_parameters_num, varg_header_pos);
+
+  dump_function_end_for_rewrite ();
+
+  current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+
+  jsp_parse_directive_prologue ();
+
+  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
+
+  if (is_strict_mode ())
+  {
+    locus body_loc = tok.loc;
+
+    seek_token (formal_parameters_list_loc);
+
+    /* Check duplication of formal parameters names */
+    while (!token_is (TOK_CLOSE_PAREN))
+    {
+      current_token_must_be (TOK_NAME);
+
+      literal_t current_parameter_name_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
+      locus current_parameter_loc = tok.loc;
+
+      skip_token ();
+
+      if (token_is (TOK_COMMA))
+      {
+        skip_token ();
+      }
+
+      jsp_early_error_emit_error_on_eval_and_arguments (current_parameter_name_lit,
+                                                        current_parameter_loc);
+
+      while (!token_is (TOK_CLOSE_PAREN))
+      {
+        current_token_must_be (TOK_NAME);
+
+        if (lit_utf8_iterator_pos_cmp (tok.loc, current_parameter_loc) != 0)
+        {
+          literal_t iter_parameter_name_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
+
+          if (lit_literal_equal_type (current_parameter_name_lit, iter_parameter_name_lit))
+          {
+            PARSE_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                              "Duplication of literal '%s' in FormalParameterList is not allowed in strict mode",
+                              tok.loc, lit_literal_to_str_internal_buf (iter_parameter_name_lit));
+          }
+        }
+
+        skip_token ();
+
+        if (token_is (TOK_COMMA))
+        {
+          skip_token ();
+        }
+        else
+        {
+          current_token_must_be (TOK_CLOSE_PAREN);
+        }
+      }
+
+      seek_token (current_parameter_loc);
+
+      JERRY_ASSERT (lit_utf8_iterator_pos_cmp (tok.loc, current_parameter_loc) == 0);
+      skip_token ();
+
+      if (token_is (TOK_COMMA))
+      {
+        skip_token ();
+      }
+      else
+      {
+        current_token_must_be (TOK_CLOSE_PAREN);
+      }
+    }
+
+    seek_token (body_loc);
+  }
+
+  if (out_formal_parameters_num_p != NULL)
+  {
+    *out_formal_parameters_num_p = formal_parameters_num;
+  }
+
+  return func;
+}
+
+static vm_instr_counter_t
+jsp_find_function_end (void)
+{
+  scopes_tree scope_tree = serializer_get_scope ();
+  JERRY_ASSERT (scope_tree->type == SCOPE_TYPE_FUNCTION);
+
+  vm_instr_counter_t instr_pos = 0u;
+
+  const vm_instr_counter_t header_oc = instr_pos++;
+  op_meta header_opm = scopes_tree_op_meta (scope_tree, header_oc);
+  JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
+
+  while (true)
+  {
+    op_meta meta_opm = scopes_tree_op_meta (scope_tree, instr_pos);
+    JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+    opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
+
+    if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
+    {
+      break;
+    }
+    else
+    {
+      JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+
+      instr_pos++;
+    }
+  }
+
+  return instr_pos;
+}
+
+static void
+jsp_finish_parse_function_scope (bool is_function_expression)
+{
+  scopes_tree func_scope = serializer_get_scope ();
+  JERRY_ASSERT (func_scope != NULL && func_scope->type == SCOPE_TYPE_FUNCTION);
+
+  scopes_tree parent_scope = (scopes_tree) func_scope->t.parent;
+
+  current_token_must_be_check_and_skip_it (TOK_CLOSE_BRACE);
+
+  dump_ret ();
+
+  vm_instr_counter_t function_end_pos = jsp_find_function_end ();
+
+  rewrite_function_end (function_end_pos);
+
+  serializer_set_scope (parent_scope);
+
+  if (is_function_expression)
+  {
+    serializer_dump_subscope (func_scope);
+    scopes_tree_free (func_scope);
+  }
+}
+
+typedef struct
+{
+  jsp_state_expr_t state; /**< current state */
+  jsp_state_expr_t req_state; /**< required state */
+
+  uint8_t is_completed              : 1; /**< the expression parse completed,
+                                          *   no more tokens can be added to the expression */
+  uint8_t is_list_in_process        : 1; /**< parsing a list, associated with the expression
+                                          *   (details depend on current expression type) */
+  uint8_t is_no_in_mode             : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
+                                          *   put to register, specified by operand, specified in state */
+  uint8_t is_value_based_reference  : 1; /**< flag, indicating whether current state represents evaluated expression
+                                          *   that evaluated to a value-based reference */
+  uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
+  uint8_t var_decl                  : 1; /**< this flag tells that we are parsing VariableStatement, not
+                                            VariableDeclarationList or VariableDeclaration inside
+                                            IterationStatement */
+  uint8_t is_var_decl_no_in       : 1; /**< this flag tells that we are parsing VariableDeclrationNoIn inside
+                                            ForIn iteration statement */
+  uint8_t was_default             : 1; /**< was default branch seen */
+  uint8_t is_default_branch         : 1; /**< marks default branch of switch statement */
+  uint8_t is_simply_jumpable_border : 1; /**< flag, indicating whether simple jump could be performed
+                                          *   from current statement outside of the statement */
+  uint8_t is_dump_eval_ret_store  : 1; /**< expression's result should be stored to eval's return register */
+
+  union u
+  {
+    u (void) { }
+
+    struct expression
+    {
+      union u
+      {
+        struct
+        {
+          uint32_t list_length;
+          vm_instr_counter_t header_pos; /**< position of a varg header instruction */
+          vm_idx_t reg_alloc_saved_state;
+        } varg_sequence;
+        static_assert (sizeof (varg_sequence) == 8, "Please, update size if changed");
+
+        struct
+        {
+          jsp_operand_t prop_name;
+          bool is_setter;
+        } accessor_prop_decl;
+        static_assert (sizeof (accessor_prop_decl) == 6, "Please, update size if changed");
+
+        struct
+        {
+          vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
+        } logical_and;
+        static_assert (sizeof (logical_and) == 2, "Please, update size if changed");
+
+        struct
+        {
+          vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
+        } logical_or;
+        static_assert (sizeof (logical_or) == 2, "Please, update size if changed");
+
+        struct
+        {
+          vm_instr_counter_t conditional_check_pos;
+          vm_instr_counter_t jump_to_end_pos;
+        } conditional;
+        static_assert (sizeof (conditional) == 4, "Please, update size if changed");
+      } u;
+      static_assert (sizeof (u) == 8, "Please, update size if changed");
+
+      jsp_operand_t operand; /**< operand, associated with expression */
+      jsp_operand_t prop_name_operand; /**< operand, describing second part of a value-based reference,
+                                        *   or empty operand (for Identifier references, values, or constants) */
+      jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
+    } expression;
+    static_assert (sizeof (expression) == 20, "Please, update size if changed");
+
+    struct statement
+    {
+      union u
+      {
+        struct iterational
+        {
+          union u
+          {
+            struct loop_for_in
+            {
+              union u
+              {
+                locus iterator_expr_loc;
+                locus body_loc;
+              } u;
+
+              lit_cpointer_t var_name_lit_cp;
+              vm_instr_counter_t header_pos;
+            } loop_for_in;
+            static_assert (sizeof (loop_for_in) == 8, "Please, update size if changed");
+
+            struct loop_while
+            {
+              union u
+              {
+                locus cond_expr_start_loc;
+                locus end_loc;
+              } u;
+
+              vm_instr_counter_t next_iter_tgt_pos;
+              vm_instr_counter_t jump_to_end_pos;
+            } loop_while;
+            static_assert (sizeof (loop_while) == 8, "Please, update size if changed");
+
+            struct loop_do_while
+            {
+              vm_instr_counter_t next_iter_tgt_pos;
+            } loop_do_while;
+            static_assert (sizeof (loop_do_while) == 2, "Please, update size if changed");
+
+            struct loop_for
+            {
+              union u1
+              {
+                locus body_loc;
+                locus condition_expr_loc;
+              } u1;
+
+              union u2
+              {
+                locus increment_expr_loc;
+                locus end_loc;
+              } u2;
+
+              vm_instr_counter_t next_iter_tgt_pos;
+              vm_instr_counter_t jump_to_end_pos;
+            } loop_for;
+            static_assert (sizeof (loop_for) == 12, "Please, update size if changed");
+          } u;
+          static_assert (sizeof (u) == 12, "Please, update size if changed");
+
+          vm_instr_counter_t continues_rewrite_chain;
+          vm_instr_counter_t continue_tgt_oc;
+        } iterational;
+        static_assert (sizeof (iterational) == 16, "Please, update size if changed");
+
+        struct if_statement
+        {
+          vm_instr_counter_t conditional_check_pos;
+          vm_instr_counter_t jump_to_end_pos;
+        } if_statement;
+        static_assert (sizeof (if_statement) == 4, "Please, update size if changed");
+
+        struct switch_statement
+        {
+          locus loc;
+          jsp_operand_t expr;
+
+          vm_instr_counter_t jmp_oc;
+
+          uint16_t case_clause_count;
+        } switch_statement;
+        static_assert (sizeof (switch_statement) == 12, "Please, update size if changed");
+
+        struct with_statement
+        {
+          vm_instr_counter_t header_pos;
+        } with_statement;
+        static_assert (sizeof (with_statement) == 2, "Please, update size if changed");
+
+        struct try_statement
+        {
+          vm_instr_counter_t try_pos;
+          vm_instr_counter_t catch_pos;
+          vm_instr_counter_t finally_pos;
+        } try_statement;
+        static_assert (sizeof (try_statement) == 6, "Please, update size if changed");
+      } u;
+      static_assert (sizeof (u) == 16, "Please, update size if changed");
+
+      vm_instr_counter_t breaks_rewrite_chain;
+    } statement;
+    static_assert (sizeof (statement) == 20, "Please, update size if changed");
+
+    struct named_label
+    {
+      lit_cpointer_t name_cp;
+    } named_label;
+    static_assert (sizeof (named_label) == 2, "Please, update size if changed");
+
+    struct source_elements
+    {
+      vm_instr_counter_t scope_code_flags_oc;
+      vm_instr_counter_t reg_var_decl_oc;
+
+      vm_idx_t saved_reg_next;
+      vm_idx_t saved_reg_max_for_temps;
+    } source_elements;
+    static_assert (sizeof (source_elements) == 6, "Please, update size if changed");
+  } u;
+  static_assert (sizeof (u) == 20, "Please, update size if changed");
+} jsp_state_t;
+
+static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
+
+/* FIXME: change to dynamic */
+#define JSP_STATE_STACK_MAX 256
+jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
+uint32_t jsp_state_stack_pos;
+
+static void
+jsp_stack_init (void)
+{
+  jsp_state_stack_pos = 0;
+} /* jsp_stack_init */
+
+static void
+jsp_state_push (jsp_state_t state)
+{
+  if (jsp_state_stack_pos == JSP_STATE_STACK_MAX)
+  {
+    JERRY_UNREACHABLE ();
   }
   else
   {
-    lexer_save_token (tok);
+    jsp_state_stack[jsp_state_stack_pos++] = state;
   }
-} /* check_directive_prologue_for_use_strict */
+} /* jsp_state_push */
 
-/**
- * Parse source element list
- *
- *  source_element_list
- *   : source_element (LT!* source_element)*
- *   ;
- */
-static void
-parse_source_element_list (bool is_global, /**< flag, indicating that we parsing global context */
-                           bool is_try_replace_local_vars_with_regs) /**< flag, indicating whether
-                                                                      *   to try moving local function
-                                                                      *   variables to registers */
+static jsp_state_t *
+jsp_state_top (void)
 {
-  const token_type end_tt = is_global ? TOK_EOF : TOK_CLOSE_BRACE;
+  JERRY_ASSERT (jsp_state_stack_pos > 0);
 
-  dumper_new_scope ();
+  return &jsp_state_stack[jsp_state_stack_pos - 1u];
+} /* jsp_state_top */
 
-  vm_instr_counter_t scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
+static bool
+jsp_is_stack_contains_exactly_one_element (void)
+{
+  return (jsp_state_stack_pos == 1);
+} /* jsp_is_stack_contains_exactly_one_element */
 
-  check_directive_prologue_for_use_strict ();
+static void
+jsp_state_pop (void)
+{
+  JERRY_ASSERT (jsp_state_stack_pos > 0);
 
-  vm_instr_counter_t reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
+  --jsp_state_stack_pos;
+} /* jsp_state_pop */
 
-  if (inside_eval
-      && !inside_function)
+static void
+jsp_push_new_expr_state (jsp_state_expr_t expr_type,
+                         jsp_state_expr_t req_state,
+                         bool in_allowed)
+{
+  jsp_state_t new_state;
+
+  new_state.state = expr_type;
+  new_state.req_state = req_state;
+  new_state.u.expression.operand = empty_operand ();
+  new_state.u.expression.prop_name_operand = empty_operand ();
+  new_state.u.expression.token_type = TOK_EMPTY;
+
+  new_state.is_completed = false;
+  new_state.is_list_in_process = false;
+  new_state.is_fixed_ret_operand = false;
+  new_state.is_value_based_reference = false;
+  new_state.is_complex_production = false;
+  new_state.var_decl = false;
+  new_state.is_var_decl_no_in = false;
+
+  new_state.is_no_in_mode = !in_allowed;
+
+  jsp_state_push (new_state);
+} /* jsp_push_new_expr_state */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static vm_instr_counter_t
+jsp_start_call_dump (jsp_operand_t obj,
+                     jsp_operand_t prop_name,
+                     bool is_value_based_reference)
+{
+  opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
+
+  jsp_operand_t val;
+
+  if (is_value_based_reference)
   {
-    dump_undefined_assignment (eval_ret_operand ());
+    if (obj.is_identifier_operand ())
+    {
+      obj = dump_get_value_if_ref (obj, empty_operand (), false);
+    }
+
+    val = tmp_operand ();
+    dump_prop_getter (val, obj, prop_name);
+
+    call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
+
+    /*
+     * Presence of explicit 'this' argument implies that this is not Direct call to Eval
+     *
+     * See also:
+     *          ECMA-262 v5, 15.2.2.1
+     */
+  }
+  else if (dumper_is_eval_literal (obj))
+  {
+    call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
+
+    val = obj;
+  }
+  else
+  {
+    /*
+     * Note:
+     *      If function is called through Identifier, then the obj should be an Identifier reference,
+     *      not register variable.
+     *      Otherwise, if function is called immediately, without reference (for example, through anonymous
+     *      function expression), the obj should be a register variable.
+     *
+     * See also:
+     *          vm_helper_call_get_call_flags_and_this_arg
+     */
+    val = obj;
   }
 
-  skip_newlines ();
-  while (!token_is (TOK_EOF) && !token_is (TOK_CLOSE_BRACE))
+  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
+
+  if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
   {
-    parse_source_element ();
-    skip_newlines ();
+    if (call_flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
+    {
+      dump_call_additional_info (call_flags, obj);
+    }
+    else
+    {
+      dump_call_additional_info (call_flags, empty_operand ());
+    }
   }
 
-  if (!token_is (end_tt))
+  return varg_header_pos;
+} /* jsp_start_call_dump */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static jsp_operand_t
+jsp_finish_call_dump (uint32_t args_num,
+                      vm_instr_counter_t header_pos)
+{
+  jsp_operand_t ret = tmp_operand ();
+
+  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
+
+  return ret;
+} /* jsp_finish_call_dump */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static vm_instr_counter_t __attr_unused___
+jsp_start_construct_dump (jsp_operand_t obj,
+                          jsp_operand_t prop_name,
+                          bool is_value_based_reference)
+{
+  return dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR,
+                                       dump_get_value_if_value_based_ref (obj,
+                                                                          prop_name,
+                                                                          is_value_based_reference));
+} /* jsp_start_construct_dump */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static jsp_operand_t __attr_unused___
+jsp_finish_construct_dump (uint32_t args_num,
+                           vm_instr_counter_t header_pos)
+{
+  jsp_operand_t ret = tmp_operand ();
+
+  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
+
+  return ret;
+} /* jsp_finish_construct_dump */
+
+static lit_cpointer_t
+jsp_get_prop_name_after_dot (void)
+{
+  if (token_is (TOK_NAME))
   {
-    PARSE_ERROR (JSP_EARLY_ERROR_SYNTAX, "Unexpected token", tok.loc);
+    return token_data_as_lit_cp ();
   }
-
-  lexer_save_token (tok);
-
-  opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
-
-  scopes_tree fe_scope_tree = STACK_TOP (scopes);
-  if (fe_scope_tree->strict_mode)
+  else if (is_keyword (lexer_get_token_type (tok)))
   {
-    scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
-  }
+    const char *s = lexer_token_type_to_string (lexer_get_token_type (tok));
+    literal_t lit = lit_find_or_create_literal_from_utf8_string ((lit_utf8_byte_t *) s,
+                                                                 (lit_utf8_size_t) strlen (s));
+    if (lit == NULL)
+    {
+      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected identifier");
+    }
 
-  if (!fe_scope_tree->ref_arguments)
-  {
-    scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
+    return lit_cpointer_t::compress (lit);
   }
+  else if (token_is (TOK_BOOL) || token_is (TOK_NULL))
+  {
+    lit_magic_string_id_t id = (token_is (TOK_NULL)
+                                ? LIT_MAGIC_STRING_NULL
+                                : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
+    literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
+                                                                 lit_get_magic_string_size (id));
 
-  if (!fe_scope_tree->ref_eval)
-  {
-    scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
+    return lit_cpointer_t::compress (lit);
   }
+  else
+  {
+    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected identifier");
+  }
+} /* jsp_get_prop_name_after_dot */
 
 #ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
-  if (is_try_replace_local_vars_with_regs
-      && fe_scope_tree->type == SCOPE_TYPE_FUNCTION)
+/**
+ * Try to perform move (allocation) of variables' values on registers
+ *
+ * Note:
+ *      The optimization is only applied to functions
+ *
+ * @return number of instructions removed from function's header
+ */
+static opcode_scope_code_flags_t
+jsp_try_move_vars_to_regs (jsp_state_t *state_p,
+                           opcode_scope_code_flags_t scope_flags)
+{
+  JERRY_ASSERT (state_p->state == JSP_STATE_SOURCE_ELEMENTS);
+
+  scopes_tree fe_scope_tree = serializer_get_scope ();
+
+  /*
+   * We don't try to perform replacement of local variables with registers for global code, eval code.
+   *
+   * For global and eval code the replacement can be connected with side effects,
+   * that currently can only be figured out in runtime. For example, a variable
+   * can be redefined as accessor property of the Global object.
+   */
+  if (fe_scope_tree->type == SCOPE_TYPE_FUNCTION)
   {
     bool may_replace_vars_with_regs = (!fe_scope_tree->ref_eval /* 'eval' can reference variables in a way,
                                                                     * that can't be figured out through static
@@ -3097,7 +1162,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
     if (may_replace_vars_with_regs)
     {
       /* no subscopes, as no function declarations / eval etc. in the scope */
-      JERRY_ASSERT (fe_scope_tree->t.children_num == 0);
+      JERRY_ASSERT (fe_scope_tree->t.children == null_list);
 
       vm_instr_counter_t instr_pos = 0u;
 
@@ -3105,26 +1170,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
       op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, header_oc);
       JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
 
-      vm_instr_counter_t function_end_pos = instr_pos;
-      while (true)
-      {
-        op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, function_end_pos);
-        JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
-
-        opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
-
-        if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
-        {
-          /* marker of function argument list end reached */
-          break;
-        }
-        else
-        {
-          JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
-
-          function_end_pos++;
-        }
-      }
+      vm_instr_counter_t function_end_pos = jsp_find_function_end ();
 
       uint32_t args_num = (uint32_t) (function_end_pos - instr_pos);
 
@@ -3255,22 +1301,3271 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
 
             scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
 
-            reg_var_decl_oc--;
-            scope_code_flags_oc--;
-            dumper_decrement_function_end_pos ();
+            state_p->u.source_elements.scope_code_flags_oc--;
+            state_p->u.source_elements.reg_var_decl_oc--;
           }
         }
       }
     }
   }
-#else /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
-  (void) is_try_replace_local_vars_with_regs;
-#endif /* !CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
-  rewrite_scope_code_flags (scope_code_flags_oc, scope_flags);
-  rewrite_reg_var_decl (reg_var_decl_oc);
-  dumper_finish_scope ();
-} /* parse_source_element_list */
+  return scope_flags;
+}
+#endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
+
+static void
+parse_expression_inside_parens_begin (void)
+{
+  current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
+}
+
+static void
+parse_expression_inside_parens_end (void)
+{
+  current_token_must_be_check_and_skip_it (TOK_CLOSE_PAREN);
+}
+
+static void
+jsp_start_statement_parse (jsp_state_expr_t stat)
+{
+  jsp_state_t new_state;
+
+  new_state.state = stat;
+  new_state.req_state = JSP_STATE_STAT_STATEMENT;
+
+  new_state.u.statement.breaks_rewrite_chain = MAX_OPCODES;
+
+  new_state.is_completed = false;
+  new_state.is_list_in_process = false;
+  new_state.is_no_in_mode = false;
+  new_state.is_fixed_ret_operand = false;
+  new_state.is_complex_production = false;
+  new_state.var_decl = false;
+  new_state.was_default = false;
+  new_state.is_default_branch = false;
+  new_state.is_simply_jumpable_border = false;
+
+  jsp_state_push (new_state);
+} /* jsp_start_statement_parse */
+
+static jsp_state_t *
+jsp_find_unnamed_label (bool is_label_for_break,
+                        bool *out_is_simply_jumpable_p)
+{
+  *out_is_simply_jumpable_p = true;
+
+  uint32_t stack_pos = jsp_state_stack_pos;
+
+  while (stack_pos != 0)
+  {
+    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      break;
+    }
+
+    if (state_p->is_simply_jumpable_border)
+    {
+      *out_is_simply_jumpable_p = false;
+    }
+
+    bool is_iterational_stmt = (state_p->state == JSP_STATE_STAT_WHILE
+                                || state_p->state == JSP_STATE_STAT_DO_WHILE
+                                || state_p->state == JSP_STATE_STAT_FOR_IN
+                                || state_p->state == JSP_STATE_STAT_FOR_IN_EXPR
+                                || state_p->state == JSP_STATE_STAT_FOR_IN_FINISH
+                                || state_p->state == JSP_STATE_STAT_FOR_INCREMENT);
+    bool is_switch_stmt = (state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
+
+    if ((is_switch_stmt && is_label_for_break) || is_iterational_stmt)
+    {
+      return state_p;
+    }
+  }
+
+  return NULL;
+}
+
+static jsp_state_t *
+jsp_find_named_label (lit_cpointer_t name_cp,
+                      bool *out_is_simply_jumpable_p)
+{
+  *out_is_simply_jumpable_p = true;
+
+  uint32_t stack_pos = jsp_state_stack_pos;
+
+  while (stack_pos != 0)
+  {
+    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      break;
+    }
+
+    if (state_p->is_simply_jumpable_border)
+    {
+      *out_is_simply_jumpable_p = false;
+    }
+
+    if (state_p->state == JSP_STATE_STAT_NAMED_LABEL
+        && state_p->u.named_label.name_cp.packed_value == name_cp.packed_value)
+    {
+      while (++stack_pos < jsp_state_stack_pos)
+      {
+        state_p = &jsp_state_stack [stack_pos];
+
+        if (state_p->state != JSP_STATE_STAT_NAMED_LABEL)
+        {
+          break;
+        }
+      }
+
+      JERRY_ASSERT (stack_pos < jsp_state_stack_pos);
+
+      return state_p;
+    }
+  }
+
+  return NULL;
+}
+
+static void
+insert_semicolon (void)
+{
+  bool is_new_line_occured = lexer_is_preceded_by_newlines (tok);
+  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
+
+  if (!is_new_line_occured && !is_close_brace_or_eof)
+  {
+    if (token_is (TOK_SEMICOLON))
+    {
+      skip_token ();
+    }
+    else if (!token_is (TOK_EOF))
+    {
+      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
+    }
+  }
+}
+
+
+#define JSP_COMPLETE_STATEMENT_PARSE() \
+do \
+{ \
+  state_p->state = JSP_STATE_STAT_STATEMENT; \
+  JERRY_ASSERT (!state_p->is_completed); \
+  dumper_new_statement (); \
+} \
+while (0)
+
+#define JSP_PUSH_STATE_AND_STATEMENT_PARSE(s) \
+do \
+{ \
+  state_p->state = (s); \
+  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY); \
+  dumper_new_statement (); \
+} \
+while (0)
+
+/**
+ * Parse source element list
+ */
+static void __attr_noinline___
+jsp_parse_source_element_list (void)
+{
+  jsp_stack_init ();
+
+  jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+  jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+
+  while (true)
+  {
+    bool is_source_elements_list_end = false;
+    bool is_subexpr_end = false, is_subexpr_value_based_reference = false;
+    jsp_operand_t subexpr_operand, subexpr_prop_name_operand = empty_operand ();
+    jsp_state_expr_t subexpr_type;
+
+    jsp_state_t *state_p = jsp_state_top ();
+
+    if (state_p->state == state_p->req_state && state_p->is_completed)
+    {
+      if (jsp_is_stack_contains_exactly_one_element ())
+      {
+        JERRY_ASSERT (state_p->state == JSP_STATE_SOURCE_ELEMENTS);
+
+        jsp_state_pop ();
+
+        return;
+      }
+      else
+      {
+        JERRY_STATIC_ASSERT (JSP_STATE_EXPR__BEGIN == 0);
+        is_subexpr_end = (state_p->state <= JSP_STATE_EXPR__END);
+
+        if (is_subexpr_end)
+        {
+          subexpr_operand = state_p->u.expression.operand;
+          subexpr_type = state_p->state;
+
+          if (state_p->is_value_based_reference)
+          {
+            is_subexpr_value_based_reference = true;
+            subexpr_prop_name_operand = state_p->u.expression.prop_name_operand;
+
+            JERRY_ASSERT (!subexpr_prop_name_operand.is_empty_operand ());
+          }
+        }
+        else if (state_p->req_state == JSP_STATE_SOURCE_ELEMENTS)
+        {
+          is_source_elements_list_end = true;
+        }
+
+        JERRY_ASSERT (state_p->is_completed);
+        jsp_state_pop ();
+
+        state_p = jsp_state_top ();
+      }
+    }
+    else
+    {
+      /*
+       * Any expression production, if parse of the production is not stopped because required
+       * production type was reached, eventually becomes Expression production.
+       *
+       * Because there are no any expression production higher than Expression,
+       * its invalid to reach Expression production type if required production is lower
+       * (i.e. is not Expression production type).
+       */
+      JERRY_ASSERT (!(state_p->state == JSP_STATE_EXPR_EXPRESSION && state_p->req_state != JSP_STATE_EXPR_EXPRESSION));
+    }
+
+    const bool in_allowed = !state_p->is_no_in_mode;
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
+    {
+      scope_type_t scope_type = serializer_get_scope ()->type;
+
+      dumper_new_scope (&state_p->u.source_elements.saved_reg_next,
+                        &state_p->u.source_elements.saved_reg_max_for_temps);
+
+      state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
+      state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
+
+      if (scope_type == SCOPE_TYPE_EVAL)
+      {
+        dump_undefined_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET));
+      }
+
+      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
+    }
+    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      scope_type_t scope_type = serializer_get_scope ()->type;
+
+      jsp_token_type_t end_token_type = (scope_type == SCOPE_TYPE_FUNCTION) ? TOK_CLOSE_BRACE : TOK_EOF;
+
+      if (token_is (end_token_type))
+      {
+        opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
+
+        scopes_tree fe_scope_tree = serializer_get_scope ();
+        if (fe_scope_tree->strict_mode)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
+        }
+
+        if (!fe_scope_tree->ref_arguments)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
+        }
+
+        if (!fe_scope_tree->ref_eval)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
+        }
+
+#ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
+        scope_flags = jsp_try_move_vars_to_regs (state_p, scope_flags);
+#endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
+
+        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
+        rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
+
+        state_p->is_completed = true;
+
+        dumper_finish_scope (state_p->u.source_elements.saved_reg_next,
+                             state_p->u.source_elements.saved_reg_max_for_temps);
+      }
+      else
+      {
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS);
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_EMPTY)
+    {
+      rescan_regexp_token ();
+
+      /* no subexpressions can occur, as expression parse is just started */
+      JERRY_ASSERT (!is_subexpr_end);
+      JERRY_ASSERT (!state_p->is_completed);
+
+      jsp_token_type_t tt = lexer_get_token_type (tok);
+      if ((tt >= TOKEN_TYPE__UNARY_BEGIN
+           && tt <= TOKEN_TYPE__UNARY_END)
+          || tt == TOK_KW_DELETE
+          || tt == TOK_KW_VOID
+          || tt == TOK_KW_TYPEOF)
+      {
+        /* UnaryExpression */
+        state_p->state = JSP_STATE_EXPR_UNARY;
+        state_p->u.expression.token_type = tt;
+
+        if (tt == TOK_KW_DELETE)
+        {
+          scopes_tree_set_contains_delete (serializer_get_scope ());
+        }
+
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
+      }
+      else if (token_is (TOK_KW_FUNCTION))
+      {
+        /* FunctionExpression */
+        state_p->state = JSP_STATE_EXPR_FUNCTION;
+      }
+      else if (token_is (TOK_OPEN_SQUARE))
+      {
+        /* ArrayLiteral */
+        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
+
+        state_p->state = JSP_STATE_EXPR_ARRAY_LITERAL;
+        state_p->is_list_in_process = true;
+        state_p->u.expression.u.varg_sequence.list_length = 0;
+        state_p->u.expression.u.varg_sequence.header_pos = varg_header_pos;
+      }
+      else if (token_is (TOK_OPEN_BRACE))
+      {
+        /* ObjectLiteral */
+        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
+        jsp_early_error_start_checking_of_prop_names ();
+
+        state_p->state = JSP_STATE_EXPR_OBJECT_LITERAL;
+        state_p->is_list_in_process = true;
+        state_p->u.expression.u.varg_sequence.list_length = 0;
+        state_p->u.expression.u.varg_sequence.header_pos = varg_header_pos;
+      }
+      else
+      {
+        /* MemberExpression (PrimaryExpression is immediately promoted to MemberExpression) */
+        state_p->state = JSP_STATE_EXPR_MEMBER;
+
+        switch (lexer_get_token_type (tok))
+        {
+          case TOK_OPEN_PAREN:
+          {
+            state_p->u.expression.token_type = TOK_OPEN_PAREN;
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+            break;
+          }
+          case TOK_KW_THIS:
+          {
+            state_p->u.expression.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
+            break;
+          }
+          case TOK_KW_NEW:
+          {
+            state_p->state = JSP_STATE_EXPR_MEMBER;
+            state_p->u.expression.token_type = TOK_KW_NEW;
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MEMBER, true);
+            break;
+          }
+          case TOK_NAME:
+          {
+            if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
+            {
+              scopes_tree_set_arguments_used (serializer_get_scope ());
+            }
+            if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "eval"))
+            {
+              scopes_tree_set_eval_used (serializer_get_scope ());
+            }
+
+            state_p->u.expression.operand = jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
+
+            break;
+          }
+          case TOK_REGEXP:
+          {
+            state_p->u.expression.operand = tmp_operand ();
+            dump_regexp_assignment (state_p->u.expression.operand, token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_NULL:
+          {
+            state_p->u.expression.operand = tmp_operand ();
+            dump_null_assignment (state_p->u.expression.operand);
+            break;
+          }
+          case TOK_BOOL:
+          {
+            state_p->u.expression.operand = tmp_operand ();
+            dump_boolean_assignment (state_p->u.expression.operand, (bool) token_data ());
+            break;
+          }
+          case TOK_SMALL_INT:
+          {
+            state_p->u.expression.operand = tmp_operand ();
+            dump_smallint_assignment (state_p->u.expression.operand, (vm_idx_t) token_data ());
+            break;
+          }
+          case TOK_NUMBER:
+          {
+            state_p->u.expression.operand = tmp_operand ();
+            dump_number_assignment (state_p->u.expression.operand, token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_STRING:
+          {
+            state_p->u.expression.operand = tmp_operand ();
+            dump_string_assignment (state_p->u.expression.operand, token_data_as_lit_cp ());
+            break;
+          }
+          default:
+          {
+            EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                             "Unknown token %s",
+                             lexer_token_type_to_string (lexer_get_token_type (tok)));
+          }
+        }
+      }
+
+      skip_token ();
+    }
+    else if (state_p->state == JSP_STATE_EXPR_FUNCTION)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+
+      if (is_source_elements_list_end)
+      {
+        jsp_finish_parse_function_scope (true);
+
+        state_p->state = JSP_STATE_EXPR_MEMBER;
+      }
+      else
+      {
+        jsp_operand_t name;
+        if (token_is (TOK_NAME))
+        {
+          name = literal_operand (token_data_as_lit_cp ());
+          skip_token ();
+        }
+        else
+        {
+          name = empty_operand ();
+        }
+
+        state_p->u.expression.operand = jsp_start_parse_function_scope (name, true, NULL);
+
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_DATA_PROP_DECL)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+
+      if (is_subexpr_end)
+      {
+        JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
+
+        jsp_operand_t prop_name = state_p->u.expression.operand;
+        jsp_operand_t value = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                 subexpr_prop_name_operand,
+                                                                 is_subexpr_value_based_reference);
+
+        JERRY_ASSERT (prop_name.is_literal_operand ());
+
+        dump_prop_name_and_value (prop_name, value);
+        jsp_early_error_add_prop_name (prop_name, PROP_DATA);
+
+        state_p->is_completed = true;
+      }
+      else
+      {
+        JERRY_ASSERT (state_p->u.expression.operand.is_empty_operand ());
+        state_p->u.expression.operand = parse_property_name ();
+        skip_token ();
+
+        JERRY_ASSERT (token_is (TOK_COLON));
+        skip_token ();
+
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_ACCESSOR_PROP_DECL)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+
+      if (is_source_elements_list_end)
+      {
+        jsp_finish_parse_function_scope (true);
+
+        jsp_operand_t prop_name = state_p->u.expression.u.accessor_prop_decl.prop_name;
+        jsp_operand_t func = state_p->u.expression.operand;
+        bool is_setter = state_p->u.expression.u.accessor_prop_decl.is_setter;
+
+        if (is_setter)
+        {
+          dump_prop_setter_decl (prop_name, func);
+        }
+        else
+        {
+          dump_prop_getter_decl (prop_name, func);
+        }
+
+        state_p->is_completed = true;
+      }
+      else
+      {
+        bool is_setter;
+
+        current_token_must_be (TOK_NAME);
+
+        lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+
+        skip_token ();
+
+        if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (lit_cp), "get"))
+        {
+          is_setter = false;
+        }
+        else if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (lit_cp), "set"))
+        {
+          is_setter = true;
+        }
+        else
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid property declaration");
+        }
+
+        jsp_operand_t prop_name = parse_property_name ();
+        skip_token ();
+
+        jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
+
+        size_t formal_parameters_num;
+        const jsp_operand_t func = jsp_start_parse_function_scope (empty_operand (), true, &formal_parameters_num);
+
+        size_t req_num_of_formal_parameters = is_setter ? 1 : 0;
+
+        if (req_num_of_formal_parameters != formal_parameters_num)
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid number of formal parameters");
+        }
+
+        JERRY_ASSERT (state_p->u.expression.operand.is_empty_operand ());
+        state_p->u.expression.operand = func;
+
+        state_p->u.expression.u.accessor_prop_decl.prop_name = prop_name;
+        state_p->u.expression.u.accessor_prop_decl.is_setter = is_setter;
+
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_OBJECT_LITERAL)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+      JERRY_ASSERT (state_p->is_list_in_process);
+
+      if (is_subexpr_end)
+      {
+        JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_DATA_PROP_DECL
+                      || subexpr_type == JSP_STATE_EXPR_ACCESSOR_PROP_DECL);
+
+        state_p->u.expression.u.varg_sequence.list_length++;
+
+        dumper_finish_varg_code_sequence (state_p->u.expression.u.varg_sequence.reg_alloc_saved_state);
+
+        if (token_is (TOK_COMMA))
+        {
+          skip_token ();
+        }
+        else
+        {
+          current_token_must_be (TOK_CLOSE_BRACE);
+        }
+      }
+
+      if (token_is (TOK_CLOSE_BRACE))
+      {
+        jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
+
+        skip_token ();
+
+        uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
+        vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
+
+        state_p->u.expression.operand = tmp_operand ();
+
+        rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
+
+        state_p->state = JSP_STATE_EXPR_MEMBER;
+        state_p->is_list_in_process = false;
+      }
+      else
+      {
+        state_p->u.expression.u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+
+        locus start_pos = tok.loc;
+        skip_token ();
+
+        jsp_state_expr_t expr_type;
+        if (token_is (TOK_COLON))
+        {
+          expr_type = JSP_STATE_EXPR_DATA_PROP_DECL;
+        }
+        else
+        {
+          expr_type = JSP_STATE_EXPR_ACCESSOR_PROP_DECL;
+        }
+
+        seek_token (start_pos);
+
+        jsp_push_new_expr_state (expr_type, expr_type, true);
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_ARRAY_LITERAL)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+      JERRY_ASSERT (state_p->is_list_in_process);
+
+      if (is_subexpr_end)
+      {
+        subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                             subexpr_prop_name_operand,
+                                                             is_subexpr_value_based_reference);
+
+        dump_varg (subexpr_operand);
+
+        state_p->u.expression.u.varg_sequence.list_length++;
+
+        dumper_finish_varg_code_sequence (state_p->u.expression.u.varg_sequence.reg_alloc_saved_state);
+
+        if (token_is (TOK_COMMA))
+        {
+          skip_token ();
+        }
+        else
+        {
+          current_token_must_be (TOK_CLOSE_SQUARE);
+        }
+      }
+      else
+      {
+        if (token_is (TOK_CLOSE_SQUARE))
+        {
+          skip_token ();
+
+          uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
+          vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
+
+          state_p->u.expression.operand = tmp_operand ();
+          rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
+
+          state_p->state = JSP_STATE_EXPR_MEMBER;
+          state_p->is_list_in_process = false;
+        }
+        else if (token_is (TOK_COMMA))
+        {
+          while (token_is (TOK_COMMA))
+          {
+            skip_token ();
+
+            vm_idx_t reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+
+            jsp_operand_t reg = tmp_operand ();
+            dump_array_hole_assignment (reg);
+            dump_varg (reg);
+
+            state_p->u.expression.u.varg_sequence.list_length++;
+
+            dumper_finish_varg_code_sequence (reg_alloc_saved_state);
+          }
+        }
+        else
+        {
+          state_p->u.expression.u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_MEMBER)
+    {
+      if (state_p->is_completed)
+      {
+        if (token_is (TOK_OPEN_PAREN))
+        {
+          state_p->state = JSP_STATE_EXPR_CALL;
+          state_p->is_completed = false;
+
+          /* propagate to CallExpression */
+          state_p->state = JSP_STATE_EXPR_CALL;
+        }
+        else
+        {
+          /* propagate to LeftHandSideExpression */
+          state_p->state = JSP_STATE_EXPR_LEFTHANDSIDE;
+          JERRY_ASSERT (state_p->is_completed);
+        }
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          if (state_p->is_list_in_process)
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_NEW);
+            JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
+
+            subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                 subexpr_prop_name_operand,
+                                                                 is_subexpr_value_based_reference);
+            dump_varg (subexpr_operand);
+
+            dumper_finish_varg_code_sequence (state_p->u.expression.u.varg_sequence.reg_alloc_saved_state);
+
+            state_p->u.expression.u.varg_sequence.list_length++;
+
+            if (token_is (TOK_CLOSE_PAREN))
+            {
+              state_p->u.expression.token_type = TOK_EMPTY;
+              state_p->is_list_in_process = false;
+
+              uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
+              vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
+
+              state_p->u.expression.operand = jsp_finish_construct_dump (list_len, header_pos);
+              state_p->u.expression.prop_name_operand = empty_operand ();
+              state_p->is_value_based_reference = false;
+            }
+            else
+            {
+              current_token_must_be (TOK_COMMA);
+
+              jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+
+              state_p->u.expression.u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+            }
+
+            skip_token ();
+          }
+          else if (state_p->u.expression.token_type == TOK_OPEN_PAREN)
+          {
+            JERRY_ASSERT (state_p->u.expression.operand.is_empty_operand ());
+
+            state_p->u.expression.operand = subexpr_operand;
+            state_p->u.expression.prop_name_operand = subexpr_prop_name_operand;
+            state_p->is_value_based_reference = is_subexpr_value_based_reference;
+
+            state_p->u.expression.token_type = TOK_EMPTY;
+
+            current_token_must_be_check_and_skip_it (TOK_CLOSE_PAREN);
+          }
+          else if (state_p->u.expression.token_type == TOK_KW_NEW)
+          {
+            JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_MEMBER);
+            JERRY_ASSERT (state_p->u.expression.operand.is_empty_operand ());
+            JERRY_ASSERT (!subexpr_operand.is_empty_operand ());
+
+            state_p->u.expression.operand = subexpr_operand;
+            state_p->u.expression.prop_name_operand = subexpr_prop_name_operand;
+            state_p->is_value_based_reference = is_subexpr_value_based_reference;
+
+            vm_instr_counter_t header_pos = jsp_start_construct_dump (state_p->u.expression.operand,
+                                                                      state_p->u.expression.prop_name_operand,
+                                                                      state_p->is_value_based_reference);
+
+            bool is_arg_list_implicit = true;
+            bool is_arg_list_empty = true;
+
+            if (token_is (TOK_OPEN_PAREN))
+            {
+              skip_token ();
+
+              is_arg_list_implicit = false;
+
+              if (token_is (TOK_CLOSE_PAREN))
+              {
+                skip_token ();
+              }
+              else
+              {
+                is_arg_list_empty = false;
+              }
+            }
+
+            if (!is_arg_list_implicit && !is_arg_list_empty)
+            {
+              state_p->is_list_in_process = true;
+              state_p->u.expression.u.varg_sequence.list_length = 0;
+              state_p->u.expression.u.varg_sequence.header_pos = header_pos;
+              state_p->u.expression.u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+
+              jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+            }
+            else
+            {
+              state_p->u.expression.token_type = TOK_EMPTY;
+
+              if (is_arg_list_implicit)
+              {
+                state_p->state = JSP_STATE_EXPR_MEMBER;
+                state_p->is_completed = true;
+              }
+
+              state_p->u.expression.operand = jsp_finish_construct_dump (0, header_pos);
+              state_p->u.expression.prop_name_operand = empty_operand ();
+              state_p->is_value_based_reference = false;
+            }
+          }
+          else
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_OPEN_SQUARE);
+            state_p->u.expression.token_type = TOK_EMPTY;
+
+            current_token_must_be_check_and_skip_it (TOK_CLOSE_SQUARE);
+
+            /*
+             * FIXME:
+             *       evaluation order - change to dump_get_value_if_ref
+             */
+            subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                 subexpr_prop_name_operand,
+                                                                 is_subexpr_value_based_reference);
+
+            state_p->u.expression.prop_name_operand = subexpr_operand;
+            state_p->is_value_based_reference = true;
+          }
+        }
+        else if (token_is (TOK_OPEN_SQUARE))
+        {
+          skip_token ();
+
+          state_p->u.expression.token_type = TOK_OPEN_SQUARE;
+
+          jsp_operand_t base = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                  state_p->u.expression.prop_name_operand,
+                                                                  state_p->is_value_based_reference);
+          state_p->u.expression.operand = base;
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+        else if (token_is (TOK_DOT))
+        {
+          skip_token ();
+
+          lit_cpointer_t prop_name = jsp_get_prop_name_after_dot ();
+          skip_token ();
+
+          jsp_operand_t base = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                  state_p->u.expression.prop_name_operand,
+                                                                  state_p->is_value_based_reference);
+
+          state_p->u.expression.operand = base;
+
+          state_p->u.expression.prop_name_operand = tmp_operand ();
+          dump_string_assignment (state_p->u.expression.prop_name_operand, prop_name);
+
+          state_p->is_value_based_reference = true;
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_CALL)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+
+      if (is_subexpr_end)
+      {
+        if (state_p->is_list_in_process)
+        {
+          JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
+
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+          dump_varg (subexpr_operand);
+
+          dumper_finish_varg_code_sequence (state_p->u.expression.u.varg_sequence.reg_alloc_saved_state);
+
+          state_p->u.expression.u.varg_sequence.list_length++;
+
+          if (token_is (TOK_CLOSE_PAREN))
+          {
+            state_p->is_list_in_process = false;
+
+            uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
+            vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
+
+            state_p->u.expression.operand = jsp_finish_call_dump (list_len, header_pos);
+            state_p->u.expression.prop_name_operand = empty_operand ();
+            state_p->is_value_based_reference = false;
+          }
+          else
+          {
+            current_token_must_be (TOK_COMMA);
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+
+            state_p->u.expression.u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+          }
+        }
+        else
+        {
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_OPEN_SQUARE);
+          state_p->u.expression.token_type = TOK_EMPTY;
+
+          current_token_must_be (TOK_CLOSE_SQUARE);
+
+          /*
+           * FIXME:
+           *       evaluation order - change to dump_get_value_if_ref
+           */
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+          state_p->u.expression.prop_name_operand = subexpr_operand;
+          state_p->is_value_based_reference = true;
+        }
+
+        skip_token ();
+      }
+      else
+      {
+        if (token_is (TOK_OPEN_PAREN))
+        {
+          skip_token ();
+
+          vm_instr_counter_t header_pos = jsp_start_call_dump (state_p->u.expression.operand,
+                                                               state_p->u.expression.prop_name_operand,
+                                                               state_p->is_value_based_reference);
+
+          if (token_is (TOK_CLOSE_PAREN))
+          {
+            skip_token ();
+
+            state_p->u.expression.operand = jsp_finish_call_dump (0, header_pos);
+            state_p->u.expression.prop_name_operand = empty_operand ();
+            state_p->is_value_based_reference = false;
+          }
+          else
+          {
+            state_p->is_list_in_process = true;
+            state_p->u.expression.u.varg_sequence.list_length = 0;
+            state_p->u.expression.u.varg_sequence.header_pos = header_pos;
+            state_p->u.expression.u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+          }
+        }
+        else if (token_is (TOK_OPEN_SQUARE))
+        {
+          skip_token ();
+
+          state_p->u.expression.token_type = TOK_OPEN_SQUARE;
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+        else if (token_is (TOK_DOT))
+        {
+          skip_token ();
+
+          lit_cpointer_t prop_name = jsp_get_prop_name_after_dot ();
+          skip_token ();
+
+          jsp_operand_t base = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                      state_p->u.expression.prop_name_operand,
+                                                      state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.operand = base;
+
+          state_p->u.expression.prop_name_operand = tmp_operand ();
+          dump_string_assignment (state_p->u.expression.prop_name_operand, prop_name);
+
+          state_p->is_value_based_reference = true;
+        }
+        else
+        {
+          state_p->state = JSP_STATE_EXPR_LEFTHANDSIDE;
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_LEFTHANDSIDE)
+    {
+      JERRY_ASSERT (state_p->is_completed);
+
+      if (is_subexpr_end)
+      {
+        jsp_token_type_t tt = state_p->u.expression.token_type;
+
+        state_p->state = JSP_STATE_EXPR_ASSIGNMENT;
+        state_p->u.expression.token_type = TOK_EMPTY;
+        state_p->is_completed = true;
+
+        JERRY_ASSERT (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END);
+
+        subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                             subexpr_prop_name_operand,
+                                                             is_subexpr_value_based_reference);
+
+        if (tt == TOK_EQ)
+        {
+          if (state_p->is_value_based_reference)
+          {
+            dump_prop_setter (state_p->u.expression.operand,
+                              state_p->u.expression.prop_name_operand,
+                              subexpr_operand);
+          }
+          else
+          {
+            dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
+          }
+
+          state_p->u.expression.operand = subexpr_operand;
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+        }
+        else
+        {
+          vm_op_t opcode;
+
+          if (tt == TOK_MULT_EQ)
+          {
+            opcode = VM_OP_MULTIPLICATION;
+          }
+          else if (tt == TOK_DIV_EQ)
+          {
+            opcode = VM_OP_DIVISION;
+          }
+          else if (tt == TOK_MOD_EQ)
+          {
+            opcode = VM_OP_REMAINDER;
+          }
+          else if (tt == TOK_PLUS_EQ)
+          {
+            opcode = VM_OP_ADDITION;
+          }
+          else if (tt == TOK_MINUS_EQ)
+          {
+            opcode = VM_OP_SUBSTRACTION;
+          }
+          else if (tt == TOK_LSHIFT_EQ)
+          {
+            opcode = VM_OP_B_SHIFT_LEFT;
+          }
+          else if (tt == TOK_RSHIFT_EQ)
+          {
+            opcode = VM_OP_B_SHIFT_RIGHT;
+          }
+          else if (tt == TOK_RSHIFT_EX_EQ)
+          {
+            opcode = VM_OP_B_SHIFT_URIGHT;
+          }
+          else if (tt == TOK_AND_EQ)
+          {
+            opcode = VM_OP_B_AND;
+          }
+          else if (tt == TOK_XOR_EQ)
+          {
+            opcode = VM_OP_B_XOR;
+          }
+          else
+          {
+            JERRY_ASSERT (tt == TOK_OR_EQ);
+
+            opcode = VM_OP_B_OR;
+          }
+
+          if (state_p->is_value_based_reference)
+          {
+            jsp_operand_t reg = tmp_operand ();
+
+            dump_prop_getter (reg, state_p->u.expression.operand, state_p->u.expression.prop_name_operand);
+
+            dump_binary_op (opcode, reg, reg, subexpr_operand);
+
+            dump_prop_setter (state_p->u.expression.operand,
+                              state_p->u.expression.prop_name_operand,
+                              reg);
+
+            state_p->u.expression.operand = reg;
+            state_p->u.expression.prop_name_operand = empty_operand ();
+            state_p->is_value_based_reference = false;
+          }
+          else
+          {
+            dump_binary_op (opcode, state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+        }
+      }
+      else
+      {
+        JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
+
+        if (token_is (TOK_DOUBLE_PLUS)
+            && !lexer_is_preceded_by_newlines (tok))
+        {
+          const jsp_operand_t reg = tmp_operand ();
+
+          if (state_p->is_value_based_reference)
+          {
+            const jsp_operand_t val = tmp_operand ();
+
+            dump_prop_getter (val, state_p->u.expression.operand, state_p->u.expression.prop_name_operand);
+
+            dump_unary_op (VM_OP_POST_INCR, reg, val);
+
+            dump_prop_setter (state_p->u.expression.operand, state_p->u.expression.prop_name_operand, val);
+
+            state_p->u.expression.operand = reg;
+            state_p->u.expression.prop_name_operand = empty_operand ();
+            state_p->is_value_based_reference = false;
+          }
+          else if (state_p->u.expression.operand.is_identifier_operand ())
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
+                                                                         is_strict_mode (),
+                                                                         tok.loc);
+
+            dump_unary_op (VM_OP_POST_INCR, reg, state_p->u.expression.operand);
+
+            state_p->u.expression.operand = reg;
+          }
+          else
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
+
+          state_p->state = JSP_STATE_EXPR_UNARY;
+          JERRY_ASSERT (state_p->is_completed);
+
+          skip_token ();
+        }
+        else if (token_is (TOK_DOUBLE_MINUS)
+                 && !lexer_is_preceded_by_newlines (tok))
+        {
+          const jsp_operand_t reg = tmp_operand ();
+
+          if (state_p->is_value_based_reference)
+          {
+            const jsp_operand_t val = tmp_operand ();
+
+            dump_prop_getter (val, state_p->u.expression.operand, state_p->u.expression.prop_name_operand);
+
+            dump_unary_op (VM_OP_POST_DECR, reg, val);
+
+            dump_prop_setter (state_p->u.expression.operand, state_p->u.expression.prop_name_operand, val);
+
+            state_p->u.expression.operand = reg;
+            state_p->u.expression.prop_name_operand = empty_operand ();
+            state_p->is_value_based_reference = false;
+          }
+          else if (state_p->u.expression.operand.is_identifier_operand ())
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
+                                                                         is_strict_mode (),
+                                                                         tok.loc);
+
+            dump_unary_op (VM_OP_POST_DECR, reg, state_p->u.expression.operand);
+
+            state_p->u.expression.operand = reg;
+          }
+          else
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
+
+          state_p->state = JSP_STATE_EXPR_UNARY;
+          JERRY_ASSERT (state_p->is_completed);
+
+          skip_token ();
+        }
+        else
+        {
+          jsp_token_type_t tt = lexer_get_token_type (tok);
+
+          if (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END)
+          {
+            if (!state_p->is_value_based_reference)
+            {
+              if (!state_p->u.expression.operand.is_identifier_operand ())
+              {
+                PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+              }
+              else
+              {
+                jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
+                                                                             is_strict_mode (),
+                                                                             tok.loc);
+              }
+            }
+
+            /* skip the assignment operator */
+            skip_token ();
+            state_p->u.expression.token_type = tt;
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+          }
+          else
+          {
+            state_p->state = JSP_STATE_EXPR_UNARY;
+          }
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_UNARY)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to MultiplicativeExpression */
+        state_p->state = JSP_STATE_EXPR_MULTIPLICATIVE;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        JERRY_ASSERT (is_subexpr_end);
+
+        if (state_p->u.expression.token_type == TOK_DOUBLE_PLUS)
+        {
+          jsp_operand_t reg = tmp_operand ();
+
+          if (is_subexpr_value_based_reference)
+          {
+            dump_prop_getter (reg, subexpr_operand, subexpr_prop_name_operand);
+
+            dump_unary_op (VM_OP_PRE_INCR, reg, reg);
+
+            dump_prop_setter (subexpr_operand, subexpr_prop_name_operand, reg);
+          }
+          else if (subexpr_operand.is_identifier_operand ())
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
+
+            dump_unary_op (VM_OP_PRE_INCR, reg, subexpr_operand);
+          }
+          else
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
+
+          state_p->u.expression.operand = reg;
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+        }
+        else if (state_p->u.expression.token_type == TOK_DOUBLE_MINUS)
+        {
+          jsp_operand_t reg = tmp_operand ();
+
+          if (is_subexpr_value_based_reference)
+          {
+            dump_prop_getter (reg, subexpr_operand, subexpr_prop_name_operand);
+
+            dump_unary_op (VM_OP_PRE_DECR, reg, reg);
+
+            dump_prop_setter (subexpr_operand, subexpr_prop_name_operand, reg);
+          }
+          else if (subexpr_operand.is_identifier_operand ())
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
+
+            dump_unary_op (VM_OP_PRE_DECR, reg, subexpr_operand);
+          }
+          else
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
+
+          state_p->u.expression.operand = reg;
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+        }
+        else if (state_p->u.expression.token_type == TOK_PLUS)
+        {
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          state_p->u.expression.operand = tmp_operand ();
+          dump_unary_plus (state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (state_p->u.expression.token_type == TOK_MINUS)
+        {
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          state_p->u.expression.operand = tmp_operand ();
+          dump_unary_minus (state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (state_p->u.expression.token_type == TOK_COMPL)
+        {
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          state_p->u.expression.operand = tmp_operand ();
+          dump_bitwise_not (state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (state_p->u.expression.token_type == TOK_NOT)
+        {
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          state_p->u.expression.operand = tmp_operand ();
+          dump_logical_not (state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (state_p->u.expression.token_type == TOK_KW_DELETE)
+        {
+          state_p->u.expression.operand = tmp_operand ();
+
+          if (!is_subexpr_value_based_reference)
+          {
+            if (subexpr_operand.is_identifier_operand ())
+            {
+              jsp_early_error_check_delete (is_strict_mode (), tok.loc);
+            }
+
+            dump_delete (state_p->u.expression.operand, subexpr_operand);
+          }
+          else
+          {
+            if (subexpr_operand.is_literal_operand ())
+            {
+              jsp_operand_t reg = tmp_operand ();
+
+              dump_string_assignment (reg, subexpr_operand.get_literal ());
+
+              subexpr_operand = reg;
+            }
+
+            dump_delete_prop (state_p->u.expression.operand,
+                              subexpr_operand,
+                              subexpr_prop_name_operand);
+          }
+        }
+        else if (state_p->u.expression.token_type == TOK_KW_VOID)
+        {
+          const jsp_operand_t reg = tmp_operand ();
+
+          if (is_subexpr_value_based_reference)
+          {
+            dump_prop_getter (reg, subexpr_operand, subexpr_prop_name_operand);
+          }
+          else if (subexpr_operand.is_identifier_operand ())
+          {
+            dump_variable_assignment (reg, subexpr_operand);
+          }
+
+          dump_undefined_assignment (reg);
+          state_p->u.expression.operand = reg;
+        }
+        else
+        {
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_TYPEOF);
+
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          state_p->u.expression.operand = tmp_operand ();
+          dump_typeof (state_p->u.expression.operand, subexpr_operand);
+        }
+
+        state_p->u.expression.token_type = TOK_EMPTY;
+        state_p->is_completed = true;
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_MULTIPLICATIVE)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to AdditiveExpression */
+        state_p->state = JSP_STATE_EXPR_ADDITIVE;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          if (state_p->u.expression.token_type == TOK_MULT)
+          {
+            dump_multiplication (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_DIV)
+          {
+            dump_division (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_MOD);
+
+            dump_remainder (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__MULTIPLICATIVE_END)
+        {
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
+
+          skip_token ();
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_ADDITIVE)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to ShiftExpression */
+        state_p->state = JSP_STATE_EXPR_SHIFT;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          if (state_p->u.expression.token_type == TOK_PLUS)
+          {
+            dump_addition (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_MINUS);
+
+            dump_substraction (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__ADDITIVE_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__ADDITIVE_END)
+        {
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
+
+          skip_token ();
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_SHIFT)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to RelationalExpression */
+        state_p->state = JSP_STATE_EXPR_RELATIONAL;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          if (state_p->u.expression.token_type == TOK_LSHIFT)
+          {
+            dump_left_shift (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_RSHIFT)
+          {
+            dump_right_shift (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_RSHIFT_EX);
+
+            dump_right_shift_ex (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__SHIFT_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__SHIFT_END)
+        {
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
+
+          skip_token ();
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_RELATIONAL)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to EqualityExpression */
+        state_p->state = JSP_STATE_EXPR_EQUALITY;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          if (state_p->u.expression.token_type == TOK_LESS)
+          {
+            dump_less_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_GREATER)
+          {
+            dump_greater_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_LESS_EQ)
+          {
+            dump_less_or_equal_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_GREATER_EQ)
+          {
+            dump_greater_or_equal_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_KW_INSTANCEOF)
+          {
+            dump_instanceof (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_IN);
+            JERRY_ASSERT (in_allowed);
+
+            dump_in (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else if ((lexer_get_token_type (tok) >= TOKEN_TYPE__RELATIONAL_BEGIN
+                  && lexer_get_token_type (tok) <= TOKEN_TYPE__RELATIONAL_END)
+                 || lexer_get_token_type (tok) == TOK_KW_INSTANCEOF
+                 || (in_allowed && lexer_get_token_type (tok) == TOK_KW_IN))
+        {
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
+
+          skip_token ();
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_EQUALITY)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to BitwiseAndExpression */
+        state_p->state = JSP_STATE_EXPR_BITWISE_AND;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          if (state_p->u.expression.token_type == TOK_DOUBLE_EQ)
+          {
+            dump_equal_value (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_NOT_EQ)
+          {
+            dump_not_equal_value (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else if (state_p->u.expression.token_type == TOK_TRIPLE_EQ)
+          {
+            dump_equal_value_type (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_NOT_DOUBLE_EQ);
+
+            dump_not_equal_value_type (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+          }
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__EQUALITY_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__EQUALITY_END)
+        {
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
+
+          skip_token ();
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_BITWISE_AND)
+    {
+      /* FIXME: Consider merging BitwiseOR / BitwiseXOR / BitwiseAND productions
+       * into one production with different operators, taking their precedence into account */
+
+      if (state_p->is_completed)
+      {
+        /* propagate to BitwiseXorExpression */
+        state_p->state = JSP_STATE_EXPR_BITWISE_XOR;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_AND);
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+          dump_bitwise_and (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (token_is (TOK_AND))
+        {
+          skip_token ();
+
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = TOK_AND;
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EQUALITY, in_allowed);
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_BITWISE_XOR)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to BitwiseOrExpression */
+        state_p->state = JSP_STATE_EXPR_BITWISE_OR;
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_XOR);
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+          dump_bitwise_xor (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (token_is (TOK_XOR))
+        {
+          skip_token ();
+
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = TOK_XOR;
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_AND, in_allowed);
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_BITWISE_OR)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to LogicalAndExpression */
+        state_p->state = JSP_STATE_EXPR_LOGICAL_AND;
+
+        state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
+
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_OR);
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+          dump_bitwise_or (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
+        }
+        else if (token_is (TOK_OR))
+        {
+          skip_token ();
+
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          state_p->u.expression.token_type = TOK_OR;
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_XOR, in_allowed);
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_LOGICAL_AND)
+    {
+      if (state_p->is_completed)
+      {
+        /* propagate to LogicalOrExpression */
+        state_p->state = JSP_STATE_EXPR_LOGICAL_OR;
+
+        state_p->u.expression.u.logical_or.rewrite_chain = MAX_OPCODES;
+
+        state_p->is_completed = false;
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                             state_p->u.expression.prop_name_operand,
+                                                                             state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_DOUBLE_AND);
+
+          JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
+
+          dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else
+        {
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
+
+          if (token_is (TOK_DOUBLE_AND))
+          {
+            /* ECMA-262 v5, 11.11 (complex LogicalAndExpression) */
+            skip_token ();
+
+            /*
+             * FIXME:
+             *       Consider eliminating COMPLEX_PRODUCTION flag through implementing establishing a general operand
+             *       management for expressions
+             */
+            if (!state_p->is_complex_production)
+            {
+              state_p->is_complex_production = true;
+
+              state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
+
+              JERRY_ASSERT (!state_p->is_fixed_ret_operand);
+
+              jsp_operand_t ret = tmp_operand ();
+
+              state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                                 state_p->u.expression.prop_name_operand,
+                                                                                 state_p->is_value_based_reference);
+              state_p->u.expression.prop_name_operand = empty_operand ();
+              state_p->is_value_based_reference = false;
+
+              dump_variable_assignment (ret, state_p->u.expression.operand);
+
+              state_p->is_fixed_ret_operand = true;
+              state_p->u.expression.operand = ret;
+            }
+
+            JERRY_ASSERT (state_p->is_complex_production);
+
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
+            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_FALSE_JMP_DOWN,
+                                                                       state_p->u.expression.operand,
+                                                                       *rewrite_chain_p);
+
+            state_p->u.expression.token_type = TOK_DOUBLE_AND;
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_OR, in_allowed);
+          }
+          else
+          {
+            /* end of LogicalAndExpression */
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
+
+            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
+
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
+            while (*rewrite_chain_p != MAX_OPCODES)
+            {
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
+            }
+
+            state_p->is_complex_production = false;
+
+            state_p->is_completed = true;
+          }
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_LOGICAL_OR)
+    {
+      if (state_p->is_completed)
+      {
+        /* switching to ConditionalExpression */
+        if (token_is (TOK_QUERY))
+        {
+          state_p->state = JSP_STATE_EXPR_CONDITION;
+          state_p->is_completed = false;
+
+          /* ECMA-262 v5, 11.12 */
+          skip_token ();
+
+          vm_instr_counter_t conditional_check_pos = dump_conditional_check_for_rewrite (state_p->u.expression.operand);
+          state_p->u.expression.u.conditional.conditional_check_pos = conditional_check_pos;
+
+          state_p->u.expression.token_type = TOK_QUERY;
+
+          JERRY_ASSERT (!state_p->is_fixed_ret_operand);
+
+          state_p->is_fixed_ret_operand = true;
+          state_p->u.expression.operand = tmp_operand ();
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+        }
+        else
+        {
+          /* just propagate */
+          state_p->state = JSP_STATE_EXPR_ASSIGNMENT;
+          JERRY_ASSERT (state_p->is_completed);
+        }
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
+
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_DOUBLE_OR);
+
+          JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
+          dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
+
+          state_p->u.expression.token_type = TOK_EMPTY;
+        }
+        else
+        {
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
+
+          if (token_is (TOK_DOUBLE_OR))
+          {
+            /* ECMA-262 v5, 11.11 (complex LogicalOrExpression) */
+            skip_token ();
+
+            /*
+             * FIXME:
+             *       Consider eliminating COMPLEX_PRODUCTION flag through implementing establishing a general operand
+             *       management for expressions
+             */
+            if (!state_p->is_complex_production)
+            {
+              state_p->is_complex_production = true;
+
+              state_p->u.expression.u.logical_or.rewrite_chain = MAX_OPCODES;
+
+              jsp_operand_t ret = tmp_operand ();
+
+              state_p->u.expression.operand = dump_get_value_if_value_based_ref (state_p->u.expression.operand,
+                                                                                 state_p->u.expression.prop_name_operand,
+                                                                                 state_p->is_value_based_reference);
+              state_p->u.expression.prop_name_operand = empty_operand ();
+              state_p->is_value_based_reference = false;
+
+              dump_variable_assignment (ret, state_p->u.expression.operand);
+
+              JERRY_ASSERT (!state_p->is_fixed_ret_operand);
+              state_p->is_fixed_ret_operand = true;
+
+              state_p->u.expression.operand = ret;
+            }
+
+            JERRY_ASSERT (state_p->is_complex_production);
+
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
+            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_TRUE_JMP_DOWN,
+                                                                       state_p->u.expression.operand,
+                                                                       *rewrite_chain_p);
+
+            state_p->u.expression.token_type = TOK_DOUBLE_OR;
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LOGICAL_AND, in_allowed);
+          }
+          else
+          {
+            /* end of LogicalOrExpression */
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
+
+            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
+
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
+            while (*rewrite_chain_p != MAX_OPCODES)
+            {
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
+            }
+
+            state_p->is_complex_production = false;
+
+            state_p->is_completed = true;
+          }
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_ASSIGNMENT)
+    {
+      /* assignment production can't be continued at the point */
+      JERRY_ASSERT (!is_subexpr_end);
+
+      JERRY_ASSERT (state_p->is_completed);
+      JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
+
+      /* 'assignment expression' production can't be continued with an operator,
+       *  so just propagating it to 'expression' production */
+      state_p->is_completed = false;
+      state_p->state = JSP_STATE_EXPR_EXPRESSION;
+    }
+    else if (state_p->state == JSP_STATE_EXPR_CONDITION)
+    {
+      JERRY_ASSERT (!state_p->is_completed);
+      JERRY_ASSERT (is_subexpr_end);
+
+      /* ECMA-262 v5, 11.12 */
+      if (state_p->u.expression.token_type == TOK_QUERY)
+      {
+        current_token_must_be_check_and_skip_it (TOK_COLON);
+
+        JERRY_ASSERT (state_p->is_fixed_ret_operand);
+        JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
+        JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
+
+        subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                             subexpr_prop_name_operand,
+                                                             is_subexpr_value_based_reference);
+
+        dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
+
+        state_p->u.expression.u.conditional.jump_to_end_pos = dump_jump_to_end_for_rewrite ();
+
+        rewrite_conditional_check (state_p->u.expression.u.conditional.conditional_check_pos);
+
+        state_p->u.expression.token_type = TOK_COLON;
+
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+      }
+      else
+      {
+        JERRY_ASSERT (state_p->u.expression.token_type == TOK_COLON);
+
+        JERRY_ASSERT (state_p->is_fixed_ret_operand);
+        JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
+        JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
+
+        subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                             subexpr_prop_name_operand,
+                                                             is_subexpr_value_based_reference);
+
+        dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
+        rewrite_jump_to_end (state_p->u.expression.u.conditional.jump_to_end_pos);
+
+        state_p->u.expression.token_type = TOK_EMPTY;
+        state_p->is_fixed_ret_operand = false;
+
+        state_p->state = JSP_STATE_EXPR_ASSIGNMENT;
+        state_p->is_completed = true;
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_EXPRESSION)
+    {
+      /* ECMA-262 v5, 11.14 */
+      JERRY_ASSERT (state_p->state == JSP_STATE_EXPR_EXPRESSION);
+
+      if (is_subexpr_end)
+      {
+        JERRY_ASSERT (state_p->u.expression.token_type == TOK_COMMA);
+
+        /*
+         * The operand should be already evaluated
+         *
+         * See also:
+         *          11.14, step 2
+         */
+        JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
+
+        if (!subexpr_operand.is_register_operand ())
+        {
+          /* evaluating, if reference */
+          subexpr_operand = dump_get_value_if_ref (subexpr_operand,
+                                                   subexpr_prop_name_operand,
+                                                   is_subexpr_value_based_reference);
+        }
+
+        state_p->u.expression.operand = subexpr_operand;
+        state_p->u.expression.prop_name_operand = empty_operand ();
+        state_p->is_value_based_reference = false;
+      }
+      else
+      {
+        JERRY_ASSERT (!state_p->is_completed);
+
+        if (token_is (TOK_COMMA))
+        {
+          skip_token ();
+
+          JERRY_ASSERT (!token_is (TOK_COMMA));
+
+          state_p->u.expression.token_type = TOK_COMMA;
+
+          /* ECMA-262 v5, 11.14, step 2 */
+          state_p->u.expression.operand = dump_get_value_if_ref (state_p->u.expression.operand,
+                                                                 state_p->u.expression.prop_name_operand,
+                                                                 state_p->is_value_based_reference);
+          state_p->u.expression.prop_name_operand = empty_operand ();
+          state_p->is_value_based_reference = false;
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_EMPTY)
+    {
+      dumper_new_statement ();
+
+      if (token_is (TOK_KW_IF)) /* IfStatement */
+      {
+        skip_token ();
+
+        parse_expression_inside_parens_begin ();
+
+        state_p->state = JSP_STATE_STAT_IF_BRANCH_START;
+
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, in_allowed);
+      }
+      else if (token_is (TOK_OPEN_BRACE))
+      {
+        skip_token ();
+
+        state_p->state = JSP_STATE_STAT_BLOCK;
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+      }
+      else if (token_is (TOK_KW_VAR))
+      {
+        state_p->state = JSP_STATE_STAT_VAR_DECL;
+        state_p->var_decl = true;
+      }
+      else if (token_is (TOK_KW_DO)
+               || token_is (TOK_KW_WHILE)
+               || token_is (TOK_KW_FOR))
+      {
+        state_p->u.statement.u.iterational.continues_rewrite_chain = MAX_OPCODES;
+        state_p->u.statement.u.iterational.continue_tgt_oc = MAX_OPCODES;
+
+        if (token_is (TOK_KW_DO))
+        {
+          state_p->u.statement.u.iterational.u.loop_do_while.next_iter_tgt_pos = dumper_set_next_iteration_target ();
+          skip_token ();
+
+          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_DO_WHILE);
+        }
+        else if (token_is (TOK_KW_WHILE))
+        {
+          skip_token ();
+
+          state_p->u.statement.u.iterational.u.loop_while.u.cond_expr_start_loc = tok.loc;
+          jsp_skip_braces (TOK_OPEN_PAREN);
+
+          state_p->u.statement.u.iterational.u.loop_while.jump_to_end_pos = dump_jump_to_end_for_rewrite ();
+
+          state_p->u.statement.u.iterational.u.loop_while.next_iter_tgt_pos = dumper_set_next_iteration_target ();
+
+          skip_token ();
+
+          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WHILE);
+        }
+        else
+        {
+          current_token_must_be_check_and_skip_it (TOK_KW_FOR);
+
+          current_token_must_be (TOK_OPEN_PAREN);
+
+          locus for_open_paren_loc, for_body_statement_loc;
+
+          for_open_paren_loc = tok.loc;
+
+          jsp_skip_braces (TOK_OPEN_PAREN);
+          skip_token ();
+
+          for_body_statement_loc = tok.loc;
+
+          seek_token (for_open_paren_loc);
+
+          bool is_plain_for = jsp_find_next_token_before_the_locus (TOK_SEMICOLON,
+                                                                    for_body_statement_loc,
+                                                                    true);
+          seek_token (for_open_paren_loc);
+
+          if (is_plain_for)
+          {
+            state_p->u.statement.u.iterational.u.loop_for.u1.body_loc = for_body_statement_loc;
+
+            current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
+
+            // Initializer
+            if (token_is (TOK_KW_VAR))
+            {
+              state_p->state = JSP_STATE_STAT_FOR_INIT_END;
+              jsp_start_statement_parse (JSP_STATE_STAT_VAR_DECL);
+            }
+            else
+            {
+              if (!token_is (TOK_SEMICOLON))
+              {
+                jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, false);
+              }
+              else
+              {
+                // Initializer is empty
+              }
+              state_p->state = JSP_STATE_STAT_FOR_INIT_END;
+            }
+          }
+          else
+          {
+            current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
+
+            // Save Iterator location
+            state_p->u.statement.u.iterational.u.loop_for_in.u.iterator_expr_loc = tok.loc;
+
+            while (lit_utf8_iterator_pos_cmp (tok.loc, for_body_statement_loc) < 0)
+            {
+              if (jsp_find_next_token_before_the_locus (TOK_KW_IN,
+                                                        for_body_statement_loc,
+                                                        true))
+              {
+                break;
+              }
+              else
+              {
+                EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid for statement");
+              }
+            }
+
+            JERRY_ASSERT (token_is (TOK_KW_IN));
+            skip_token ();
+
+            // Collection
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+            state_p->state = JSP_STATE_STAT_FOR_IN;
+          }
+        }
+      }
+      else if (token_is (TOK_NAME))  // LabelledStatement or ExpressionStatement
+      {
+        const token temp = tok;
+        skip_token ();
+        if (token_is (TOK_COLON))
+        {
+          skip_token ();
+
+          lit_cpointer_t name_cp;
+          name_cp.packed_value = temp.uid;
+
+          bool is_simply_jumpable;
+          jsp_state_t *named_label_state_p = jsp_find_named_label (name_cp, &is_simply_jumpable);
+
+          if (named_label_state_p != NULL)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
+          }
+
+          state_p->state = JSP_STATE_STAT_NAMED_LABEL;
+          state_p->u.named_label.name_cp = name_cp;
+
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
+        }
+        else
+        {
+          seek_token (temp.loc);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+
+          state_p->state = JSP_STATE_STAT_EXPRESSION;
+        }
+      }
+      else if (token_is (TOK_KW_SWITCH))
+      {
+        skip_token ();
+
+        parse_expression_inside_parens_begin ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        state_p->state = JSP_STATE_STAT_SWITCH;
+      }
+      else if (token_is (TOK_SEMICOLON))
+      {
+        skip_token ();
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
+      else if (token_is (TOK_KW_CONTINUE)
+               || token_is (TOK_KW_BREAK))
+      {
+        bool is_break = token_is (TOK_KW_BREAK);
+
+        skip_token ();
+
+        jsp_state_t *labelled_stmt_p;
+        bool is_simply_jumpable = true;
+
+        if (!lexer_is_preceded_by_newlines (tok) && token_is (TOK_NAME))
+        {
+          /* break or continue on a label */
+          labelled_stmt_p = jsp_find_named_label (token_data_as_lit_cp (), &is_simply_jumpable);
+
+          if (labelled_stmt_p == NULL)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label not found");
+          }
+
+          skip_token ();
+        }
+        else
+        {
+          labelled_stmt_p = jsp_find_unnamed_label (is_break, &is_simply_jumpable);
+
+          if (labelled_stmt_p == NULL)
+          {
+            if (is_break)
+            {
+              EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the break");
+            }
+            else
+            {
+              EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the continue");
+            }
+          }
+        }
+
+        insert_semicolon ();
+
+        JERRY_ASSERT (labelled_stmt_p != NULL);
+
+        vm_instr_counter_t *rewrite_chain_p;
+        if (is_break)
+        {
+          rewrite_chain_p = &labelled_stmt_p->u.statement.breaks_rewrite_chain;
+        }
+        else
+        {
+          rewrite_chain_p = &labelled_stmt_p->u.statement.u.iterational.continues_rewrite_chain;
+        }
+
+        vm_op_t jmp_opcode = is_simply_jumpable ? VM_OP_JMP_DOWN : VM_OP_JMP_BREAK_CONTINUE;
+        *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, empty_operand (), *rewrite_chain_p);
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
+      else if (token_is (TOK_KW_RETURN))
+      {
+        if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Return is illegal");
+        }
+
+        skip_token ();
+
+        if (!token_is (TOK_SEMICOLON)
+            && !lexer_is_preceded_by_newlines (tok)
+            && !token_is (TOK_CLOSE_BRACE))
+        {
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+          state_p->state = JSP_STATE_STAT_RETURN;
+        }
+        else
+        {
+          dump_ret ();
+          JSP_COMPLETE_STATEMENT_PARSE ();
+        }
+      }
+      else if (token_is (TOK_KW_TRY))
+      {
+        skip_token ();
+
+        scopes_tree_set_contains_try (serializer_get_scope ());
+
+        state_p->u.statement.u.try_statement.try_pos = dump_try_for_rewrite ();
+
+        current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+
+        state_p->is_simply_jumpable_border = true;
+
+        state_p->state = JSP_STATE_STAT_TRY;
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+      }
+      else if (token_is (TOK_KW_WITH))
+      {
+        skip_token ();
+
+        if (is_strict_mode ())
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
+        }
+
+        parse_expression_inside_parens_begin();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        state_p->state = JSP_STATE_STAT_WITH;
+      }
+      else if (token_is (TOK_KW_THROW))
+      {
+        skip_token ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        state_p->state = JSP_STATE_STAT_THROW;
+      }
+      else if (token_is (TOK_KW_FUNCTION))
+      {
+        skip_token ();
+
+        current_token_must_be (TOK_NAME);
+
+        const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
+        skip_token ();
+
+        jsp_start_parse_function_scope (func_name, false, NULL);
+
+        state_p->state = JSP_STATE_FUNC_DECL_FINISH;
+
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+      }
+      else
+      {
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+
+        state_p->state = JSP_STATE_STAT_EXPRESSION;
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_BLOCK)
+    {
+      current_token_must_be_check_and_skip_it (TOK_CLOSE_BRACE);
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_IF_BRANCH_START)
+    {
+      if (is_subexpr_end) // Finished parsing condition
+      {
+        parse_expression_inside_parens_end ();
+
+        jsp_operand_t cond = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                subexpr_prop_name_operand,
+                                                                is_subexpr_value_based_reference);
+        state_p->u.statement.u.if_statement.conditional_check_pos = dump_conditional_check_for_rewrite (cond);
+
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_IF_BRANCH_START);
+      }
+      else
+      {
+        if (token_is (TOK_KW_ELSE))
+        {
+          skip_token ();
+
+          state_p->u.statement.u.if_statement.jump_to_end_pos = dump_jump_to_end_for_rewrite ();
+          rewrite_conditional_check (state_p->u.statement.u.if_statement.conditional_check_pos);
+
+          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_IF_BRANCH_END);
+        }
+        else
+        {
+          rewrite_conditional_check (state_p->u.statement.u.if_statement.conditional_check_pos);
+
+          JSP_COMPLETE_STATEMENT_PARSE ();
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_IF_BRANCH_END)
+    {
+      rewrite_jump_to_end (state_p->u.statement.u.if_statement.jump_to_end_pos);
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_STATEMENT_LIST)
+    {
+      while (token_is (TOK_SEMICOLON))
+      {
+        skip_token ();
+      }
+
+      if (token_is (TOK_CLOSE_BRACE)
+          || (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT)))
+      {
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
+      else
+      {
+        jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_VAR_DECL)
+    {
+      skip_token ();
+
+      locus name_loc = tok.loc;
+
+      current_token_must_be (TOK_NAME);
+
+      const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+      const jsp_operand_t name = literal_operand (lit_cp);
+
+      skip_token ();
+
+      jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
+
+      if (!scopes_tree_variable_declaration_exists (serializer_get_scope (), lit_cp))
+      {
+        dump_variable_declaration (lit_cp);
+      }
+
+      if (token_is (TOK_EQ))
+      {
+        seek_token (name_loc);
+
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+      }
+
+      state_p->state = JSP_STATE_STAT_VAR_DECL_FINISH;
+    }
+    else if (state_p->state == JSP_STATE_STAT_VAR_DECL_FINISH)
+    {
+      if (!token_is (TOK_COMMA))
+      {
+        JSP_COMPLETE_STATEMENT_PARSE ();
+
+        if (state_p->var_decl)
+        {
+          insert_semicolon ();
+        }
+      }
+      else
+      {
+        state_p->state = JSP_STATE_STAT_VAR_DECL;
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_DO_WHILE)
+    {
+      if (is_subexpr_end)
+      {
+        parse_expression_inside_parens_end ();
+
+        const jsp_operand_t cond = subexpr_operand;
+        dump_continue_iterations_check (state_p->u.statement.u.iterational.u.loop_do_while.next_iter_tgt_pos, cond);
+
+        state_p->state = JSP_STATE_STAT_ITER_FINISH;
+      }
+      else
+      {
+        assert_keyword (TOK_KW_WHILE);
+        skip_token ();
+
+        JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
+        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+
+        parse_expression_inside_parens_begin ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_WHILE)
+    {
+      if (is_subexpr_end)
+      {
+        parse_expression_inside_parens_end ();
+
+        const jsp_operand_t cond = subexpr_operand;
+        dump_continue_iterations_check (state_p->u.statement.u.iterational.u.loop_while.next_iter_tgt_pos, cond);
+
+        seek_token (state_p->u.statement.u.iterational.u.loop_while.u.end_loc);
+
+        state_p->state = JSP_STATE_STAT_ITER_FINISH;
+      }
+      else
+      {
+        JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
+        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+
+        rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_while.jump_to_end_pos);
+
+        const locus end_loc = tok.loc;
+
+        seek_token (state_p->u.statement.u.iterational.u.loop_while.u.cond_expr_start_loc);
+
+        state_p->u.statement.u.iterational.u.loop_while.u.end_loc = end_loc;
+
+        parse_expression_inside_parens_begin ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_INIT_END)
+    {
+      // Jump -> ConditionCheck
+      state_p->u.statement.u.iterational.u.loop_for.jump_to_end_pos = dump_jump_to_end_for_rewrite ();
+
+      state_p->u.statement.u.iterational.u.loop_for.next_iter_tgt_pos = dumper_set_next_iteration_target ();
+
+      current_token_must_be_check_and_skip_it (TOK_SEMICOLON);
+
+      locus for_body_statement_loc = state_p->u.statement.u.iterational.u.loop_for.u1.body_loc;
+
+      // Save Condition locus
+      state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc = tok.loc;
+
+      if (!jsp_find_next_token_before_the_locus (TOK_SEMICOLON,
+                                                 for_body_statement_loc,
+                                                 true))
+      {
+        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid for statement");
+      }
+
+      current_token_must_be_check_and_skip_it (TOK_SEMICOLON);
+
+      // Save Increment locus
+      state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc = tok.loc;
+
+      // Body
+      seek_token (for_body_statement_loc);
+
+      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_INCREMENT);
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_INCREMENT)
+    {
+      if (is_subexpr_end)
+      {
+        state_p->state = JSP_STATE_STAT_FOR_COND;
+      }
+      else
+      {
+        // Save LoopEnd locus
+        const locus loop_end_loc = tok.loc;
+
+        // Setup ContinueTarget
+        JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
+        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+
+        // Increment
+        seek_token (state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc);
+
+        state_p->u.statement.u.iterational.u.loop_for.u2.end_loc = loop_end_loc;
+
+        if (!token_is (TOK_CLOSE_PAREN))
+        {
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+        else
+        {
+          state_p->state = JSP_STATE_STAT_FOR_COND;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_COND)
+    {
+      if (is_subexpr_end)
+      {
+          jsp_operand_t cond = subexpr_operand;
+          dump_continue_iterations_check (state_p->u.statement.u.iterational.u.loop_for.next_iter_tgt_pos, cond);
+
+          state_p->state = JSP_STATE_STAT_FOR_FINISH;
+      }
+      else
+      {
+        current_token_must_be (TOK_CLOSE_PAREN);
+
+        // Setup ConditionCheck
+        rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_for.jump_to_end_pos);
+
+        // Condition
+        seek_token (state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc);
+
+        if (token_is (TOK_SEMICOLON))
+        {
+          dump_continue_iterations_check (state_p->u.statement.u.iterational.u.loop_for.next_iter_tgt_pos, empty_operand ());
+          state_p->state = JSP_STATE_STAT_FOR_FINISH;
+        }
+        else
+        {
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_FINISH)
+    {
+      seek_token (state_p->u.statement.u.iterational.u.loop_for.u2.end_loc);
+
+      state_p->state = JSP_STATE_STAT_ITER_FINISH;
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_IN)
+    {
+      current_token_must_be_check_and_skip_it (TOK_CLOSE_PAREN);
+
+      locus body_loc = tok.loc;
+
+      // Dump for-in instruction
+      jsp_operand_t collection = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                    subexpr_prop_name_operand,
+                                                                    is_subexpr_value_based_reference);
+      state_p->u.statement.u.iterational.u.loop_for_in.header_pos = dump_for_in_for_rewrite (collection);
+
+      // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
+      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.u.iterator_expr_loc);
+
+      if (token_is (TOK_KW_VAR))
+      {
+        skip_token ();
+
+        locus name_loc = tok.loc;
+
+        current_token_must_be (TOK_NAME);
+
+        const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+        const jsp_operand_t name = literal_operand (lit_cp);
+
+        skip_token ();
+
+        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
+
+        if (!scopes_tree_variable_declaration_exists (serializer_get_scope (), lit_cp))
+        {
+          dump_variable_declaration (lit_cp);
+        }
+
+        if (token_is (TOK_EQ))
+        {
+          seek_token (name_loc);
+
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, false);
+        }
+        state_p->is_var_decl_no_in = true;
+        state_p->u.statement.u.iterational.u.loop_for_in.var_name_lit_cp = lit_cp;
+      }
+      else
+      {
+        state_p->is_var_decl_no_in = false;
+        state_p->u.statement.u.iterational.u.loop_for_in.var_name_lit_cp = NOT_A_LITERAL;
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LEFTHANDSIDE, true);
+      }
+
+      // Body
+      state_p->u.statement.u.iterational.u.loop_for_in.u.body_loc = body_loc;
+
+      state_p->state = JSP_STATE_STAT_FOR_IN_EXPR;
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_IN_EXPR)
+    {
+      current_token_must_be (TOK_KW_IN);
+
+      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.u.body_loc);
+
+      jsp_operand_t for_in_special_reg = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME);
+
+      if (!state_p->is_var_decl_no_in)
+      {
+        JERRY_ASSERT (is_subexpr_end);
+
+        if (is_subexpr_value_based_reference)
+        {
+          dump_prop_setter (subexpr_operand, subexpr_prop_name_operand, for_in_special_reg);
+        }
+        else
+        {
+          dump_variable_assignment (subexpr_operand, for_in_special_reg);
+        }
+      }
+      else
+      {
+        lit_cpointer_t var_name_lit_cp = state_p->u.statement.u.iterational.u.loop_for_in.var_name_lit_cp;
+
+        dump_variable_assignment (jsp_operand_t::make_identifier_operand (var_name_lit_cp), for_in_special_reg);
+      }
+
+      state_p->is_simply_jumpable_border = true;
+
+      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_IN_FINISH)
+    {
+      // Save LoopEnd locus
+      const locus loop_end_loc = tok.loc;
+
+      // Setup ContinueTarget
+      JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
+      state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+
+      // Write position of for-in end to for_in instruction
+      rewrite_for_in (state_p->u.statement.u.iterational.u.loop_for_in.header_pos);
+
+      // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
+      dump_for_in_end ();
+
+      seek_token (loop_end_loc);
+
+      state_p->state = JSP_STATE_STAT_ITER_FINISH;
+    }
+    else if (state_p->state == JSP_STATE_STAT_ITER_FINISH)
+    {
+      JSP_COMPLETE_STATEMENT_PARSE ();
+
+      vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.u.iterational.continues_rewrite_chain;
+      vm_instr_counter_t continue_tgt_oc = state_p->u.statement.u.iterational.continue_tgt_oc;
+
+      while (*rewrite_chain_p != MAX_OPCODES)
+      {
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                       continue_tgt_oc);
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_SWITCH)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      parse_expression_inside_parens_end ();
+      jsp_operand_t switch_expr = dump_get_value_if_ref (subexpr_operand,
+                                                         subexpr_prop_name_operand,
+                                                         is_subexpr_value_based_reference);
+
+      locus start_loc = tok.loc;
+
+      current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+
+      // First, generate table of jumps
+      start_dumping_case_clauses ();
+
+      state_p->state = JSP_STATE_STAT_SWITCH_FINISH;
+      jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH_EXPR);
+      jsp_state_top()->u.statement.u.switch_statement.case_clause_count = 0;
+      jsp_state_top()->u.statement.u.switch_statement.loc = start_loc;
+      jsp_state_top()->u.statement.u.switch_statement.jmp_oc = MAX_OPCODES;
+      jsp_state_top()->u.statement.u.switch_statement.expr = switch_expr;
+    }
+    else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH_EXPR)
+    {
+      if (is_subexpr_end)
+      {
+        jsp_operand_t case_expr = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                     subexpr_prop_name_operand,
+                                                                     is_subexpr_value_based_reference);
+
+        current_token_must_be (TOK_COLON);
+
+        jsp_operand_t switch_expr = state_p->u.statement.u.switch_statement.expr;
+
+        const jsp_operand_t cond = tmp_operand ();
+        dump_equal_value_type (cond, switch_expr, case_expr);
+
+        vm_instr_counter_t jmp_oc = dump_case_clause_check_for_rewrite (cond);
+        skip_token ();
+
+        jsp_state_t tmp_state = *state_p;
+        jsp_state_pop ();
+        jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
+        jsp_state_top ()->u.statement.u.switch_statement.loc = tok.loc;
+        jsp_state_top ()->u.statement.u.switch_statement.jmp_oc = jmp_oc;
+        jsp_state_push (tmp_state);
+        state_p = jsp_state_top ();
+
+        skip_case_clause_body ();
+      }
+
+      if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
+      {
+        state_p->u.statement.u.switch_statement.case_clause_count++;
+
+        if (token_is (TOK_KW_CASE))
+        {
+          skip_token ();
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+        else if (token_is (TOK_KW_DEFAULT))
+        {
+          if (state_p->was_default)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Duplication of 'default' clause");
+          }
+          state_p->was_default = true;
+
+          skip_token ();
+
+          current_token_must_be_check_and_skip_it (TOK_COLON);
+
+          jsp_state_t tmp_state = *state_p;
+          jsp_state_pop ();
+          jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
+          jsp_state_top ()->u.statement.u.switch_statement.loc = tok.loc;
+          jsp_state_top ()->u.statement.u.switch_statement.jmp_oc = MAX_OPCODES;
+          jsp_state_top ()->is_default_branch = true;
+          jsp_state_push (tmp_state);
+          state_p = jsp_state_top ();
+
+          skip_case_clause_body ();
+        }
+      }
+      else
+      {
+        current_token_must_be (TOK_CLOSE_BRACE);
+
+        vm_instr_counter_t jmp_oc = dump_default_clause_check_for_rewrite ();
+
+        /**
+         * Reorder switch branches here, so that they are processed in reverse stack push order
+         */
+        uint16_t case_clause_count = state_p->u.statement.u.switch_statement.case_clause_count;
+        locus start_loc = state_p->u.statement.u.switch_statement.loc;
+        bool was_default = state_p->was_default;
+        jsp_state_pop ();
+
+        JERRY_ASSERT (jsp_state_stack_pos >= case_clause_count);
+        for (uint16_t i = 0; i < case_clause_count / 2; ++i)
+        {
+          jsp_state_t *tmp_state1_p = &jsp_state_stack [jsp_state_stack_pos - case_clause_count + i];
+          JERRY_ASSERT (tmp_state1_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
+
+          jsp_state_t *tmp_state2_p = &jsp_state_stack [jsp_state_stack_pos - 1 - i];
+          JERRY_ASSERT (tmp_state2_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
+
+          locus loc = tmp_state1_p->u.statement.u.switch_statement.loc;
+          tmp_state1_p->u.statement.u.switch_statement.loc = tmp_state2_p->u.statement.u.switch_statement.loc;
+          tmp_state2_p->u.statement.u.switch_statement.loc = loc;
+
+          bool is_default_branch = tmp_state1_p->is_default_branch;
+          tmp_state1_p->is_default_branch = tmp_state2_p->is_default_branch;
+          tmp_state2_p->is_default_branch = is_default_branch;
+
+          vm_instr_counter_t jmp_oc_tmp = tmp_state1_p->u.statement.u.switch_statement.jmp_oc;
+          tmp_state1_p->u.statement.u.switch_statement.jmp_oc = tmp_state2_p->u.statement.u.switch_statement.jmp_oc;
+          tmp_state2_p->u.statement.u.switch_statement.jmp_oc = jmp_oc_tmp;
+        }
+
+        for (uint16_t i = 0; i < case_clause_count; i++)
+        {
+          if (jsp_state_stack [jsp_state_stack_pos - case_clause_count + i].is_default_branch)
+          {
+            JERRY_ASSERT (jsp_state_stack [jsp_state_stack_pos - case_clause_count + i].u.statement.u.switch_statement.jmp_oc == MAX_OPCODES);
+            jsp_state_stack [jsp_state_stack_pos - case_clause_count + i].u.statement.u.switch_statement.jmp_oc = jmp_oc;
+          }
+        }
+
+        /**
+         * Mark final state if default branch was seen
+         */
+        jsp_state_t *tmp_state_p = &jsp_state_stack [jsp_state_stack_pos - case_clause_count - 1];
+        JERRY_ASSERT (tmp_state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
+        tmp_state_p->was_default = was_default;
+
+        if (!was_default)
+        {
+          tmp_state_p->u.statement.u.switch_statement.jmp_oc = jmp_oc;
+        }
+
+        seek_token (start_loc);
+
+        // Second, parse case clauses' bodies and rewrite jumps
+        current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH)
+    {
+      seek_token (state_p->u.statement.u.switch_statement.loc);
+
+      if (state_p->is_default_branch)
+      {
+        rewrite_default_clause (state_p->u.statement.u.switch_statement.jmp_oc);
+
+        if (token_is (TOK_KW_CASE))
+        {
+          JSP_COMPLETE_STATEMENT_PARSE ();
+          continue;
+        }
+      }
+      else
+      {
+        rewrite_case_clause (state_p->u.statement.u.switch_statement.jmp_oc);
+        if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
+        {
+          JSP_COMPLETE_STATEMENT_PARSE ();
+          continue;
+        }
+      }
+
+      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_STATEMENT_LIST);
+    }
+    else if (state_p->state == JSP_STATE_STAT_SWITCH_FINISH)
+    {
+      if (!state_p->was_default)
+      {
+        rewrite_default_clause (state_p->u.statement.u.switch_statement.jmp_oc);
+      }
+
+      current_token_must_be_check_and_skip_it (TOK_CLOSE_BRACE);
+
+      finish_dumping_case_clauses ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_TRY)
+    {
+      rewrite_try (state_p->u.statement.u.try_statement.try_pos);
+
+      if (!token_is (TOK_KW_CATCH)
+          && !token_is (TOK_KW_FINALLY))
+      {
+        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either 'catch' or 'finally' token");
+      }
+
+      if (token_is (TOK_KW_CATCH))
+      {
+        skip_token ();
+
+        current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
+
+        current_token_must_be (TOK_NAME);
+
+        const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
+        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
+
+        skip_token ();
+
+        current_token_must_be_check_and_skip_it (TOK_CLOSE_PAREN);
+
+        state_p->u.statement.u.try_statement.catch_pos = dump_catch_for_rewrite (name);
+
+        current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+
+        state_p->state = JSP_STATE_STAT_CATCH_FINISH;
+
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+      }
+      else
+      {
+        JERRY_ASSERT (token_is (TOK_KW_FINALLY));
+        skip_token ();
+
+        state_p->u.statement.u.try_statement.finally_pos = dump_finally_for_rewrite ();
+
+        current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+
+        state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_CATCH_FINISH)
+    {
+      rewrite_catch (state_p->u.statement.u.try_statement.catch_pos);
+
+      if (token_is (TOK_KW_FINALLY))
+      {
+        skip_token ();
+        state_p->u.statement.u.try_statement.finally_pos = dump_finally_for_rewrite ();
+
+        current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
+
+        state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+      }
+      else
+      {
+        state_p->state = JSP_STATE_STAT_TRY_FINISH;
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    {
+      rewrite_finally (state_p->u.statement.u.try_statement.finally_pos);
+
+      state_p->state = JSP_STATE_STAT_TRY_FINISH;
+    }
+    else if (state_p->state == JSP_STATE_STAT_TRY_FINISH)
+    {
+      dump_end_try_catch_finally ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_WITH)
+    {
+      if (is_subexpr_end)
+      {
+        parse_expression_inside_parens_end();
+        const jsp_operand_t expr = subexpr_operand;
+
+        scopes_tree_set_contains_with (serializer_get_scope ());
+
+        state_p->is_simply_jumpable_border = true;
+
+        state_p->u.statement.u.with_statement.header_pos = dump_with_for_rewrite (expr);
+
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WITH);
+      }
+      else
+      {
+        rewrite_with (state_p->u.statement.u.with_statement.header_pos);
+        dump_with_end ();
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
+    }
+    else if (state_p->state == JSP_STATE_FUNC_DECL_FINISH)
+    {
+      jsp_finish_parse_function_scope (false);
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_NAMED_LABEL)
+    {
+      jsp_state_pop ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_EXPRESSION)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+      insert_semicolon ();
+
+      jsp_operand_t expr = dump_get_value_if_ref (subexpr_operand,
+                                                  subexpr_prop_name_operand,
+                                                  is_subexpr_value_based_reference);
+
+      if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL)
+      {
+        dump_variable_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET),
+                                  expr);
+      }
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_RETURN)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      const jsp_operand_t op = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                  subexpr_prop_name_operand,
+                                                                  is_subexpr_value_based_reference);
+      dump_retval (op);
+
+      insert_semicolon ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_THROW)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      const jsp_operand_t op = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                  subexpr_prop_name_operand,
+                                                                  is_subexpr_value_based_reference);
+      dump_throw (op);
+
+      insert_semicolon ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else
+    {
+      JERRY_ASSERT (state_p->state == JSP_STATE_STAT_STATEMENT);
+      JERRY_ASSERT (!state_p->is_completed);
+
+      vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.breaks_rewrite_chain;
+      vm_instr_counter_t break_tgt_oc = serializer_get_current_instr_counter ();
+
+      while (*rewrite_chain_p != MAX_OPCODES)
+      {
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, break_tgt_oc);
+      }
+
+      state_p->is_completed = true;
+    }
+  }
+} /* jsp_parse_source_element_list */
+
+static void
+skip_case_clause_body (void)
+{
+  while (!token_is (TOK_KW_CASE)
+         && !token_is (TOK_KW_DEFAULT)
+         && !token_is (TOK_CLOSE_BRACE))
+  {
+    if (token_is (TOK_OPEN_BRACE))
+    {
+      jsp_skip_braces (TOK_OPEN_BRACE);
+    }
+    skip_token ();
+  }
+}
 
 /**
  * Parse program
@@ -3296,9 +4591,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 {
   JERRY_ASSERT (out_bytecode_data_p != NULL);
 
-  inside_eval = in_eval;
-
-  scope_type_t scope_type = (in_eval ? SCOPE_TYPE_EVAL : SCOPE_TYPE_GLOBAL);
+  const scope_type_t scope_type = (in_eval ? SCOPE_TYPE_EVAL : SCOPE_TYPE_GLOBAL);
 
 #ifndef JERRY_NDEBUG
   volatile bool is_parse_finished = false;
@@ -3307,16 +4600,14 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
   jsp_status_t status;
 
   jsp_mm_init ();
-  jsp_label_init ();
 
   serializer_set_show_instrs (parser_show_instrs);
   dumper_init ();
   jsp_early_error_init ();
 
-  STACK_INIT (scopes);
-  STACK_PUSH (scopes, scopes_tree_init (NULL, scope_type));
-  serializer_set_scope (STACK_TOP (scopes));
-  scopes_tree_set_strict_mode (STACK_TOP (scopes), is_strict);
+  scopes_tree scope = scopes_tree_init (NULL, scope_type);
+  serializer_set_scope (scope);
+  scopes_tree_set_strict_mode (scope, is_strict);
 
   jmp_buf *jsp_early_error_label_p = jsp_early_error_get_early_error_longjmp_label ();
   int r = setjmp (*jsp_early_error_label_p);
@@ -3327,34 +4618,19 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
      * Note:
      *      Operations that could raise an early error can be performed only during execution of the block.
      */
-
     lexer_init (source_p, source_size, parser_show_instrs);
-    lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
 
-    skip_newlines ();
+    skip_token ();
 
-    /*
-     * We don't try to perform replacement of local variables with registers for global code, eval code,
-     * and code of dynamically constructed functions.
-     *
-     * For global and eval code the replacement can be connected with side effects,
-     * that currently can only be figured out in runtime. For example, a variable
-     * can be redefined as accessor property of the Global object.
-     *
-     * For dynamically constructed functions replacement is not performed due to missing
-     * information about argument names (the names array is not passed to parser_parse_program).
-     * This could be solved by providing general way to iterate argument names during the optimization,
-     * or by expanding the optimization to run-time. In the second case, argument values could also
-     * be moved to registers.
-     */
-    parse_source_element_list (true, false);
+    jsp_parse_directive_prologue ();
 
-    skip_newlines ();
+    jsp_parse_source_element_list ();
+
     JERRY_ASSERT (token_is (TOK_EOF));
 
-    if (inside_eval)
+    if (scope_type == SCOPE_TYPE_EVAL)
     {
-      dump_retval (eval_ret_operand ());
+      dump_retval (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET));
     }
     else
     {
@@ -3373,15 +4649,11 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     if (out_contains_functions_p != NULL)
     {
-      scopes_tree scope = STACK_TOP (scopes);
-
       *out_contains_functions_p = scope->contains_functions;
     }
 
     serializer_set_scope (NULL);
-    scopes_tree_free (STACK_TOP (scopes));
-    STACK_DROP (scopes, 1);
-    STACK_FREE (scopes);
+    scopes_tree_free (scope);
 
     status = JSP_STATUS_OK;
   }
@@ -3395,7 +4667,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     *out_bytecode_data_p = NULL;
 
-    jsp_label_remove_all_labels ();
     jsp_mm_free_all ();
 
     jsp_early_error_t type = jsp_early_error_get_type ();
@@ -3412,7 +4683,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
     }
   }
 
-  jsp_label_finalize ();
   jsp_mm_finalize ();
 
   return status;

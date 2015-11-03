@@ -32,6 +32,7 @@ public:
   {
     EMPTY, /**< empty operand */
     LITERAL, /**< operand contains literal value */
+    IDENTIFIER, /**< Identifier reference */
     TMP, /**< operand contains byte-code register index */
     IDX_CONST, /**< operand contains an integer constant that fits vm_idx_t */
     UNKNOWN, /**< operand, representing unknown value that would be rewritten later */
@@ -115,6 +116,24 @@ public:
 
     return ret;
   } /* make_lit_operand */
+
+  /**
+   * Construct identifier reference operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_identifier_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::IDENTIFIER;
+    ret._data.identifier = lit_id;
+
+    return ret;
+  } /* make_identifier_operand */
 
   /**
    * Construct register operand
@@ -210,6 +229,30 @@ public:
   } /* is_literal_operand */
 
   /**
+   * Is it identifier reference operand?
+   *
+   * @return true / false
+   */
+  bool is_identifier_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::IDENTIFIER);
+  } /* is_identifier_operand */
+
+  /**
+   * Get string literal - name of Identifier reference
+   *
+   * @return literal identifier
+   */
+  lit_cpointer_t get_identifier_name (void) const
+  {
+    JERRY_ASSERT (is_identifier_operand ());
+
+    return (_data.identifier);
+  } /* get_identifier_name */
+
+  /**
    * Get idx for operand
    *
    * @return VM_IDX_REWRITE_LITERAL_UID (for jsp_operand_t::LITERAL),
@@ -275,16 +318,20 @@ public:
 
     return _data.idx_const;
   } /* get_idx_const */
+
 private:
   union
   {
     vm_idx_t idx_const; /**< idx constant value (for jsp_operand_t::IDX_CONST) */
-    vm_idx_t uid; /**< byte-code register index (for jsp_operand_t::TMP) */
+    vm_idx_t uid; /**< register index (for jsp_operand_t::TMP) */
     lit_cpointer_t lit_id; /**< literal (for jsp_operand_t::LITERAL) */
+    lit_cpointer_t identifier; /**< Identifier reference (is_value_based_ref flag not set) */
   } _data;
 
   type_t _type; /**< type of operand */
 };
+
+static_assert (sizeof (jsp_operand_t) == 4, "");
 
 typedef enum __attr_packed___
 {
@@ -298,8 +345,7 @@ typedef enum __attr_packed___
 
 jsp_operand_t empty_operand (void);
 jsp_operand_t literal_operand (lit_cpointer_t);
-jsp_operand_t eval_ret_operand (void);
-jsp_operand_t jsp_create_operand_for_in_special_reg (void);
+jsp_operand_t tmp_operand (void);
 bool operand_is_empty (jsp_operand_t);
 
 void dumper_init (void);
@@ -311,33 +357,25 @@ bool dumper_try_replace_identifier_name_with_reg (scopes_tree, op_meta *);
 void dumper_alloc_reg_for_unused_arg (void);
 
 void dumper_new_statement (void);
-void dumper_new_scope (void);
-void dumper_finish_scope (void);
-void dumper_start_varg_code_sequence (void);
-void dumper_finish_varg_code_sequence (void);
+void dumper_new_scope (vm_idx_t *, vm_idx_t *);
+void dumper_finish_scope (vm_idx_t, vm_idx_t);
+vm_idx_t dumper_start_varg_code_sequence (void);
+void dumper_finish_varg_code_sequence (vm_idx_t);
 
 extern bool dumper_is_eval_literal (jsp_operand_t);
 
-jsp_operand_t dump_array_hole_assignment_res (void);
+void dump_array_hole_assignment (jsp_operand_t);
 void dump_boolean_assignment (jsp_operand_t, bool);
-jsp_operand_t dump_boolean_assignment_res (bool);
 void dump_string_assignment (jsp_operand_t, lit_cpointer_t);
-jsp_operand_t dump_string_assignment_res (lit_cpointer_t);
 void dump_number_assignment (jsp_operand_t, lit_cpointer_t);
-jsp_operand_t dump_number_assignment_res (lit_cpointer_t);
 void dump_regexp_assignment (jsp_operand_t, lit_cpointer_t);
-jsp_operand_t dump_regexp_assignment_res (lit_cpointer_t);
 void dump_smallint_assignment (jsp_operand_t, vm_idx_t);
-jsp_operand_t dump_smallint_assignment_res (vm_idx_t);
 void dump_undefined_assignment (jsp_operand_t);
-jsp_operand_t dump_undefined_assignment_res (void);
 void dump_null_assignment (jsp_operand_t);
-jsp_operand_t dump_null_assignment_res (void);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_variable_assignment_res (jsp_operand_t);
 
-void dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
-jsp_operand_t rewrite_varg_header_set_args_count (size_t);
+vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
+void rewrite_varg_header_set_args_count (jsp_operand_t, size_t, vm_instr_counter_t);
 void dump_call_additional_info (opcode_call_flags_t, jsp_operand_t);
 void dump_varg (jsp_operand_t);
 
@@ -345,121 +383,62 @@ void dump_prop_name_and_value (jsp_operand_t, jsp_operand_t);
 void dump_prop_getter_decl (jsp_operand_t, jsp_operand_t);
 void dump_prop_setter_decl (jsp_operand_t, jsp_operand_t);
 void dump_prop_getter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_getter_res (jsp_operand_t, jsp_operand_t);
 void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 void dump_function_end_for_rewrite (void);
-void rewrite_function_end ();
-void dumper_decrement_function_end_pos (void);
+void rewrite_function_end (vm_instr_counter_t);
 
-jsp_operand_t dump_this_res (void);
-
-void dump_post_increment (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_post_increment_res (jsp_operand_t);
-void dump_post_decrement (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_post_decrement_res (jsp_operand_t);
-void dump_pre_increment (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_pre_increment_res (jsp_operand_t);
-void dump_pre_decrement (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_pre_decrement_res (jsp_operand_t);
 void dump_unary_plus (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_unary_plus_res (jsp_operand_t);
 void dump_unary_minus (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_unary_minus_res (jsp_operand_t);
 void dump_bitwise_not (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_bitwise_not_res (jsp_operand_t);
 void dump_logical_not (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_logical_not_res (jsp_operand_t);
 
 void dump_multiplication (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_multiplication_res (jsp_operand_t, jsp_operand_t);
 void dump_division (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_division_res (jsp_operand_t, jsp_operand_t);
 void dump_remainder (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_remainder_res (jsp_operand_t, jsp_operand_t);
 void dump_addition (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_addition_res (jsp_operand_t, jsp_operand_t);
 void dump_substraction (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_substraction_res (jsp_operand_t, jsp_operand_t);
 void dump_left_shift (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_left_shift_res (jsp_operand_t, jsp_operand_t);
 void dump_right_shift (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_right_shift_res (jsp_operand_t, jsp_operand_t);
 void dump_right_shift_ex (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_right_shift_ex_res (jsp_operand_t, jsp_operand_t);
 void dump_less_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_less_than_res (jsp_operand_t, jsp_operand_t);
 void dump_greater_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_greater_than_res (jsp_operand_t, jsp_operand_t);
 void dump_less_or_equal_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_less_or_equal_than_res (jsp_operand_t, jsp_operand_t);
 void dump_greater_or_equal_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_greater_or_equal_than_res (jsp_operand_t, jsp_operand_t);
 void dump_instanceof (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_instanceof_res (jsp_operand_t, jsp_operand_t);
 void dump_in (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_in_res (jsp_operand_t, jsp_operand_t);
 void dump_equal_value (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_equal_value_res (jsp_operand_t, jsp_operand_t);
 void dump_not_equal_value (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_not_equal_value_res (jsp_operand_t, jsp_operand_t);
 void dump_equal_value_type (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_equal_value_type_res (jsp_operand_t, jsp_operand_t);
 void dump_not_equal_value_type (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_not_equal_value_type_res (jsp_operand_t, jsp_operand_t);
 void dump_bitwise_and (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_bitwise_and_res (jsp_operand_t, jsp_operand_t);
 void dump_bitwise_xor (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_bitwise_xor_res (jsp_operand_t, jsp_operand_t);
 void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_bitwise_or_res (jsp_operand_t, jsp_operand_t);
 
-void start_dumping_logical_and_checks (void);
-void dump_logical_and_check_for_rewrite (jsp_operand_t);
-void rewrite_logical_and_checks (void);
-void start_dumping_logical_or_checks (void);
-void dump_logical_or_check_for_rewrite (jsp_operand_t);
-void rewrite_logical_or_checks (void);
-void dump_conditional_check_for_rewrite (jsp_operand_t);
-void rewrite_conditional_check (void);
-void dump_jump_to_end_for_rewrite (void);
-void rewrite_jump_to_end (void);
+vm_instr_counter_t dump_conditional_check_for_rewrite (jsp_operand_t);
+void rewrite_conditional_check (vm_instr_counter_t);
+vm_instr_counter_t dump_jump_to_end_for_rewrite (void);
+void rewrite_jump_to_end (vm_instr_counter_t);
 
-void start_dumping_assignment_expression (jsp_operand_t, locus);
-jsp_operand_t dump_prop_setter_or_variable_assignment_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_addition_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_multiplication_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_division_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_remainder_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_substraction_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_left_shift_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_right_shift_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_right_shift_ex_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_bitwise_and_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_bitwise_xor_res (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_setter_or_bitwise_or_res (jsp_operand_t, jsp_operand_t);
-
-void dumper_set_break_target (void);
-void dumper_set_continue_target (void);
-void dumper_set_next_interation_target (void);
-vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (bool, vm_instr_counter_t);
-vm_instr_counter_t
-rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
-void dump_continue_iterations_check (jsp_operand_t);
+vm_instr_counter_t dumper_set_next_iteration_target (void);
+vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
+vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
+void dump_continue_iterations_check (vm_instr_counter_t, jsp_operand_t);
 
 void start_dumping_case_clauses (void);
-void dump_case_clause_check_for_rewrite (jsp_operand_t, jsp_operand_t);
-void dump_default_clause_check_for_rewrite (void);
-void rewrite_case_clause (void);
-void rewrite_default_clause (void);
+vm_instr_counter_t dump_case_clause_check_for_rewrite (jsp_operand_t);
+vm_instr_counter_t dump_default_clause_check_for_rewrite (void);
+void rewrite_case_clause (vm_instr_counter_t);
+void rewrite_default_clause (vm_instr_counter_t);
 void finish_dumping_case_clauses (void);
 
-void dump_delete (jsp_operand_t, jsp_operand_t, bool, locus);
-jsp_operand_t dump_delete_res (jsp_operand_t, bool, locus);
+void dump_delete (jsp_operand_t, jsp_operand_t);
+void dump_delete_prop (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 void dump_typeof (jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_typeof_res (jsp_operand_t);
+
+void dump_unary_op (vm_op_t, jsp_operand_t, jsp_operand_t);
+void dump_binary_op (vm_op_t, jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_with_for_rewrite (jsp_operand_t);
 void rewrite_with (vm_instr_counter_t);
@@ -469,12 +448,12 @@ vm_instr_counter_t dump_for_in_for_rewrite (jsp_operand_t);
 void rewrite_for_in (vm_instr_counter_t);
 void dump_for_in_end (void);
 
-void dump_try_for_rewrite (void);
-void rewrite_try (void);
-void dump_catch_for_rewrite (jsp_operand_t);
-void rewrite_catch (void);
-void dump_finally_for_rewrite (void);
-void rewrite_finally (void);
+vm_instr_counter_t dump_try_for_rewrite (void);
+vm_instr_counter_t dump_catch_for_rewrite (jsp_operand_t);
+vm_instr_counter_t dump_finally_for_rewrite (void);
+void rewrite_try (vm_instr_counter_t);
+void rewrite_catch (vm_instr_counter_t);
+void rewrite_finally (vm_instr_counter_t);
 void dump_end_try_catch_finally (void);
 void dump_throw (jsp_operand_t);
 
