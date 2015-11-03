@@ -84,11 +84,12 @@ lit_id_hash_table_free (lit_id_hash_table *table_p) /**< table's header */
 } /* lit_id_hash_table_free */
 
 /**
- * Register pair in the hash table
+ * Register literal in the hash table
+ *
+ * @return corresponding idx
  */
-void
+vm_idx_t
 lit_id_hash_table_insert (lit_id_hash_table *table_p, /**< table's header */
-                          vm_idx_t uid, /**< value of byte-code instruction's argument */
                           vm_instr_counter_t oc, /**< instruction counter of the instruction */
                           lit_cpointer_t lit_cp) /**< literal identifier */
 {
@@ -101,8 +102,31 @@ lit_id_hash_table_insert (lit_id_hash_table *table_p, /**< table's header */
     table_p->buckets[block_id] = table_p->raw_buckets + table_p->current_bucket_pos;
   }
 
-  table_p->buckets[block_id][uid] = lit_cp;
-  table_p->current_bucket_pos++;
+  lit_cpointer_t *raw_bucket_iter_p = table_p->raw_buckets + table_p->current_bucket_pos;
+
+  JERRY_ASSERT (raw_bucket_iter_p >= table_p->buckets[block_id]);
+  ssize_t bucket_size = (raw_bucket_iter_p - table_p->buckets[block_id]);
+
+  int32_t index;
+  for (index = 0; index < bucket_size; index++)
+  {
+    if (table_p->buckets[block_id][index].packed_value == lit_cp.packed_value)
+    {
+      break;
+    }
+  }
+
+  if (index == bucket_size)
+  {
+    JERRY_ASSERT ((uint8_t *) (table_p->raw_buckets + table_p->current_bucket_pos) < (uint8_t *) (table_p->buckets));
+
+    table_p->buckets[block_id][index] = lit_cp;
+    table_p->current_bucket_pos++;
+  }
+
+  JERRY_ASSERT (index <= VM_IDX_LITERAL_LAST);
+
+  return (vm_idx_t) index;
 } /* lit_id_hash_table_insert */
 
 /**

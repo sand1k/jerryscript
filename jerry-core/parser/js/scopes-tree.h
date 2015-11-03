@@ -19,7 +19,6 @@
 #include "linked-list.h"
 #include "lexer.h"
 #include "ecma-globals.h"
-#include "hash-table.h"
 #include "opcodes.h"
 #include "lit-id-hash-table.h"
 #include "lit-literal.h"
@@ -39,9 +38,7 @@ typedef struct
 
 typedef struct tree_header
 {
-  struct tree_header *parent;
   linked_list children;
-  uint8_t children_num;
 } tree_header;
 
 /**
@@ -59,16 +56,27 @@ typedef enum
  */
 typedef struct
 {
-  tree_header t; /**< header */
-  linked_list instrs; /**< instructions */
+  mem_cpointer_t next_scope_cp; /**< next scope with same parent */
+  mem_cpointer_t children_list_cp; /**< child scopes */
+
+  mem_cpointer_t bc_header_cp; /**< pointer to corresponding byte-code header
+                                *   (after bc_alloc_headers_from_scopes_tree) */
+  uint16_t child_scopes_processed_num; /**< number of child scopes that were already parsed */
+
+  uint16_t max_uniq_literals_num; /**< upper estimate number of entries
+                                   *   in idx-literal hash table */
+
   vm_instr_counter_t instrs_count; /**< count of instructions */
+
   linked_list var_decls; /**< instructions for variable declarations */
+
   scope_type_t type : 2; /**< scope type */
+  bool is_root_scope : 1; /**< flag, indicating whether the scope is root of corresponding scopes tree */
   bool strict_mode: 1; /**< flag, indicating that scope's code should be executed in strict mode */
   bool ref_arguments: 1; /**< flag, indicating that "arguments" variable is used inside the scope
                           *   (not depends on subscopes) */
   bool ref_eval: 1; /**< flag, indicating that "eval" is used inside the scope
-                          *   (not depends on subscopes) */
+                     *   (not depends on subscopes) */
   bool contains_with: 1; /**< flag, indicationg whether 'with' statement is contained in the scope
                           *   (not depends on subscopes) */
   bool contains_try: 1; /**< flag, indicationg whether 'try' statement is contained in the scope
@@ -76,25 +84,23 @@ typedef struct
   bool contains_delete: 1; /**< flag, indicationg whether 'delete' operator is contained in the scope
                             *   (not depends on subscopes) */
   bool contains_functions: 1; /**< flag, indicating that the scope contains a function declaration / expression */
+  bool is_args_moved_to_regs : 1; /**< the function's arguments are moved to registers,
+                                   *   so should be initialized in vm registers,
+                                   *   and not in lexical environment */
+  bool is_no_lex_env : 1; /**< no lex. env. is necessary for the scope */
 } scopes_tree_int;
 
 typedef scopes_tree_int *scopes_tree;
 
 scopes_tree scopes_tree_init (scopes_tree, scope_type_t);
 void scopes_tree_free (scopes_tree);
+size_t scopes_tree_child_scopes_num (scopes_tree);
 vm_instr_counter_t scopes_tree_instrs_num (scopes_tree);
 vm_instr_counter_t scopes_tree_var_decls_num (scopes_tree);
-void scopes_tree_add_op_meta (scopes_tree, op_meta);
 void scopes_tree_add_var_decl (scopes_tree, op_meta);
-void scopes_tree_set_op_meta (scopes_tree, vm_instr_counter_t, op_meta);
-void scopes_tree_set_instrs_num (scopes_tree, vm_instr_counter_t);
-op_meta scopes_tree_op_meta (scopes_tree, vm_instr_counter_t);
 op_meta scopes_tree_var_decl (scopes_tree, vm_instr_counter_t);
-void scopes_tree_remove_op_meta (scopes_tree tree, vm_instr_counter_t oc);
-size_t scopes_tree_count_literals_in_blocks (scopes_tree);
-vm_instr_counter_t scopes_tree_count_instructions (scopes_tree);
 bool scopes_tree_variable_declaration_exists (scopes_tree, lit_cpointer_t);
-vm_instr_t *scopes_tree_raw_data (scopes_tree, uint8_t *, size_t, lit_id_hash_table *);
+void scopes_tree_dump_var_decls (scopes_tree, lit_cpointer_t *);
 void scopes_tree_set_strict_mode (scopes_tree, bool);
 void scopes_tree_set_arguments_used (scopes_tree);
 void scopes_tree_set_eval_used (scopes_tree);
@@ -103,5 +109,4 @@ void scopes_tree_set_contains_try (scopes_tree);
 void scopes_tree_set_contains_delete (scopes_tree);
 void scopes_tree_set_contains_functions (scopes_tree);
 bool scopes_tree_strict_mode (scopes_tree);
-
 #endif /* SCOPES_TREE_H */
