@@ -1817,6 +1817,95 @@ parse_assignment_expression (bool in_allowed)
   return expr;
 }
 
+typedef enum
+{
+  JSP_UNARY_EXPR_OP_NO_OP,
+  JSP_UNARY_EXPR_OP_DELETE,
+  JSP_UNARY_EXPR_OP_VOID,
+  JSP_UNARY_EXPR_OP_TYPEOF,
+  JSP_UNARY_EXPR_OP_PREINCR,
+  JSP_UNARY_EXPR_OP_PREDECR,
+  JSP_UNARY_EXPR_OP_PLUS,
+  JSP_UNARY_EXPR_OP_MINUS,
+  JSP_UNARY_EXPR_OP_INVERT,
+  JSP_UNARY_EXPR_OP_NOT
+} jsp_unary_expr_op_t;
+
+typedef enum
+{
+  JSP_MEMBER_EXPR_OP_NO_OP,
+  JSP_MEMBER_EXPR_OP_NEW,
+  JSP_MEMBER_EXPR_OP_NEW_ARGS_LIST,
+} jsp_member_expr_op_t;
+
+typedef enum
+{
+  JSP_PRIMARY_EXPR_OP_THIS_BINDING,
+  JSP_PRIMARY_EXPR_OP_IDENTIFIER,
+  JSP_PRIMARY_EXPR_OP_LITERAL,
+  JSP_PRIMARY_EXPR_OP_ARRAY_LITERAL,
+  JSP_PRIMARY_EXPR_OP_OBJECT_LITERAL
+} jsp_primary_expr_op_t;
+
+typedef enum
+{
+  JSP_STATE_EXPR_UNINITIALIZED,
+
+  JSP_STATE_EXPR_START,
+  JSP_STATE_EXPR_END,
+  JSP_STATE_EXPR_PRIMARY,
+  JSP_STATE_EXPR_FUNCTION,
+  JSP_STATE_EXPR_MEMBER,
+  JSP_STATE_EXPR_CALL,
+  JSP_STATE_EXPR_LEFTHANDSIDE,
+  JSP_STATE_EXPR_POSTFIX,
+  JSP_STATE_EXPR_UNARY,
+  JSP_STATE_EXPR_MULT,
+  JSP_STATE_EXPR_CONDITION,
+  JSP_STATE_EXPR_ASSIGNMENT,
+  JSP_STATE_EXPR_EXPRESSION
+} jsp_state_expr_t;
+
+typedef struct
+{
+  jsp_state_expr_t expr_state;
+
+  union
+  {
+    jsp_member_expr_op_t member_expr_op;
+    jsp_unary_expr_op_t unary_expr_op;
+    jsp_primary_expr_op_t primary_expr_op;
+  } expr_op;
+
+  jsp_operand_t operand;
+} jsp_state_t;
+
+/* FIXME: change to dynamic */
+#define JSP_STATE_STACK_MAX 32
+jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
+uint32_t jsp_state_stack_pos = 0;
+
+static void
+jsp_state_push (jsp_state_t state)
+{
+  if (jsp_state_stack_pos == JSP_STATE_STACK_MAX)
+  {
+    JERRY_UNREACHABLE ();
+  }
+  else
+  {
+    jsp_state_stack[jsp_state_stack_pos++] = state;
+  }
+} /* jsp_state_push */
+
+static jsp_state_t
+jsp_state_pop (void)
+{
+  JERRY_ASSERT (jsp_state_stack_pos > 0);
+
+  return jsp_state_stack[--jsp_state_stack_pos];
+} /* jsp_state_pop */
+
 /**
  * Parse an expression
  *
@@ -1831,33 +1920,118 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
                   jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
                                                              *   result code store should be dumped */
 {
-  jsp_operand_t expr = parse_assignment_expression (in_allowed);
+  (void) in_allowed;
+  (void) dump_eval_ret_store;
+
+  jsp_state_t start_state;
+
+  start_state.expr_state = JSP_STATE_EXPR_START;
+  jsp_state_push (start_state);
 
   while (true)
   {
-    skip_newlines ();
-    if (token_is (TOK_COMMA))
-    {
-      dump_assignment_of_lhs_if_literal (expr);
+    jsp_state_t new_state;
+    new_state.expr_state = JSP_STATE_EXPR_UNINITIALIZED;
 
-      skip_newlines ();
-      expr = parse_assignment_expression (in_allowed);
-    }
-    else
+    jsp_state_t current_state = jsp_state_pop ();
+
+    if (current_state.expr_state == JSP_STATE_EXPR_START)
     {
-      lexer_save_token (tok);
+      JERRY_DLOG ("JSP_STATE_EXPR_START\n");
+
+      if (token_is (TOK_KEYWORD))
+      {
+        JERRY_ASSERT (!is_keyword (KW_FUNCTION));
+
+        JERRY_DDLOG ("KEYWORD\n");
+
+        if (is_keyword (KW_THIS))
+        {
+          new_state.expr_state = JSP_STATE_EXPR_PRIMARY;
+          new_state.expr_op.primary_expr_op = JSP_PRIMARY_EXPR_OP_THIS_BINDING;
+          new_state.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
+        }
+        else if (is_keyword (KW_NEW))
+        {
+          new_state.expr_state = JSP_STATE_EXPR_MEMBER;
+          new_state.expr_op.member_expr_op = JSP_MEMBER_EXPR_OP_NEW;
+        }
+        else if (is_keyword (KW_DELETE)
+                 || is_keyword (KW_VOID)
+                 || is_keyword (KW_TYPEOF))
+        {
+          new_state.expr_state = JSP_STATE_EXPR_UNARY;
+
+          if (is_keyword (KW_DELETE))
+          {
+            new_state.expr_op.unary_expr_op = JSP_UNARY_EXPR_OP_DELETE;
+          }
+          else if (is_keyword (KW_VOID))
+          {
+            new_state.expr_op.unary_expr_op = JSP_UNARY_EXPR_OP_VOID;
+          }
+          else
+          {
+            JERRY_ASSERT (is_keyword (KW_TYPEOF));
+
+            new_state.expr_op.unary_expr_op = JSP_UNARY_EXPR_OP_TYPEOF;
+          }
+        }
+      }
+    }
+    else if (current_state.expr_state == JSP_STATE_EXPR_PRIMARY)
+    {
+      new_state = current_state;
+
+      new_state.expr_state = JSP_STATE_EXPR_MEMBER;
+      new_state.expr_op.member_expr_op = JSP_MEMBER_EXPR_OP_NO_OP;
+    }
+    else if (current_state.expr_state == JSP_STATE_EXPR_MEMBER)
+    {
+      new_state = current_state;
+
+      if (current_state.expr_op.member_expr_op == JSP_MEMBER_EXPR_OP_NO_OP)
+      {
+        if (token_is (TOK_OPEN_SQUARE))
+        {
+          new_state.expr_state = JSP_STATE_EXPR_START;
+        }
+      }
+      else if (current_state.expr_op.member_expr_op == JSP_MEMBER_EXPR_OP_NEW)
+      {
+        if (token_is (TOK_OPEN_PAREN))
+        {
+          new_state.expr_op.member_expr_op = JSP_MEMBER_EXPR_OP_NEW_ARGS_LIST;
+        }
+        else
+        {
+          new_state.expr_state = JSP_STATE_EXPR_END;
+        }
+      }
+      else if (current_state.expr_op.member_expr_op == JSP_MEMBER_EXPR_OP_NEW_ARGS_LIST)
+      {
+        if (token_is (TOK_CLOSE_PAREN))
+        {
+        }
+        else
+        {
+          jsp_state_push (current_state);
+        }
+
+        new_state.expr_state = JSP_ARGS_LIST;
+      }
+    }
+    else if (current_state.expr_state == JSP_STATE_EXPR_END)
+    {
+      /* FIXME: continue to outer expression, if any */
       break;
     }
+
+    JERRY_ASSERT (new_state.expr_state != JSP_STATE_EXPR_UNINITIALIZED);
+    jsp_state_push (new_state);
   }
 
-  if (inside_eval
-      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
-      && !inside_function)
-  {
-    dump_variable_assignment (eval_ret_operand () , expr);
-  }
-
-  return expr;
+  return empty_operand ();
 } /* parse_expression */
 
 /* variable_declaration
