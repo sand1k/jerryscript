@@ -1870,65 +1870,47 @@ typedef enum
 
 typedef enum
 {
-  JSP_UNARY_EXPR_OP_NO_OP,
-  JSP_UNARY_EXPR_OP_DELETE,
-  JSP_UNARY_EXPR_OP_VOID,
-  JSP_UNARY_EXPR_OP_TYPEOF,
-  JSP_UNARY_EXPR_OP_PREINCR,
-  JSP_UNARY_EXPR_OP_PREDECR,
-  JSP_UNARY_EXPR_OP_PLUS,
-  JSP_UNARY_EXPR_OP_MINUS,
-  JSP_UNARY_EXPR_OP_INVERT,
-  JSP_UNARY_EXPR_OP_NOT
-} jsp_unary_expr_op_t;
+  JSP_STATE_EXPR_UNINITIALIZED  = 0x0000,
 
-typedef enum
-{
-  JSP_MEMBER_EXPR_OP_NO_OP,
-  JSP_MEMBER_EXPR_OP_NEW,
-  JSP_MEMBER_EXPR_OP_NEW_ARGS_LIST,
-} jsp_member_expr_op_t;
+  /* ECMA-262 v5 expression types */
+  JSP_STATE_EXPR_EMPTY          = 0x0001, /**< no expression yet (at start) */
+  JSP_STATE_EXPR_PRIMARY        = 0x0003, /**< PrimaryExpression (11.1) */
+  JSP_STATE_EXPR_FUNCTION       = 0x0004, /**< FunctionExpression (11.2.5) */
+  JSP_STATE_EXPR_MEMBER         = 0x0005, /**< MemberExpression (11.2) */ 
+  JSP_STATE_EXPR_CALL           = 0x0006, /**< CallExpression (11.2) */
+  JSP_STATE_EXPR_LEFTHANDSIDE   = 0x0007, /**< LeftHandSideExpression (11.2) */
+  JSP_STATE_EXPR_POSTFIX        = 0x0008, /**< PostfixExpression (11.3) */
+  JSP_STATE_EXPR_UNARY          = 0x0009, /**< UnaryExpression (11.4) */
+  JSP_STATE_EXPR_MULTIPLICATIVE = 0x000A, /**< MultiplicativeExpression (11.5) */
+  JSP_STATE_EXPR_ADDITIVE       = 0x000B, /**< AdditiveExpression (11.6) */
+  JSP_STATE_EXPR_SHIFT          = 0x000C, /**< ShiftExpression (11.7) */
+  JSP_STATE_EXPR_RELATIONAL     = 0x000D, /**< RelationalExpression (11.8) */
+  JSP_STATE_EXPR_EQUALITY       = 0x000E, /**< EqualityExpression (11.9) */
+  JSP_STATE_EXPR_BITWISE_AND    = 0x000F, /**< BitwiseAndExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_XOR    = 0x0010, /**< BitwiseXorExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_OR     = 0x0011, /**< BitwiseOrExpression (11.10) */
+  JSP_STATE_EXPR_LOGICAL_AND    = 0x0012, /**< LogicalAndExpression (11.11) */
+  JSP_STATE_EXPR_LOGICAL_OR     = 0x0013, /**< LogicalOrExpression (11.11) */
+  JSP_STATE_EXPR_CONDITION      = 0x0014, /**< ConditionalExpression (11.12) */
+  JSP_STATE_EXPR_ASSIGNMENT     = 0x0015, /**< AssignmentExpression (11.13) */
+  JSP_STATE_EXPR_EXPRESSION     = 0x0016, /**< Expression (11.14) */
 
-typedef enum
-{
-  JSP_PRIMARY_EXPR_OP_THIS_BINDING,
-  JSP_PRIMARY_EXPR_OP_IDENTIFIER,
-  JSP_PRIMARY_EXPR_OP_LITERAL,
-  JSP_PRIMARY_EXPR_OP_ARRAY_LITERAL,
-  JSP_PRIMARY_EXPR_OP_OBJECT_LITERAL
-} jsp_primary_expr_op_t;
-
-typedef enum
-{
-  JSP_STATE_EXPR_UNINITIALIZED,
-
-  JSP_STATE_EXPR_START,
-  JSP_STATE_EXPR_END,
-  JSP_STATE_EXPR_PRIMARY,
-  JSP_STATE_EXPR_FUNCTION,
-  JSP_STATE_EXPR_MEMBER,
-  JSP_STATE_EXPR_CALL,
-  JSP_STATE_EXPR_LEFTHANDSIDE,
-  JSP_STATE_EXPR_POSTFIX,
-  JSP_STATE_EXPR_UNARY,
-  JSP_STATE_EXPR_MULT,
-  JSP_STATE_EXPR_CONDITION,
-  JSP_STATE_EXPR_ASSIGNMENT,
-  JSP_STATE_EXPR_EXPRESSION
+  /* Flags */
+  JSP_STATE_EXPR_FLAG_START         = 0x0100, /**< the expression parse just started, no tokens were processed yet */
+  JSP_STATE_EXPR_FLAG_COMPLETED     = 0x0200, /**< the expression parse completed, no more tokens can be added to
+                                               *   the expression */
+  JSP_STATE_EXPR_FLAG_ARG_LIST      = 0x0400, /**< parsing an argument list, associated with the expression */
+  JSP_STATE_EXPR_FLAG_ARG_COMPLETED = 0x0800, /**< parse of a next argument completed */
+  JSP_STATE_EXPR_FLAG_NO_IN         = 0x1000  /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
 } jsp_state_expr_t;
 
 typedef struct
 {
-  jsp_state_expr_t expr_state;
-
-  union
-  {
-    jsp_member_expr_op_t member_expr_op;
-    jsp_unary_expr_op_t unary_expr_op;
-    jsp_primary_expr_op_t primary_expr_op;
-  } expr_op;
-
-  jsp_operand_t operand;
+  jsp_state_expr_t state; /**< current state */
+  jsp_state_expr_t req_expr_type; /**< requested type of expression */
+  jsp_operand_t ret_operand; /**< operand, associated with expression */
+  jsp_operator_t op; /**< operator, applied to current and, if binary, to previous expression */
+  vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
 } jsp_state_t;
 
 /* FIXME: change to dynamic */
