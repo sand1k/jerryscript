@@ -1871,45 +1871,55 @@ typedef enum
 {
   JSP_STATE_EXPR_UNINITIALIZED  = 0x0000,
 
-  /* ECMA-262 v5 expression types */
-  JSP_STATE_EXPR_EMPTY          = 0x0001, /**< no expression yet (at start) */
-  JSP_STATE_EXPR_PRIMARY        = 0x0003, /**< PrimaryExpression (11.1) */
-  JSP_STATE_EXPR_FUNCTION       = 0x0004, /**< FunctionExpression (11.2.5) */
-  JSP_STATE_EXPR_MEMBER         = 0x0005, /**< MemberExpression (11.2) */ 
-  JSP_STATE_EXPR_CALL           = 0x0006, /**< CallExpression (11.2) */
-  JSP_STATE_EXPR_LEFTHANDSIDE   = 0x0007, /**< LeftHandSideExpression (11.2) */
-  JSP_STATE_EXPR_POSTFIX        = 0x0008, /**< PostfixExpression (11.3) */
-  JSP_STATE_EXPR_UNARY          = 0x0009, /**< UnaryExpression (11.4) */
-  JSP_STATE_EXPR_MULTIPLICATIVE = 0x000A, /**< MultiplicativeExpression (11.5) */
-  JSP_STATE_EXPR_ADDITIVE       = 0x000B, /**< AdditiveExpression (11.6) */
-  JSP_STATE_EXPR_SHIFT          = 0x000C, /**< ShiftExpression (11.7) */
-  JSP_STATE_EXPR_RELATIONAL     = 0x000D, /**< RelationalExpression (11.8) */
-  JSP_STATE_EXPR_EQUALITY       = 0x000E, /**< EqualityExpression (11.9) */
-  JSP_STATE_EXPR_BITWISE_AND    = 0x000F, /**< BitwiseAndExpression (11.10) */
-  JSP_STATE_EXPR_BITWISE_XOR    = 0x0010, /**< BitwiseXorExpression (11.10) */
-  JSP_STATE_EXPR_BITWISE_OR     = 0x0011, /**< BitwiseOrExpression (11.10) */
-  JSP_STATE_EXPR_LOGICAL_AND    = 0x0012, /**< LogicalAndExpression (11.11) */
-  JSP_STATE_EXPR_LOGICAL_OR     = 0x0013, /**< LogicalOrExpression (11.11) */
-  JSP_STATE_EXPR_CONDITION      = 0x0014, /**< ConditionalExpression (11.12) */
-  JSP_STATE_EXPR_ASSIGNMENT     = 0x0015, /**< AssignmentExpression (11.13) */
-  JSP_STATE_EXPR_EXPRESSION     = 0x0016, /**< Expression (11.14) */
+  /** Mask of expression type field */
+  JSP_STATE_EXPR_TYPE_MASK      = 0x00ff,
 
+  /* ECMA-262 v5 expression types */
+  JSP_STATE_EXPR_EMPTY          = 0x01, /**< no expression yet (at start) */
+  JSP_STATE_EXPR_PRIMARY        = 0x02, /**< PrimaryExpression (11.1) */
+  JSP_STATE_EXPR_FUNCTION       = 0x03, /**< FunctionExpression (11.2.5) */
+  JSP_STATE_EXPR_MEMBER         = 0x04, /**< MemberExpression (11.2) */ 
+  JSP_STATE_EXPR_NEW            = 0x05, /**< MemberExpression (11.2) */ 
+  JSP_STATE_EXPR_CALL           = 0x06, /**< CallExpression (11.2) */
+  JSP_STATE_EXPR_LEFTHANDSIDE   = 0x07, /**< LeftHandSideExpression (11.2) */
+  JSP_STATE_EXPR_POSTFIX        = 0x08, /**< PostfixExpression (11.3) */
+  JSP_STATE_EXPR_UNARY          = 0x09, /**< UnaryExpression (11.4) */
+  JSP_STATE_EXPR_MULTIPLICATIVE = 0x0A, /**< MultiplicativeExpression (11.5) */
+  JSP_STATE_EXPR_ADDITIVE       = 0x0B, /**< AdditiveExpression (11.6) */
+  JSP_STATE_EXPR_SHIFT          = 0x0C, /**< ShiftExpression (11.7) */
+  JSP_STATE_EXPR_RELATIONAL     = 0x0D, /**< RelationalExpression (11.8) */
+  JSP_STATE_EXPR_EQUALITY       = 0x0E, /**< EqualityExpression (11.9) */
+  JSP_STATE_EXPR_BITWISE_AND    = 0x0F, /**< BitwiseAndExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_XOR    = 0x10, /**< BitwiseXorExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_OR     = 0x11, /**< BitwiseOrExpression (11.10) */
+  JSP_STATE_EXPR_LOGICAL_AND    = 0x12, /**< LogicalAndExpression (11.11) */
+  JSP_STATE_EXPR_LOGICAL_OR     = 0x13, /**< LogicalOrExpression (11.11) */
+  JSP_STATE_EXPR_CONDITION      = 0x14, /**< ConditionalExpression (11.12) */
+  JSP_STATE_EXPR_ASSIGNMENT     = 0x15, /**< AssignmentExpression (11.13) */
+  JSP_STATE_EXPR_EXPRESSION     = 0x16, /**< Expression (11.14) */
+} jsp_state_expr_t;
+
+typedef enum
+{
   /* Flags */
-  JSP_STATE_EXPR_FLAG_START         = 0x0100, /**< the expression parse just started, no tokens were processed yet */
+  JSP_STATE_EXPR_FLAG_NO_FLAGS      = 0x0000, /**< empty flags set */
+  JSP_STATE_EXPR_FLAG_IN_PROCESS    = 0x0100, /**< the expression parse is in process */
   JSP_STATE_EXPR_FLAG_COMPLETED     = 0x0200, /**< the expression parse completed, no more tokens can be added to
                                                *   the expression */
   JSP_STATE_EXPR_FLAG_ARG_LIST      = 0x0400, /**< parsing an argument list, associated with the expression */
   JSP_STATE_EXPR_FLAG_ARG_COMPLETED = 0x0800, /**< parse of a next argument completed */
-  JSP_STATE_EXPR_FLAG_NO_IN         = 0x1000  /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
-} jsp_state_expr_t;
+  JSP_STATE_EXPR_FLAG_NO_IN         = 0x1000, /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  JSP_STATE_EXPR_FIXED_RET_OPERAND  = 0x2000  /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+} jsp_state_expr_flag_t;
 
 typedef struct
 {
+  jsp_operand_t operand; /**< operand, associated with expression */
+  vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
   jsp_state_expr_t state; /**< current state */
   jsp_state_expr_t req_expr_type; /**< requested type of expression */
-  jsp_operand_t ret_operand; /**< operand, associated with expression */
+  int flags; /**< flags */
   jsp_operator_t op; /**< operator, applied to current and, if binary, to previous expression */
-  vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
 } jsp_state_t;
 
 /* FIXME: change to dynamic */
@@ -1931,11 +1941,19 @@ jsp_state_push (jsp_state_t state)
 } /* jsp_state_push */
 
 static jsp_state_t
+jsp_state_top (void)
+{
+  JERRY_ASSERT (jsp_state_stack_pos > 0);
+
+  return jsp_state_stack[jsp_state_stack_pos - 1u];
+} /* jsp_state_top */
+
+static jsp_state_t
 jsp_state_pop (void)
 {
   JERRY_ASSERT (jsp_state_stack_pos > 0);
 
-  return jsp_state_stack[--jsp_state_stack_pos];
+  --jsp_state_stack_pos;
 } /* jsp_state_pop */
 
 /**
@@ -1952,41 +1970,59 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
                   jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
                                                              *   result code store should be dumped */
 {
+  JERRY_ASSERT (!is_keyword (KW_FUNCTION));
+
   (void) in_allowed;
   (void) dump_eval_ret_store;
 
   jsp_state_t start_state;
 
-  start_state.expr_state = JSP_STATE_EXPR_START;
+  start_state.state = JSP_STATE_EXPR_EMPTY;
+
+  start_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
+  if (in_allowed)
+  {
+    start_state.flags |= JSP_STATE_EXPR_FLAG_NO_IN;
+  }
+
+  start_state.req_expr_type = JSP_STATE_EXPR_EXPRESSION;
+  start_state.operand = empty_operand ();
+  start_state.op = JSP_OPERATOR_NO_OP;
+  start_state.rewrite_chain = MAX_OPCODES; /* empty chain */
+
   jsp_state_push (start_state);
 
   while (true)
   {
-    jsp_state_t new_state;
-    new_state.expr_state = JSP_STATE_EXPR_UNINITIALIZED;
+    jsp_state_t state = jsp_state_top ();
+    jsp_state_pop ();
 
-    jsp_state_t current_state = jsp_state_pop ();
-
-    if (current_state.expr_state == JSP_STATE_EXPR_START)
+    if (state.state == JSP_STATE_EXPR_EMPTY)
     {
-      JERRY_DLOG ("JSP_STATE_EXPR_START\n");
-
       if (token_is (TOK_KEYWORD))
       {
-        JERRY_ASSERT (!is_keyword (KW_FUNCTION));
-
-        JERRY_DDLOG ("KEYWORD\n");
-
         if (is_keyword (KW_THIS))
         {
-          new_state.expr_state = JSP_STATE_EXPR_PRIMARY;
-          new_state.expr_op.primary_expr_op = JSP_PRIMARY_EXPR_OP_THIS_BINDING;
-          new_state.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
+          state.state = JSP_STATE_EXPR_PRIMARY;
+          state.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
+        }
+        else if (is_keyword (KW_FUNCTION))
+        {
+          JERRY_UNIMPLEMENTED ("function expression parse is not implemented");
         }
         else if (is_keyword (KW_NEW))
         {
-          new_state.expr_state = JSP_STATE_EXPR_MEMBER;
-          new_state.expr_op.member_expr_op = JSP_MEMBER_EXPR_OP_NEW;
+          jsp_state_t new_state;
+
+          new_state.state = JSP_STATE_EXPR_EMPTY;
+          new_state.req_expr_type = JSP_STATE_EXPR_MEMBER;
+          new_state.operand = state.operand;
+          new_state.flags = state.flags & (JSP_STATE_EXPR_FLAG_NO_IN | JSP_STATE_EXPR_FIXED_RET_OPERAND);
+
+          state.state = JSP_STATE_EXPR_NEW;
+
+          jsp_state_push (state);
+          jsp_state_push (new_state);
         }
         else if (is_keyword (KW_DELETE)
                  || is_keyword (KW_VOID)
