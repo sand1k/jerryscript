@@ -1948,7 +1948,7 @@ jsp_state_top (void)
   return jsp_state_stack[jsp_state_stack_pos - 1u];
 } /* jsp_state_top */
 
-static jsp_state_t
+static void
 jsp_state_pop (void)
 {
   JERRY_ASSERT (jsp_state_stack_pos > 0);
@@ -1969,6 +1969,50 @@ static jsp_operand_t
 parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
                   jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
                                                              *   result code store should be dumped */
+{
+  jsp_operand_t expr = parse_assignment_expression (in_allowed);
+
+  while (true)
+  {
+    skip_newlines ();
+
+    if (token_is (TOK_COMMA))
+    {
+      dump_assignment_of_lhs_if_literal (expr);
+
+      skip_newlines ();
+      expr = parse_assignment_expression (in_allowed);
+    }
+    else
+    {
+      lexer_save_token (tok);
+      break;
+    }
+  }
+
+  if (inside_eval
+      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
+      && !inside_function)
+  {
+    dump_variable_assignment (eval_ret_operand () , expr);
+  }
+
+  return expr;
+} /* parse_expression */
+
+/**
+ * Parse an expression
+ *
+ * expression
+ *  : assignment_expression (LT!* ',' LT!* assignment_expression)*
+ *  ;
+ *
+ * @return jsp_operand_t which holds result of expression
+ */
+static jsp_operand_t __attr_unused___
+parse_expression_ (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
+                   jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
+                                                              *   result code store should be dumped */
 {
   JERRY_ASSERT (!is_keyword (KW_FUNCTION));
 
@@ -1991,7 +2035,10 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
   start_state.rewrite_chain = MAX_OPCODES; /* empty chain */
 
   jsp_state_push (start_state);
+  jsp_state_top ();
+  jsp_state_pop ();
 
+#if 0
   while (true)
   {
     jsp_state_t state = jsp_state_top ();
@@ -2098,9 +2145,10 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
     JERRY_ASSERT (new_state.expr_state != JSP_STATE_EXPR_UNINITIALIZED);
     jsp_state_push (new_state);
   }
+#endif
 
   return empty_operand ();
-} /* parse_expression */
+} /* parse_expression_ */
 
 /* variable_declaration
   : Identifier LT!* initialiser?
