@@ -1819,6 +1819,9 @@ parse_assignment_expression (bool in_allowed)
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
+
+  JSP_OPERATOR_COMMA,
+
   JSP_OPERATOR_DELETE,
   JSP_OPERATOR_VOID,
   JSP_OPERATOR_TYPEOF,
@@ -1903,13 +1906,12 @@ typedef enum
 {
   /* Flags */
   JSP_STATE_EXPR_FLAG_NO_FLAGS      = 0x0000, /**< empty flags set */
-  JSP_STATE_EXPR_FLAG_IN_PROCESS    = 0x0100, /**< the expression parse is in process */
-  JSP_STATE_EXPR_FLAG_COMPLETED     = 0x0200, /**< the expression parse completed, no more tokens can be added to
+  JSP_STATE_EXPR_FLAG_COMPLETED     = 0x0100, /**< the expression parse completed, no more tokens can be added to
                                                *   the expression */
-  JSP_STATE_EXPR_FLAG_ARG_LIST      = 0x0400, /**< parsing an argument list, associated with the expression */
-  JSP_STATE_EXPR_FLAG_ARG_COMPLETED = 0x0800, /**< parse of a next argument completed */
-  JSP_STATE_EXPR_FLAG_NO_IN         = 0x1000, /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
-  JSP_STATE_EXPR_FIXED_RET_OPERAND  = 0x2000  /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  JSP_STATE_EXPR_FLAG_ARG_LIST      = 0x0200, /**< parsing an argument list, associated with the expression */
+  JSP_STATE_EXPR_FLAG_ARG_COMPLETED = 0x0400, /**< parse of a next argument completed */
+  JSP_STATE_EXPR_FLAG_NO_IN         = 0x0800, /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  JSP_STATE_EXPR_FIXED_RET_OPERAND  = 0x1000  /**< expression is parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
 } jsp_state_expr_flag_t;
 
 typedef struct
@@ -1948,6 +1950,12 @@ jsp_state_top (void)
   return jsp_state_stack[jsp_state_stack_pos - 1u];
 } /* jsp_state_top */
 
+static bool
+jsp_is_stack_empty (void)
+{
+  return (jsp_state_stack_pos == 0);
+} /* jsp_is_stack_empty */
+
 static void
 jsp_state_pop (void)
 {
@@ -1965,40 +1973,158 @@ jsp_state_pop (void)
  *
  * @return jsp_operand_t which holds result of expression
  */
-static jsp_operand_t
-parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
-                  jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
-                                                             *   result code store should be dumped */
+static jsp_operand_t __attr_unused___
+parse_expression_ (bool in_allowed) /**< flag indicating if 'in' is allowed inside expression to parse */
 {
-  jsp_operand_t expr = parse_assignment_expression (in_allowed);
+  jsp_state_t start_state;
+
+  start_state.state = JSP_STATE_EXPR_EMPTY;
+  start_state.req_expr_type = JSP_STATE_EXPR_EXPRESSION;
+  start_state.operand = empty_operand ();
+  start_state.op = JSP_OPERATOR_NO_OP;
+  start_state.rewrite_chain = MAX_OPCODES; /* empty chain */
+  start_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
+
+  if (!in_allowed)
+  {
+    start_state.flags |= JSP_STATE_EXPR_FLAG_NO_IN;
+  }
+
+  jsp_state_push (start_state);
 
   while (true)
   {
-    skip_newlines ();
+    jsp_state_t state = jsp_state_top ();
+    jsp_state_pop ();
 
-    if (token_is (TOK_COMMA))
+    if (state.state == state.req_expr_type
+        && ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0))
     {
-      dump_assignment_of_lhs_if_literal (expr);
+      if (jsp_is_stack_empty ())
+      {
+        lexer_save_token (tok);
 
-      skip_newlines ();
-      expr = parse_assignment_expression (in_allowed);
+        return state.operand;
+      }
+      else
+      {
+        /*
+         * TODO:
+         *      Consider putting result operand of merged expression to the previous expression and
+         *      setting a corresponding flag in previous expression, instead of merging expressions
+         *      here. In the case, merging of sub-/next- expressions could be performed in handlers
+         *      of corresponding types.
+         */
+        jsp_state_t state_prev = jsp_state_top ();
+        jsp_state_pop ();
+
+        if (state_prev.op == JSP_OPERATOR_COMMA)
+        {
+          /* ECMA-262 v5, 11.14 */
+          JERRY_ASSERT (state_prev.state == JSP_STATE_EXPR_EXPRESSION);
+
+          /*
+           * The operand should be already evaluated
+           *
+           * See also:
+           *          11.14.step 2
+           */
+          // FIXME JERRY_ASSERT (state_prev.operand.is_register_operand ());
+
+          // FIXME
+#if 0
+          if (!state.operand.is_register_operand ())
+          {
+            /* evaluating, if reference */
+            state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          }
+#endif
+
+          state_prev.operand = state.operand;
+
+          jsp_state_push (state_prev);
+        }
+        else
+        {
+          JERRY_UNIMPLEMENTED ("Expression merging with the operator is not implemented yet");
+        }
+
+        continue;
+      }
     }
-    else
+
+    if (state.state == JSP_STATE_EXPR_EMPTY)
     {
-      lexer_save_token (tok);
-      break;
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
+
+      bool in_allowed = ((state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
+
+      state.operand = parse_assignment_expression (in_allowed);
+
+      skip_newlines (); /* FIXME: remove */
+
+      state.state = JSP_STATE_EXPR_ASSIGNMENT;
+      state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
+
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_ASSIGNMENT)
+    {
+      /* currently assignment expressions are parsed through parse_assignment_expression,
+       * so can't be incomplete in the function */
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+      JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+      /* 'assignment expression' production can't be continued with an operator,
+       *  so just propagating it to 'expression' production */
+      state.flags &= ~(JSP_STATE_EXPR_FLAG_COMPLETED);
+      state.state = JSP_STATE_EXPR_EXPRESSION;
+
+      /* ECMA-262 v5, 11.14, step 2 */
+      // FIXME state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_EXPRESSION)
+    {
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
+
+      if (token_is (TOK_COMMA))
+      {
+        skip_newlines ();
+
+        JERRY_ASSERT (!token_is (TOK_COMMA));
+
+        state.op = JSP_OPERATOR_COMMA;
+
+        jsp_state_push (state);
+
+        jsp_state_t state_parse_assignment_expr; /* FIXME: introduce interface for the operation */
+        state_parse_assignment_expr.state = JSP_STATE_EXPR_EMPTY;
+        state_parse_assignment_expr.req_expr_type = JSP_STATE_EXPR_ASSIGNMENT;
+        state_parse_assignment_expr.operand = empty_operand ();
+        state_parse_assignment_expr.op = JSP_OPERATOR_NO_OP;
+        state_parse_assignment_expr.rewrite_chain = MAX_OPCODES; /* empty chain */
+        state_parse_assignment_expr.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
+
+        if ((state.flags & JSP_STATE_EXPR_FLAG_NO_IN) != 0)
+        {
+          state_parse_assignment_expr.flags |= JSP_STATE_EXPR_FLAG_NO_IN;
+        }
+
+        jsp_state_push (state_parse_assignment_expr);
+      }
+      else
+      {
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
     }
   }
 
-  if (inside_eval
-      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
-      && !inside_function)
-  {
-    dump_variable_assignment (eval_ret_operand () , expr);
-  }
-
-  return expr;
-} /* parse_expression */
+  return empty_operand ();
+} /* parse_expression_ */
 
 /**
  * Parse an expression
@@ -2009,146 +2135,22 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
  *
  * @return jsp_operand_t which holds result of expression
  */
-static jsp_operand_t __attr_unused___
-parse_expression_ (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
-                   jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
-                                                              *   result code store should be dumped */
+static jsp_operand_t
+parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
+                  jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
+                                                             *   result code store should be dumped */
 {
-  JERRY_ASSERT (!is_keyword (KW_FUNCTION));
+  jsp_operand_t expr = parse_expression_ (in_allowed);
 
-  (void) in_allowed;
-  (void) dump_eval_ret_store;
-
-  jsp_state_t start_state;
-
-  start_state.state = JSP_STATE_EXPR_EMPTY;
-
-  start_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
-  if (in_allowed)
+  if (inside_eval
+      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
+      && !inside_function)
   {
-    start_state.flags |= JSP_STATE_EXPR_FLAG_NO_IN;
+    dump_variable_assignment (eval_ret_operand (), expr);
   }
 
-  start_state.req_expr_type = JSP_STATE_EXPR_EXPRESSION;
-  start_state.operand = empty_operand ();
-  start_state.op = JSP_OPERATOR_NO_OP;
-  start_state.rewrite_chain = MAX_OPCODES; /* empty chain */
-
-  jsp_state_push (start_state);
-  jsp_state_top ();
-  jsp_state_pop ();
-
-#if 0
-  while (true)
-  {
-    jsp_state_t state = jsp_state_top ();
-    jsp_state_pop ();
-
-    if (state.state == JSP_STATE_EXPR_EMPTY)
-    {
-      if (token_is (TOK_KEYWORD))
-      {
-        if (is_keyword (KW_THIS))
-        {
-          state.state = JSP_STATE_EXPR_PRIMARY;
-          state.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
-        }
-        else if (is_keyword (KW_FUNCTION))
-        {
-          JERRY_UNIMPLEMENTED ("function expression parse is not implemented");
-        }
-        else if (is_keyword (KW_NEW))
-        {
-          jsp_state_t new_state;
-
-          new_state.state = JSP_STATE_EXPR_EMPTY;
-          new_state.req_expr_type = JSP_STATE_EXPR_MEMBER;
-          new_state.operand = state.operand;
-          new_state.flags = state.flags & (JSP_STATE_EXPR_FLAG_NO_IN | JSP_STATE_EXPR_FIXED_RET_OPERAND);
-
-          state.state = JSP_STATE_EXPR_NEW;
-
-          jsp_state_push (state);
-          jsp_state_push (new_state);
-        }
-        else if (is_keyword (KW_DELETE)
-                 || is_keyword (KW_VOID)
-                 || is_keyword (KW_TYPEOF))
-        {
-          new_state.expr_state = JSP_STATE_EXPR_UNARY;
-
-          if (is_keyword (KW_DELETE))
-          {
-            new_state.expr_op.unary_expr_op = JSP_UNARY_EXPR_OP_DELETE;
-          }
-          else if (is_keyword (KW_VOID))
-          {
-            new_state.expr_op.unary_expr_op = JSP_UNARY_EXPR_OP_VOID;
-          }
-          else
-          {
-            JERRY_ASSERT (is_keyword (KW_TYPEOF));
-
-            new_state.expr_op.unary_expr_op = JSP_UNARY_EXPR_OP_TYPEOF;
-          }
-        }
-      }
-    }
-    else if (current_state.expr_state == JSP_STATE_EXPR_PRIMARY)
-    {
-      new_state = current_state;
-
-      new_state.expr_state = JSP_STATE_EXPR_MEMBER;
-      new_state.expr_op.member_expr_op = JSP_MEMBER_EXPR_OP_NO_OP;
-    }
-    else if (current_state.expr_state == JSP_STATE_EXPR_MEMBER)
-    {
-      new_state = current_state;
-
-      if (current_state.expr_op.member_expr_op == JSP_MEMBER_EXPR_OP_NO_OP)
-      {
-        if (token_is (TOK_OPEN_SQUARE))
-        {
-          new_state.expr_state = JSP_STATE_EXPR_START;
-        }
-      }
-      else if (current_state.expr_op.member_expr_op == JSP_MEMBER_EXPR_OP_NEW)
-      {
-        if (token_is (TOK_OPEN_PAREN))
-        {
-          new_state.expr_op.member_expr_op = JSP_MEMBER_EXPR_OP_NEW_ARGS_LIST;
-        }
-        else
-        {
-          new_state.expr_state = JSP_STATE_EXPR_END;
-        }
-      }
-      else if (current_state.expr_op.member_expr_op == JSP_MEMBER_EXPR_OP_NEW_ARGS_LIST)
-      {
-        if (token_is (TOK_CLOSE_PAREN))
-        {
-        }
-        else
-        {
-          jsp_state_push (current_state);
-        }
-
-        new_state.expr_state = JSP_ARGS_LIST;
-      }
-    }
-    else if (current_state.expr_state == JSP_STATE_EXPR_END)
-    {
-      /* FIXME: continue to outer expression, if any */
-      break;
-    }
-
-    JERRY_ASSERT (new_state.expr_state != JSP_STATE_EXPR_UNINITIALIZED);
-    jsp_state_push (new_state);
-  }
-#endif
-
-  return empty_operand ();
-} /* parse_expression_ */
+  return expr;
+} /* parse_expression */
 
 /* variable_declaration
   : Identifier LT!* initialiser?
