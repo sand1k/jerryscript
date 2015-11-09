@@ -2028,18 +2028,15 @@ parse_expression_ (bool in_allowed) /**< flag indicating if 'in' is allowed insi
            * The operand should be already evaluated
            *
            * See also:
-           *          11.14.step 2
+           *          11.14, step 2
            */
-          // FIXME JERRY_ASSERT (state_prev.operand.is_register_operand ());
+          JERRY_ASSERT (state_prev.operand.is_register_operand ());
 
-          // FIXME
-#if 0
           if (!state.operand.is_register_operand ())
           {
             /* evaluating, if reference */
             state.operand = dump_assignment_of_lhs_if_literal (state.operand);
           }
-#endif
 
           state_prev.operand = state.operand;
 
@@ -2081,9 +2078,6 @@ parse_expression_ (bool in_allowed) /**< flag indicating if 'in' is allowed insi
       state.flags &= ~(JSP_STATE_EXPR_FLAG_COMPLETED);
       state.state = JSP_STATE_EXPR_EXPRESSION;
 
-      /* ECMA-262 v5, 11.14, step 2 */
-      // FIXME state.operand = dump_assignment_of_lhs_if_literal (state.operand);
-
       jsp_state_push (state);
     }
     else if (state.state == JSP_STATE_EXPR_EXPRESSION)
@@ -2097,6 +2091,9 @@ parse_expression_ (bool in_allowed) /**< flag indicating if 'in' is allowed insi
         JERRY_ASSERT (!token_is (TOK_COMMA));
 
         state.op = JSP_OPERATOR_COMMA;
+
+        /* ECMA-262 v5, 11.14, step 2*/
+        state.operand = dump_assignment_of_lhs_if_literal (state.operand);
 
         jsp_state_push (state);
 
