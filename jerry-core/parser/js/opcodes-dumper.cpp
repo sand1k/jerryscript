@@ -537,7 +537,7 @@ jsp_dmp_create_op_meta_3 (vm_op_t opcode, /**< opcode */
   return jsp_dmp_create_op_meta (opcode, ops, 3);
 } /* jsp_dmp_create_op_meta_3 */
 
-static jsp_operand_t
+jsp_operand_t
 tmp_operand (void)
 {
   return jsp_operand_t::make_reg_operand (jsp_alloc_reg_for_temp ());
