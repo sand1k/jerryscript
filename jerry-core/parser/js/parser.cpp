@@ -1484,59 +1484,6 @@ done:
   return expr;
 }
 
-/* equality_expression
-  : relational_expression (LT!* ('==' | '!=' | '===' | '!==') LT!* relational_expression)*
-  ; */
-static jsp_operand_t
-parse_equality_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_relational_expression (in_allowed);
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_DOUBLE_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_equal_value_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      case TOK_NOT_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_not_equal_value_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      case TOK_TRIPLE_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_equal_value_type_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      case TOK_NOT_DOUBLE_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_not_equal_value_type_res (expr, parse_relational_expression (in_allowed));
-        break;
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1590,6 +1537,11 @@ typedef enum
   JSP_OPERATOR_ASSIGN_LSHIFT,
   JSP_OPERATOR_ASSIGN_RSHIFT,
   JSP_OPERATOR_ASSIGN_RSHIFT_U,
+
+  JSP_OPERATOR_EQUAL,
+  JSP_OPERATOR_NOT_EQUAL,
+  JSP_OPERATOR_STRICT_EQUAL,
+  JSP_OPERATOR_STRICT_NOT_EQUAL,
 
   JSP_OPERATOR_LESS,
   JSP_OPERATOR_GREATER,
@@ -1777,7 +1729,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_equality_expression (in_allowed);
+      state.operand = parse_relational_expression (in_allowed);
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1802,7 +1754,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_EQUALITY;
+        state.state = JSP_STATE_EXPR_RELATIONAL;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
@@ -1863,19 +1815,100 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_state_push (state);
       }
     }
-    else if (state.state == JSP_STATE_EXPR_EQUALITY)
+    else if (state.state == JSP_STATE_EXPR_RELATIONAL)
     {
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-      JERRY_ASSERT (!token_is (TOK_DOUBLE_EQ)
-                    && !token_is (TOK_NOT_EQ)
-                    && !token_is (TOK_TRIPLE_EQ)
-                    && !token_is (TOK_NOT_DOUBLE_EQ));
 
-      /* propagate to BitwiseAndExpression */
-      state.state = JSP_STATE_EXPR_BITWISE_AND;
+      /* propagate to EqualityExpression */
+      state.state = JSP_STATE_EXPR_EQUALITY;
       state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_EQUALITY)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to BitwiseAndExpression */
+        state.state = JSP_STATE_EXPR_BITWISE_AND;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          if (state.op == JSP_OPERATOR_EQUAL)
+          {
+            dump_equal_value (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_NOT_EQUAL)
+          {
+            dump_not_equal_value (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_STRICT_EQUAL)
+          {
+            dump_equal_value_type (state.operand, state.operand, subexpr_state.operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state.op == JSP_OPERATOR_STRICT_NOT_EQUAL);
+
+            dump_not_equal_value_type (state.operand, state.operand, subexpr_state.operand);
+          }
+
+          state.op = JSP_OPERATOR_NO_OP;
+
+          jsp_state_push (state);
+        }
+        else if (token_is (TOK_DOUBLE_EQ))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_EQUAL;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+        }
+        else if (token_is (TOK_NOT_EQ))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_NOT_EQUAL;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+        }
+        else if (token_is (TOK_TRIPLE_EQ))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_STRICT_EQUAL;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+        }
+        else if (token_is (TOK_NOT_DOUBLE_EQ))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_STRICT_NOT_EQUAL;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+        }
+        else
+        {
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          jsp_state_push (state);
+        }
+      }
     }
     else if (state.state == JSP_STATE_EXPR_BITWISE_AND)
     {
