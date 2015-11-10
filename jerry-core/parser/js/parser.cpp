@@ -1653,41 +1653,6 @@ parse_logical_and_expression (bool in_allowed)
   return tmp;
 }
 
-/* logical_or_expression
-  : logical_and_expression (LT!* '||' LT!* logical_and_expression)*
-  ; */
-static jsp_operand_t
-parse_logical_or_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_logical_and_expression (in_allowed), tmp;
-  skip_newlines ();
-  if (token_is (TOK_DOUBLE_OR))
-  {
-    tmp = dump_variable_assignment_res (expr);
-    start_dumping_logical_or_checks ();
-    dump_logical_or_check_for_rewrite (tmp);
-  }
-  else
-  {
-    lexer_save_token (tok);
-    return expr;
-  }
-  while (token_is (TOK_DOUBLE_OR))
-  {
-    skip_newlines ();
-    expr = parse_logical_and_expression (in_allowed);
-    dump_variable_assignment (tmp, expr);
-    skip_newlines ();
-    if (token_is (TOK_DOUBLE_OR))
-    {
-      dump_logical_or_check_for_rewrite (tmp);
-    }
-  }
-  lexer_save_token (tok);
-  rewrite_logical_or_checks ();
-  return tmp;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1696,6 +1661,9 @@ typedef enum
 
   JSP_OPERATOR_QUERY,
   JSP_OPERATOR_COLON,
+
+  JSP_OPERATOR_LOGICAL_OR,
+  JSP_OPERATOR_LOGICAL_AND,
 
   JSP_OPERATOR_DELETE,
   JSP_OPERATOR_VOID,
@@ -1789,8 +1757,9 @@ typedef enum
   JSP_STATE_EXPR_FLAG_ARG_COMPLETED      = 0x0400, /**< parse of a next argument completed */
   JSP_STATE_EXPR_FLAG_NO_IN              = 0x0800, /**< expression is parsed in NoIn mode
                                                     *   (see also: ECMA-262 v5, 11.8) */
-  JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND  = 0x1000  /**< the expression's evaluation should produce value that should be
+  JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND  = 0x1000, /**< the expression's evaluation should produce value that should be
                                                     *   put to register, specified by operand, specified in state */
+  JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION = 0x2000, /**< parse of a next argument completed */
 } jsp_state_expr_flag_t;
 
 typedef struct
@@ -1924,7 +1893,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       bool in_allowed = ((state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
 
-      state.operand = parse_logical_or_expression (in_allowed);
+      state.operand = parse_logical_and_expression (in_allowed);
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1949,7 +1918,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_LOGICAL_OR;
+        state.state = JSP_STATE_EXPR_LOGICAL_AND;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
@@ -1980,7 +1949,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           jsp_state_push (state);
 
           jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT,
-                                   (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) != 0);
+                                   (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
         }
         else
         {
@@ -2011,40 +1980,109 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_state_push (state);
       }
     }
+    else if (state.state == JSP_STATE_EXPR_LOGICAL_AND)
+    {
+      /* parsed through parse_logical_and_expression */
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+      JERRY_ASSERT (!token_is (TOK_DOUBLE_AND));
+
+      /* propagate to LogicalOrExpression */
+      state.state = JSP_STATE_EXPR_LOGICAL_OR;
+      state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+      jsp_state_push (state);
+    }
     else if (state.state == JSP_STATE_EXPR_LOGICAL_OR)
     {
-      /* FIXME: Unimplemented */
-      JERRY_ASSERT (!is_subexpr_end);
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      /* parsed through parse_logical_or_expression */
-      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-      JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
-
-      state.state = JSP_STATE_EXPR_CONDITION;
-
-      if (token_is (TOK_QUERY))
+      if (is_subexpr_end)
       {
-        /* ECMA-262 v5, 11.12 */
-        skip_newlines ();
+        JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_OR);
 
-        dump_conditional_check_for_rewrite (state.operand);
+        JERRY_ASSERT (state.operand.is_register_operand ());
+        dump_variable_assignment (state.operand, subexpr_state.operand);
 
-        state.op = JSP_OPERATOR_QUERY;
-        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
-
-        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) == 0);
-
-        state.flags |= JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
-        state.operand = tmp_operand ();
+        state.op = JSP_OPERATOR_NO_OP;
 
         jsp_state_push (state);
-
-        jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
       }
       else
       {
-        /* just propagate */
-        jsp_state_push (state);
+        JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+        if (token_is (TOK_DOUBLE_OR))
+        {
+          /* ECMA-262 v5, 11.11 (complex LogicalOrExpression) */
+          skip_newlines ();
+
+          if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) == 0)
+          {
+            state.flags |= JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
+
+            JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) == 0);
+
+            jsp_operand_t ret = tmp_operand ();
+            dump_variable_assignment (ret, state.operand);
+
+            start_dumping_logical_or_checks ();
+
+            state.flags |= JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
+            state.operand = ret;
+          }
+
+          JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) != 0);
+
+          dump_logical_or_check_for_rewrite (state.operand);
+
+          state.op = JSP_OPERATOR_LOGICAL_OR;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_LOGICAL_AND, (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
+        }
+        else
+        {
+          /* end of LogicalOrExpression */
+          JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+          if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) != 0)
+          {
+            rewrite_logical_or_checks ();
+
+            state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
+          }
+
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          /* switching to ConditionalExpression */
+          state.state = JSP_STATE_EXPR_CONDITION;
+
+          if (token_is (TOK_QUERY))
+          {
+            state.state = JSP_STATE_EXPR_CONDITION;
+            state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+            /* ECMA-262 v5, 11.12 */
+            skip_newlines ();
+
+            dump_conditional_check_for_rewrite (state.operand);
+
+            state.op = JSP_OPERATOR_QUERY;
+
+            JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) == 0);
+
+            state.flags |= JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
+            state.operand = tmp_operand ();
+
+            jsp_state_push (state);
+            jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+          }
+          else
+          {
+            /* just propagate */
+            jsp_state_push (state);
+          }
+        }
       }
     }
     else if (state.state == JSP_STATE_EXPR_LEFTHANDSIDE)
@@ -2212,7 +2250,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           /* FIXME: propagate to PostfixExpression */
 
-          /* currently impossible, as lhse is parsed through parse_logical_or_expression */
+          /* currently impossible, as lhse is parsed through parse_logical_and_expression */
           JERRY_UNREACHABLE ();
         }
       }
@@ -2276,7 +2314,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           jsp_state_push (state);
 
           jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT,
-                                   (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) != 0);
+                                   (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
         }
         else
         {
