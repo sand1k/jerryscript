@@ -2015,6 +2015,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
           /* ECMA-262 v5, 11.11 (complex LogicalOrExpression) */
           skip_newlines ();
 
+          /*
+           * FIXME:
+           *       Consider eliminating COMPLEX_PRODUCTION flag through implementing rewrite chain
+           */
+
           if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) == 0)
           {
             state.flags |= JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
