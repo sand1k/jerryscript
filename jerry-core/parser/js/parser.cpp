@@ -1325,45 +1325,6 @@ done:
   return expr;
 }
 
-/* additive_expression
-  : multiplicative_expression (LT!* ('+' | '-') LT!* multiplicative_expression)*
-  ; */
-static jsp_operand_t
-parse_additive_expression (void)
-{
-  jsp_operand_t expr = parse_multiplicative_expression ();
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_PLUS:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_addition_res (expr, parse_multiplicative_expression ());
-        break;
-      }
-      case TOK_MINUS:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_substraction_res (expr, parse_multiplicative_expression ());
-        break;
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1609,7 +1570,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_additive_expression ();
+      state.operand = parse_multiplicative_expression ();
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1634,22 +1595,79 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_ADDITIVE;
+        state.state = JSP_STATE_EXPR_MULTIPLICATIVE;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
 
       jsp_state_push (state);
     }
-    else if (state.state == JSP_STATE_EXPR_ADDITIVE)
+    else if (state.state == JSP_STATE_EXPR_MULTIPLICATIVE)
     {
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
-      /* propagate to ShiftExpression */
-      state.state = JSP_STATE_EXPR_SHIFT;
+      /* propagate to AdditiveExpression */
+      state.state = JSP_STATE_EXPR_ADDITIVE;
       state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_ADDITIVE)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to ShiftExpression */
+        state.state = JSP_STATE_EXPR_SHIFT;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          if (state.op == JSP_OPERATOR_ADD)
+          {
+            dump_addition (state.operand, state.operand, subexpr_state.operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state.op == JSP_OPERATOR_SUB);
+
+            dump_substraction (state.operand, state.operand, subexpr_state.operand);
+          }
+
+          state.op = JSP_OPERATOR_NO_OP;
+
+          jsp_state_push (state);
+        }
+        else if (token_is (TOK_PLUS))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_ADD;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
+        }
+        else if (token_is (TOK_MINUS))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_SUB;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
+        }
+        else
+        {
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          jsp_state_push (state);
+        }
+      }
     }
     else if (state.state == JSP_STATE_EXPR_SHIFT)
     {
