@@ -1410,80 +1410,6 @@ done:
   return expr;
 }
 
-/* relational_expression
-  : shift_expression (LT!* ('<' | '>' | '<=' | '>=' | 'instanceof' | 'in') LT!* shift_expression)*
-  ; */
-static jsp_operand_t
-parse_relational_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_shift_expression ();
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_LESS:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_less_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_GREATER:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_greater_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_LESS_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_less_or_equal_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_GREATER_EQ:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_greater_or_equal_than_res (expr, parse_shift_expression ());
-        break;
-      }
-      case TOK_KEYWORD:
-      {
-        if (is_keyword (KW_INSTANCEOF))
-        {
-          expr = dump_assignment_of_lhs_if_literal (expr);
-          skip_newlines ();
-          expr = dump_instanceof_res (expr, parse_shift_expression ());
-          break;
-        }
-        else if (is_keyword (KW_IN))
-        {
-          if (in_allowed)
-          {
-            expr = dump_assignment_of_lhs_if_literal (expr);
-            skip_newlines ();
-            expr = dump_in_res (expr, parse_shift_expression ());
-            break;
-          }
-        }
-        /* FALLTHROUGH */
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1729,7 +1655,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_relational_expression (in_allowed);
+      state.operand = parse_shift_expression ();
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1754,7 +1680,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_RELATIONAL;
+        state.state = JSP_STATE_EXPR_SHIFT;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
@@ -1815,15 +1741,129 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_state_push (state);
       }
     }
-    else if (state.state == JSP_STATE_EXPR_RELATIONAL)
+    else if (state.state == JSP_STATE_EXPR_SHIFT)
     {
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
-      /* propagate to EqualityExpression */
-      state.state = JSP_STATE_EXPR_EQUALITY;
+      /* propagate to RelationalExpression */
+      state.state = JSP_STATE_EXPR_RELATIONAL;
       state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_RELATIONAL)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to EqualityExpression */
+        state.state = JSP_STATE_EXPR_EQUALITY;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          if (state.op == JSP_OPERATOR_LESS)
+          {
+            dump_less_than (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_GREATER)
+          {
+            dump_greater_than (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_LESS_OR_EQUAL)
+          {
+            dump_less_or_equal_than (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_GREATER_OR_EQUAL)
+          {
+            dump_greater_or_equal_than (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_INSTANCEOF)
+          {
+            dump_instanceof (state.operand, state.operand, subexpr_state.operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state.op == JSP_OPERATOR_IN);
+            JERRY_ASSERT (in_allowed);
+
+            dump_in (state.operand, state.operand, subexpr_state.operand);
+          }
+
+          state.op = JSP_OPERATOR_NO_OP;
+
+          jsp_state_push (state);
+        }
+        else if (token_is (TOK_LESS))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_LESS;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+        }
+        else if (token_is (TOK_GREATER))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_GREATER;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+        }
+        else if (token_is (TOK_LESS_EQ))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_LESS_OR_EQUAL;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+        }
+        else if (token_is (TOK_GREATER_EQ))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_GREATER_OR_EQUAL;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+        }
+        else if (token_is (TOK_KEYWORD) && is_keyword (KW_INSTANCEOF))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_INSTANCEOF;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+        }
+        else if (in_allowed && token_is (TOK_KEYWORD) && is_keyword (KW_IN))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_IN;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+        }
+        else
+        {
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          jsp_state_push (state);
+        }
+      }
     }
     else if (state.state == JSP_STATE_EXPR_EQUALITY)
     {
