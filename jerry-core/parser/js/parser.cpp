@@ -1883,12 +1883,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
   while (true)
   {
-    jsp_state_t state, state_to_merge;
+    jsp_state_t state, subexpr_state;
 
     state = jsp_state_top ();
     jsp_state_pop ();
 
-    bool is_merge = false;
+    bool is_subexpr_end = false;
 
     if (state.state == state.req_expr_type
         && ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0))
@@ -1899,28 +1899,26 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         lexer_save_token (tok);
 
+        /* expression parse finished */
         return state.operand;
       }
       else
       {
-        is_merge = true;
+        is_subexpr_end = true;
+
+        subexpr_state = state;
+
+        state = jsp_state_top ();
+        jsp_state_pop ();
+
+        JERRY_ASSERT ((subexpr_state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
       }
-    }
-
-    if (is_merge)
-    {
-      state_to_merge = state;
-
-      state = jsp_state_top ();
-      jsp_state_pop ();
-
-      JERRY_ASSERT ((state_to_merge.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
     }
 
     if (state.state == JSP_STATE_EXPR_EMPTY)
     {
-      /* nothing to merge, as expression is empty */
-      JERRY_ASSERT (!is_merge);
+      /* no subexpressions can occur, as expression parse is just started */
+      JERRY_ASSERT (!is_subexpr_end);
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
@@ -1961,7 +1959,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
     else if (state.state == JSP_STATE_EXPR_CONDITION)
     {
       /* ECMA-262 v5, 11.12 */
-      if (is_merge)
+      if (is_subexpr_end)
       {
         if (state.op == JSP_OPERATOR_QUERY)
         {
@@ -1970,9 +1968,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
           JERRY_ASSERT (state.operand.is_register_operand ());
-          JERRY_ASSERT (state_to_merge.state == JSP_STATE_EXPR_ASSIGNMENT);
+          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
 
-          dump_variable_assignment (state.operand, state_to_merge.operand);
+          dump_variable_assignment (state.operand, subexpr_state.operand);
 
           dump_jump_to_end_for_rewrite ();
           rewrite_conditional_check ();
@@ -1990,9 +1988,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
           JERRY_ASSERT (state.operand.is_register_operand ());
-          JERRY_ASSERT (state_to_merge.state == JSP_STATE_EXPR_ASSIGNMENT);
+          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
 
-          dump_variable_assignment (state.operand, state_to_merge.operand);
+          dump_variable_assignment (state.operand, subexpr_state.operand);
           rewrite_jump_to_end ();
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2004,7 +2002,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        /* ConditionalExpression can't be continued, so just propagate it to AssignmentExpression */
+        /* ConditionalExpression is finished, so can't contain more subexpressions,
+         * so just propagate it to AssignmentExpression */
         JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
         state.state = JSP_STATE_EXPR_ASSIGNMENT;
@@ -2015,7 +2014,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
     else if (state.state == JSP_STATE_EXPR_LOGICAL_OR)
     {
       /* FIXME: Unimplemented */
-      JERRY_ASSERT (!is_merge);
+      JERRY_ASSERT (!is_subexpr_end);
 
       /* parsed through parse_logical_or_expression */
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
@@ -2050,77 +2049,77 @@ parse_expression_ (jsp_state_expr_t req_expr,
     }
     else if (state.state == JSP_STATE_EXPR_LEFTHANDSIDE)
     {
-      if (is_merge)
+      if (is_subexpr_end)
       {
-        JERRY_ASSERT (state.op == JSP_OPERATOR_ASSIGN
-                      || state.op == JSP_OPERATOR_ASSIGN_MUL
-                      || state.op == JSP_OPERATOR_ASSIGN_DIV
-                      || state.op == JSP_OPERATOR_ASSIGN_MOD
-                      || state.op == JSP_OPERATOR_ASSIGN_ADD
-                      || state.op == JSP_OPERATOR_ASSIGN_SUB
-                      || state.op == JSP_OPERATOR_ASSIGN_LSHIFT
-                      || state.op == JSP_OPERATOR_ASSIGN_RSHIFT
-                      || state.op == JSP_OPERATOR_ASSIGN_RSHIFT_U
-                      || state.op == JSP_OPERATOR_ASSIGN_B_AND
-                      || state.op == JSP_OPERATOR_ASSIGN_B_XOR
-                      || state.op == JSP_OPERATOR_ASSIGN_B_OR);
-
-        if (state.op == JSP_OPERATOR_ASSIGN)
-        {
-          state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_MUL)
-        {
-          state.operand = dump_prop_setter_or_multiplication_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_DIV)
-        {
-          state.operand = dump_prop_setter_or_division_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_MOD)
-        {
-          state.operand = dump_prop_setter_or_remainder_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_ADD)
-        {
-          state.operand = dump_prop_setter_or_addition_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_SUB)
-        {
-          state.operand = dump_prop_setter_or_substraction_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_LSHIFT)
-        {
-          state.operand = dump_prop_setter_or_left_shift_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_RSHIFT)
-        {
-          state.operand = dump_prop_setter_or_right_shift_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_RSHIFT_U)
-        {
-          state.operand = dump_prop_setter_or_right_shift_ex_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_B_AND)
-        {
-          state.operand = dump_prop_setter_or_bitwise_and_res (state.operand, state_to_merge.operand);
-        }
-        else if (state.op == JSP_OPERATOR_ASSIGN_B_XOR)
-        {
-          state.operand = dump_prop_setter_or_bitwise_xor_res (state.operand, state_to_merge.operand);
-        }
-        else
-        {
-          JERRY_ASSERT (state.op == JSP_OPERATOR_ASSIGN_B_OR);
-
-          state.operand = dump_prop_setter_or_bitwise_or_res (state.operand, state_to_merge.operand);
-        }
-
-        JERRY_ASSERT (state.state == JSP_STATE_EXPR_LEFTHANDSIDE);
+        jsp_operator_t op = state.op;
 
         state.state = JSP_STATE_EXPR_ASSIGNMENT;
         state.op = JSP_OPERATOR_NO_OP;
         state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN
+                      || op == JSP_OPERATOR_ASSIGN_MUL
+                      || op == JSP_OPERATOR_ASSIGN_DIV
+                      || op == JSP_OPERATOR_ASSIGN_MOD
+                      || op == JSP_OPERATOR_ASSIGN_ADD
+                      || op == JSP_OPERATOR_ASSIGN_SUB
+                      || op == JSP_OPERATOR_ASSIGN_LSHIFT
+                      || op == JSP_OPERATOR_ASSIGN_RSHIFT
+                      || op == JSP_OPERATOR_ASSIGN_RSHIFT_U
+                      || op == JSP_OPERATOR_ASSIGN_B_AND
+                      || op == JSP_OPERATOR_ASSIGN_B_XOR
+                      || op == JSP_OPERATOR_ASSIGN_B_OR);
+
+        if (op == JSP_OPERATOR_ASSIGN)
+        {
+          state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_MUL)
+        {
+          state.operand = dump_prop_setter_or_multiplication_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_DIV)
+        {
+          state.operand = dump_prop_setter_or_division_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_MOD)
+        {
+          state.operand = dump_prop_setter_or_remainder_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_ADD)
+        {
+          state.operand = dump_prop_setter_or_addition_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_SUB)
+        {
+          state.operand = dump_prop_setter_or_substraction_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_LSHIFT)
+        {
+          state.operand = dump_prop_setter_or_left_shift_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_RSHIFT)
+        {
+          state.operand = dump_prop_setter_or_right_shift_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_RSHIFT_U)
+        {
+          state.operand = dump_prop_setter_or_right_shift_ex_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_B_AND)
+        {
+          state.operand = dump_prop_setter_or_bitwise_and_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_B_XOR)
+        {
+          state.operand = dump_prop_setter_or_bitwise_xor_res (state.operand, subexpr_state.operand);
+        }
+        else
+        {
+          JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN_B_OR);
+
+          state.operand = dump_prop_setter_or_bitwise_or_res (state.operand, subexpr_state.operand);
+        }
 
         jsp_state_push (state);
       }
@@ -2207,23 +2206,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
 
           jsp_state_push (state);
-
-          /* require assignment expression */
-          jsp_state_t assign_expr_req_state;
-
-          assign_expr_req_state.state = JSP_STATE_EXPR_EMPTY;
-          assign_expr_req_state.req_expr_type = JSP_STATE_EXPR_ASSIGNMENT;
-          assign_expr_req_state.operand = empty_operand ();
-          assign_expr_req_state.op = JSP_OPERATOR_NO_OP;
-          assign_expr_req_state.rewrite_chain = MAX_OPCODES; /* empty chain */
-          assign_expr_req_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
-
-          if (!in_allowed)
-          {
-            assign_expr_req_state.flags |= JSP_STATE_EXPR_FLAG_NO_IN;
-          }
-
-          jsp_state_push (assign_expr_req_state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
         }
         else
         {
@@ -2237,7 +2220,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
     else if (state.state == JSP_STATE_EXPR_ASSIGNMENT)
     {
       /* assignment production can't be continued at the point */
-      JERRY_ASSERT (!is_merge);
+      JERRY_ASSERT (!is_subexpr_end);
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
       JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
@@ -2253,7 +2236,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
     {
       /* ECMA-262 v5, 11.14 */
 
-      if (is_merge)
+      if (is_subexpr_end)
       {
         JERRY_ASSERT (state.op == JSP_OPERATOR_COMMA);
 
@@ -2265,13 +2248,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
          */
         JERRY_ASSERT (state.operand.is_register_operand ());
 
-        if (!state_to_merge.operand.is_register_operand ())
+        if (!subexpr_state.operand.is_register_operand ())
         {
           /* evaluating, if reference */
-          state_to_merge.operand = dump_assignment_of_lhs_if_literal (state_to_merge.operand);
+          subexpr_state.operand = dump_assignment_of_lhs_if_literal (subexpr_state.operand);
         }
 
-        state.operand = state_to_merge.operand;
+        state.operand = subexpr_state.operand;
 
         jsp_state_push (state);
       }
