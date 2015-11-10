@@ -1364,52 +1364,6 @@ done:
   return expr;
 }
 
-/* shift_expression
-  : additive_expression (LT!* ('<<' | '>>' | '>>>') LT!* additive_expression)*
-  ; */
-static jsp_operand_t
-parse_shift_expression (void)
-{
-  jsp_operand_t expr = parse_additive_expression ();
-
-  skip_newlines ();
-  while (true)
-  {
-    switch (tok.type)
-    {
-      case TOK_LSHIFT:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_left_shift_res (expr, parse_additive_expression ());
-        break;
-      }
-      case TOK_RSHIFT:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_right_shift_res (expr, parse_additive_expression ());
-        break;
-      }
-      case TOK_RSHIFT_EX:
-      {
-        expr = dump_assignment_of_lhs_if_literal (expr);
-        skip_newlines ();
-        expr = dump_right_shift_ex_res (expr, parse_additive_expression ());
-        break;
-      }
-      default:
-      {
-        lexer_save_token (tok);
-        goto done;
-      }
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1655,7 +1609,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_shift_expression ();
+      state.operand = parse_additive_expression ();
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1680,76 +1634,93 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_SHIFT;
+        state.state = JSP_STATE_EXPR_ADDITIVE;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
 
       jsp_state_push (state);
     }
-    else if (state.state == JSP_STATE_EXPR_CONDITION)
+    else if (state.state == JSP_STATE_EXPR_ADDITIVE)
     {
-      /* ECMA-262 v5, 11.12 */
-      if (is_subexpr_end)
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+
+      /* propagate to ShiftExpression */
+      state.state = JSP_STATE_EXPR_SHIFT;
+      state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_SHIFT)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
       {
-        if (state.op == JSP_OPERATOR_QUERY)
+        /* propagate to RelationalExpression */
+        state.state = JSP_STATE_EXPR_RELATIONAL;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
         {
-          current_token_must_be (TOK_COLON);
-          skip_newlines ();
+          if (state.op == JSP_OPERATOR_LSHIFT)
+          {
+            dump_left_shift (state.operand, state.operand, subexpr_state.operand);
+          }
+          else if (state.op == JSP_OPERATOR_RSHIFT)
+          {
+            dump_right_shift (state.operand, state.operand, subexpr_state.operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state.op == JSP_OPERATOR_RSHIFT_U);
 
-          JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
-          JERRY_ASSERT (state.operand.is_register_operand ());
-          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+            dump_right_shift_ex (state.operand, state.operand, subexpr_state.operand);
+          }
 
-          dump_variable_assignment (state.operand, subexpr_state.operand);
-
-          dump_jump_to_end_for_rewrite ();
-          rewrite_conditional_check ();
-
-          state.op = JSP_OPERATOR_COLON;
+          state.op = JSP_OPERATOR_NO_OP;
 
           jsp_state_push (state);
+        }
+        else if (token_is (TOK_LSHIFT))
+        {
+          skip_newlines ();
 
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_LSHIFT;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ADDITIVE, in_allowed);
+        }
+        else if (token_is (TOK_RSHIFT))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_RSHIFT;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ADDITIVE, in_allowed);
+        }
+        else if (token_is (TOK_RSHIFT_EX))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_RSHIFT_U;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ADDITIVE, in_allowed);
         }
         else
         {
-          JERRY_ASSERT (state.op == JSP_OPERATOR_COLON);
-
-          JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
-          JERRY_ASSERT (state.operand.is_register_operand ());
-          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
-
-          dump_variable_assignment (state.operand, subexpr_state.operand);
-          rewrite_jump_to_end ();
-
-          state.op = JSP_OPERATOR_NO_OP;
-          state.flags &= ~JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
           state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
 
           jsp_state_push (state);
         }
       }
-      else
-      {
-        /* ConditionalExpression is finished, so can't contain more subexpressions,
-         * so just propagate it to AssignmentExpression */
-        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-
-        state.state = JSP_STATE_EXPR_ASSIGNMENT;
-
-        jsp_state_push (state);
-      }
-    }
-    else if (state.state == JSP_STATE_EXPR_SHIFT)
-    {
-      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-
-      /* propagate to RelationalExpression */
-      state.state = JSP_STATE_EXPR_RELATIONAL;
-      state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
-
-      jsp_state_push (state);
     }
     else if (state.state == JSP_STATE_EXPR_RELATIONAL)
     {
@@ -2436,6 +2407,60 @@ parse_expression_ (jsp_state_expr_t req_expr,
       state.state = JSP_STATE_EXPR_EXPRESSION;
 
       jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_CONDITION)
+    {
+      /* ECMA-262 v5, 11.12 */
+      if (is_subexpr_end)
+      {
+        if (state.op == JSP_OPERATOR_QUERY)
+        {
+          current_token_must_be (TOK_COLON);
+          skip_newlines ();
+
+          JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
+          JERRY_ASSERT (state.operand.is_register_operand ());
+          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+
+          dump_variable_assignment (state.operand, subexpr_state.operand);
+
+          dump_jump_to_end_for_rewrite ();
+          rewrite_conditional_check ();
+
+          state.op = JSP_OPERATOR_COLON;
+
+          jsp_state_push (state);
+
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+        }
+        else
+        {
+          JERRY_ASSERT (state.op == JSP_OPERATOR_COLON);
+
+          JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
+          JERRY_ASSERT (state.operand.is_register_operand ());
+          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+
+          dump_variable_assignment (state.operand, subexpr_state.operand);
+          rewrite_jump_to_end ();
+
+          state.op = JSP_OPERATOR_NO_OP;
+          state.flags &= ~JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          jsp_state_push (state);
+        }
+      }
+      else
+      {
+        /* ConditionalExpression is finished, so can't contain more subexpressions,
+         * so just propagate it to AssignmentExpression */
+        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+
+        state.state = JSP_STATE_EXPR_ASSIGNMENT;
+
+        jsp_state_push (state);
+      }
     }
     else if (state.state == JSP_STATE_EXPR_EXPRESSION)
     {
