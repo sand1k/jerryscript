@@ -2042,7 +2042,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
 
-            state.state = JSP_STATE_EXPR_LOGICAL_AND;
             jsp_state_push (state);
           }
         }
