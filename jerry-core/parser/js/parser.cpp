@@ -1564,33 +1564,6 @@ done:
   return expr;
 }
 
-/* bitwise_xor_expression
-  : bitwise_and_expression (LT!* '^' LT!* bitwise_and_expression)*
-  ; */
-static jsp_operand_t
-parse_bitwise_xor_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_bitwise_and_expression (in_allowed);
-  skip_newlines ();
-  while (true)
-  {
-    if (tok.type == TOK_XOR)
-    {
-      expr = dump_assignment_of_lhs_if_literal (expr);
-      skip_newlines ();
-      expr = dump_bitwise_xor_res (expr, parse_bitwise_and_expression (in_allowed));
-    }
-    else
-    {
-      lexer_save_token (tok);
-      goto done;
-    }
-    skip_newlines ();
-  }
-done:
-  return expr;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1831,7 +1804,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_bitwise_xor_expression (in_allowed);
+      state.operand = parse_bitwise_and_expression (in_allowed);
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1856,7 +1829,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_BITWISE_XOR;
+        state.state = JSP_STATE_EXPR_BITWISE_AND;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
@@ -1917,16 +1890,58 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_state_push (state);
       }
     }
-    else if (state.state == JSP_STATE_EXPR_BITWISE_XOR)
+    else if (state.state == JSP_STATE_EXPR_BITWISE_AND)
     {
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-      JERRY_ASSERT (!token_is (TOK_XOR));
+      JERRY_ASSERT (!token_is (TOK_AND));
 
-      /* propagate to BitwiseOrExpression */
-      state.state = JSP_STATE_EXPR_BITWISE_OR;
+      /* propagate to BitwiseXorExpression */
+      state.state = JSP_STATE_EXPR_BITWISE_XOR;
       state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_BITWISE_XOR)
+    {
+      /* FIXME: Consider merging BitwiseOR / BitwiseXOR / BitwiseAND productions
+       * into one production with different operators, taking their precedence into account */
+
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to BitwiseOrExpression */
+        state.state = JSP_STATE_EXPR_BITWISE_OR;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          JERRY_ASSERT (state.op == JSP_OPERATOR_B_XOR);
+
+          state.op = JSP_OPERATOR_NO_OP;
+          dump_bitwise_xor (state.operand, state.operand, subexpr_state.operand);
+
+          jsp_state_push (state);
+        }
+        else if (token_is (TOK_XOR))
+        {
+          skip_newlines ();
+
+          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.op = JSP_OPERATOR_B_XOR;
+
+          jsp_state_push (state);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_BITWISE_AND, in_allowed);
+        }
+        else
+        {
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          jsp_state_push (state);
+        }
+      }
     }
     else if (state.state == JSP_STATE_EXPR_BITWISE_OR)
     {
