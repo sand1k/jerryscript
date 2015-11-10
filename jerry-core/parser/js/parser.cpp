@@ -1884,14 +1884,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
     }
 
+    const bool in_allowed = ((state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
+
     if (state.state == JSP_STATE_EXPR_EMPTY)
     {
       /* no subexpressions can occur, as expression parse is just started */
       JERRY_ASSERT (!is_subexpr_end);
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
-
-      bool in_allowed = ((state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
 
       state.operand = parse_logical_and_expression (in_allowed);
       skip_newlines (); /* FIXME: remove */
@@ -1948,8 +1948,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_state_push (state);
 
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT,
-                                   (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
         }
         else
         {
@@ -2038,7 +2037,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_LOGICAL_OR;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_LOGICAL_AND, (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_LOGICAL_AND, in_allowed);
         }
         else
         {
@@ -2313,8 +2312,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_state_push (state);
 
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT,
-                                   (state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
+          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
         }
         else
         {
