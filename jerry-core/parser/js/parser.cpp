@@ -1618,41 +1618,6 @@ done:
   return expr;
 }
 
-/* logical_and_expression
-  : bitwise_or_expression (LT!* '&&' LT!* bitwise_or_expression)*
-  ; */
-static jsp_operand_t
-parse_logical_and_expression (bool in_allowed)
-{
-  jsp_operand_t expr = parse_bitwise_or_expression (in_allowed), tmp;
-  skip_newlines ();
-  if (token_is (TOK_DOUBLE_AND))
-  {
-    tmp = dump_variable_assignment_res (expr);
-    start_dumping_logical_and_checks ();
-    dump_logical_and_check_for_rewrite (tmp);
-  }
-  else
-  {
-    lexer_save_token (tok);
-    return expr;
-  }
-  while (token_is (TOK_DOUBLE_AND))
-  {
-    skip_newlines ();
-    expr = parse_bitwise_or_expression (in_allowed);
-    dump_variable_assignment (tmp, expr);
-    skip_newlines ();
-    if (token_is (TOK_DOUBLE_AND))
-    {
-      dump_logical_and_check_for_rewrite (tmp);
-    }
-  }
-  lexer_save_token (tok);
-  rewrite_logical_and_checks ();
-  return tmp;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1893,7 +1858,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_logical_and_expression (in_allowed);
+      state.operand = parse_bitwise_or_expression (in_allowed);
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1918,7 +1883,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else
       {
         /* LOE */
-        state.state = JSP_STATE_EXPR_LOGICAL_AND;
+        state.state = JSP_STATE_EXPR_BITWISE_OR;
       }
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
@@ -1979,17 +1944,98 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_state_push (state);
       }
     }
-    else if (state.state == JSP_STATE_EXPR_LOGICAL_AND)
+    else if (state.state == JSP_STATE_EXPR_BITWISE_OR)
     {
-      /* parsed through parse_logical_and_expression */
+      /* parsed through parse_bitwise_or_expression */
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-      JERRY_ASSERT (!token_is (TOK_DOUBLE_AND));
+      JERRY_ASSERT (!token_is (TOK_OR));
 
-      /* propagate to LogicalOrExpression */
-      state.state = JSP_STATE_EXPR_LOGICAL_OR;
+      /* propagate to LogicalAndExpression */
+      state.state = JSP_STATE_EXPR_LOGICAL_AND;
       state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_LOGICAL_AND)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to LogicalOrExpression */
+        state.state = JSP_STATE_EXPR_LOGICAL_OR;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_AND);
+
+          JERRY_ASSERT (state.operand.is_register_operand ());
+          dump_variable_assignment (state.operand, subexpr_state.operand);
+
+          state.op = JSP_OPERATOR_NO_OP;
+
+          jsp_state_push (state);
+        }
+        else
+        {
+          JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+          if (token_is (TOK_DOUBLE_AND))
+          {
+            /* ECMA-262 v5, 11.11 (complex LogicalAndExpression) */
+            skip_newlines ();
+
+            /*
+             * FIXME:
+             *       Consider eliminating COMPLEX_PRODUCTION flag through implementing rewrite chain
+             */
+
+            if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) == 0)
+            {
+              state.flags |= JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
+
+              JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) == 0);
+
+              jsp_operand_t ret = tmp_operand ();
+              dump_variable_assignment (ret, state.operand);
+
+              start_dumping_logical_and_checks ();
+
+              state.flags |= JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
+              state.operand = ret;
+            }
+
+            JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) != 0);
+
+            dump_logical_and_check_for_rewrite (state.operand);
+
+            state.op = JSP_OPERATOR_LOGICAL_AND;
+
+            jsp_state_push (state);
+            jsp_start_subexpr_parse (JSP_STATE_EXPR_BITWISE_OR, in_allowed);
+          }
+          else
+          {
+            /* end of LogicalAndExpression */
+            JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+            if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) != 0)
+            {
+              rewrite_logical_and_checks ();
+
+              state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
+            }
+
+            state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+            state.state = JSP_STATE_EXPR_LOGICAL_AND;
+            jsp_state_push (state);
+          }
+        }
+      }
     }
     else if (state.state == JSP_STATE_EXPR_LOGICAL_OR)
     {
@@ -2254,7 +2300,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           /* FIXME: propagate to PostfixExpression */
 
-          /* currently impossible, as lhse is parsed through parse_logical_and_expression */
+          /* currently impossible, as lhse is parsed through parse_bitwise_or_expression */
           JERRY_UNREACHABLE ();
         }
       }
