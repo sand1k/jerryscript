@@ -223,10 +223,24 @@ emit_error_on_eval_and_arguments (literal_t lit, locus loc __attr_unused___)
 void
 jsp_early_error_check_for_eval_and_arguments_in_strict_mode (jsp_operand_t op, bool is_strict, locus loc)
 {
-  if (is_strict
-      && op.is_literal_operand ())
+  if (is_strict)
   {
-    emit_error_on_eval_and_arguments (lit_get_literal_by_cp (op.get_literal ()), loc);
+    lit_cpointer_t lit_cp;
+
+    if (op.is_literal_operand ())
+    {
+      lit_cp = op.get_literal ();
+    }
+    else if (op.is_identifier_operand ())
+    {
+      lit_cp = op.get_identifier_name ();
+    }
+    else
+    {
+      return;
+    }
+
+    emit_error_on_eval_and_arguments (lit_get_literal_by_cp (lit_cp), loc);
   }
 }
 

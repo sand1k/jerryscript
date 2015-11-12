@@ -104,12 +104,6 @@ STATIC_STACK (jumps_to_end, vm_instr_counter_t)
 
 enum
 {
-  prop_getters_global_size
-};
-STATIC_STACK (prop_getters, op_meta)
-
-enum
-{
   next_iterations_global_size
 };
 STATIC_STACK (next_iterations, vm_instr_counter_t)
@@ -414,7 +408,7 @@ jsp_dmp_gen_instr (vm_op_t opcode, /**< operation code */
     }
     else
     {
-      JERRY_ASSERT (ops[i].is_literal_operand ());
+      JERRY_ASSERT (ops[i].is_literal_operand () || ops[i].is_identifier_operand ());
 
       instr.data.raw_args[i] = VM_IDX_REWRITE_LITERAL_UID;
     }
@@ -448,6 +442,10 @@ jsp_dmp_create_op_meta (vm_op_t opcode, /**< opcode */
     if (ops[i].is_literal_operand ())
     {
       ret.lit_id[i] = ops[i].get_literal ();
+    }
+    else if (ops[i].is_identifier_operand ())
+    {
+      ret.lit_id[i] = ops[i].get_identifier_name ();
     }
     else
     {
@@ -543,12 +541,6 @@ split_instr_counter (vm_instr_counter_t oc, vm_idx_t *id1, vm_idx_t *id2)
   JERRY_ASSERT (oc == vm_calc_instr_counter_from_idx_idx (*id1, *id2));
 }
 
-static op_meta
-last_dumped_op_meta (void)
-{
-  return serializer_get_op_meta ((vm_instr_counter_t) (serializer_get_current_instr_counter () - 1));
-}
-
 static void
 dump_single_address (vm_op_t opcode,
                      jsp_operand_t op)
@@ -574,79 +566,31 @@ dump_triple_address (vm_op_t opcode,
 }
 
 static jsp_operand_t
-create_operand_from_tmp_and_lit (vm_idx_t tmp, lit_cpointer_t lit_id)
-{
-  if (tmp != VM_IDX_REWRITE_LITERAL_UID)
-  {
-    JERRY_ASSERT (lit_id.packed_value == MEM_CP_NULL);
-
-    return jsp_operand_t::make_reg_operand (tmp);
-  }
-  else
-  {
-    JERRY_ASSERT (lit_id.packed_value != MEM_CP_NULL);
-
-    return jsp_operand_t::make_lit_operand (lit_id);
-  }
-}
-
-static void
-dump_prop_setter_op_meta (op_meta last, jsp_operand_t op)
-{
-  JERRY_ASSERT (last.op.op_idx == VM_OP_PROP_GETTER);
-
-  dump_triple_address (VM_OP_PROP_SETTER,
-                       create_operand_from_tmp_and_lit (last.op.data.prop_getter.obj,
-                                                        last.lit_id[1]),
-                       create_operand_from_tmp_and_lit (last.op.data.prop_getter.prop,
-                                                        last.lit_id[2]),
-                       op);
-}
-
-
-static jsp_operand_t
-dump_triple_address_and_prop_setter_res (vm_op_t opcode, /**< opcode of triple address operation */
-                                         op_meta last,
-                                         jsp_operand_t op)
-{
-  JERRY_ASSERT (last.op.op_idx == VM_OP_PROP_GETTER);
-
-  const jsp_operand_t obj = create_operand_from_tmp_and_lit (last.op.data.prop_getter.obj, last.lit_id[1]);
-  const jsp_operand_t prop = create_operand_from_tmp_and_lit (last.op.data.prop_getter.prop, last.lit_id[2]);
-
-  const jsp_operand_t tmp = dump_prop_getter_res (obj, prop);
-
-  dump_triple_address (opcode, tmp, tmp, op);
-
-  dump_prop_setter (obj, prop, tmp);
-
-  return tmp;
-}
-
-static jsp_operand_t
 dump_prop_setter_or_triple_address_res (vm_op_t opcode,
                                         jsp_operand_t res,
                                         jsp_operand_t op)
 {
-  const op_meta last = STACK_TOP (prop_getters);
-  if (last.op.op_idx == VM_OP_PROP_GETTER)
+  if (!res.is_reference_operand ())
   {
-    res = dump_triple_address_and_prop_setter_res (opcode, last, op);
+    PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", LIT_ITERATOR_POS_ZERO);
   }
   else
   {
-    if (res.is_register_operand ())
+    if (res.is_value_based_reference_operand ())
     {
-      /*
-       * FIXME:
-       *       Implement correct handling of references through parser operands
-       */
-      PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", LIT_ITERATOR_POS_ZERO);
-    }
+      JERRY_ASSERT (res.is_evaluated_value_based_reference_operand ());
 
-    dump_triple_address (opcode, res, res, op);
+      const jsp_operand_t tmp = dump_prop_getter_res (res);
+
+      dump_triple_address (opcode, tmp, tmp, op);
+
+      dump_prop_setter (res, tmp);
+    }
+    else
+    {
+      dump_triple_address (opcode, res, res, op);
+    }
   }
-  STACK_DROP (prop_getters, 1);
   return res;
 }
 
@@ -776,11 +720,25 @@ dumper_is_eval_literal (jsp_operand_t obj) /**< byte-code operand */
   /*
    * FIXME: Switch to corresponding magic string
    */
-  bool is_eval_lit = (obj.is_literal_operand ()
-                      && lit_literal_equal_type_cstr (lit_get_literal_by_cp (obj.get_literal ()), "eval"));
+  bool is_eval_lit = (obj.is_identifier_operand ()
+                      && lit_literal_equal_type_cstr (lit_get_literal_by_cp (obj.get_identifier_name ()), "eval"));
 
   return is_eval_lit;
 } /* dumper_is_eval_literal */
+
+/**
+ * Raise early ReferenceError if the operand is not a Reference
+ */
+static void
+jsp_raise_reference_error_if_not_reference (jsp_operand_t obj) /**< operand, which type should be Reference */
+{
+  if (!obj.is_reference_operand ())
+  {
+    PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE,
+                 "Invalid left-hand-side expression in prefix operation",
+                 LIT_ITERATOR_POS_ZERO);
+  }
+} /* jsp_raise_reference_error_if_not_reference */
 
 /**
  * Dump assignment of an array-hole simple value to a register
@@ -1158,23 +1116,75 @@ dump_prop_setter_decl (jsp_operand_t name, jsp_operand_t func)
 }
 
 void
-dump_prop_getter (jsp_operand_t res, jsp_operand_t obj, jsp_operand_t prop)
+dump_prop_getter (jsp_operand_t res, jsp_operand_t obj)
 {
-  dump_triple_address (VM_OP_PROP_GETTER, res, obj, prop);
+  JERRY_ASSERT (obj.is_reference_operand () && obj.is_value_based_reference_operand ());
+
+  jsp_operand_t base;
+
+  if (obj.is_evaluated_value_based_reference_operand ())
+  {
+    base = obj.get_value_based_ref_base_value ();
+  }
+  else
+  {
+    base = obj.get_value_based_ref_base_identifier ();
+  }
+
+  jsp_operand_t prop_name = obj.get_value_based_ref_prop_name ();
+
+  if (prop_name.is_literal_operand ())
+  {
+    /*
+     * TODO:
+     *      Introduce VM_OP_PROP_GETTER version that accepts
+     *      literal-represented property name directly,
+     *      without moving it to a register first
+     */
+    prop_name = dump_string_assignment_res (prop_name.get_literal ());
+  }
+
+  dump_triple_address (VM_OP_PROP_GETTER, res, base, prop_name);
 }
 
 jsp_operand_t
-dump_prop_getter_res (jsp_operand_t obj, jsp_operand_t prop)
+dump_prop_getter_res (jsp_operand_t obj)
 {
   const jsp_operand_t res = tmp_operand ();
-  dump_prop_getter (res, obj, prop);
+  dump_prop_getter (res, obj);
   return res;
 }
 
 void
-dump_prop_setter (jsp_operand_t res, jsp_operand_t obj, jsp_operand_t prop)
+dump_prop_setter (jsp_operand_t res, jsp_operand_t obj)
 {
-  dump_triple_address (VM_OP_PROP_SETTER, res, obj, prop);
+  JERRY_ASSERT (res.is_reference_operand () && res.is_value_based_reference_operand ());
+
+  jsp_operand_t base;
+
+  if (res.is_evaluated_value_based_reference_operand ())
+  {
+    base = res.get_value_based_ref_base_value ();
+  }
+  else
+  {
+    base = res.get_value_based_ref_base_identifier ();
+  }
+
+  jsp_operand_t prop_name = res.get_value_based_ref_prop_name ();
+
+  if (prop_name.is_literal_operand ())
+  {
+    /*
+     * TODO:
+     *      Introduce VM_OP_PROP_SETTER version that accepts
+     *      literal-represented property name directly,
+     *      without moving it to a register first
+     */
+    prop_name = dump_string_assignment_res (prop_name.get_literal ());
+  }
+
+  dump_triple_address (VM_OP_PROP_SETTER, base, prop_name, obj);
 }
 
 void
@@ -1237,83 +1247,103 @@ dump_this_res (void)
   return jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
 }
 
-void
-dump_post_increment (jsp_operand_t res, jsp_operand_t obj)
-{
-  dump_double_address (VM_OP_POST_INCR, res, obj);
-}
-
 jsp_operand_t
 dump_post_increment_res (jsp_operand_t op)
 {
-  const jsp_operand_t res = tmp_operand ();
-  dump_post_increment (res, op);
-  return res;
-}
+  jsp_raise_reference_error_if_not_reference (op);
+  JERRY_ASSERT (op.is_reference_operand ());
 
-void
-dump_post_decrement (jsp_operand_t res, jsp_operand_t obj)
-{
-  dump_double_address (VM_OP_POST_DECR, res, obj);
+  const jsp_operand_t res = tmp_operand ();
+
+  if (op.is_value_based_reference_operand ())
+  {
+    const jsp_operand_t val = tmp_operand ();
+
+    dump_prop_getter (val, op);
+
+    dump_double_address (VM_OP_POST_INCR, res, val);
+
+    dump_prop_setter (op, val);
+  }
+  else
+  {
+    dump_double_address (VM_OP_POST_INCR, res, op);
+  }
+
+  return res;
 }
 
 jsp_operand_t
 dump_post_decrement_res (jsp_operand_t op)
 {
+  jsp_raise_reference_error_if_not_reference (op);
+  JERRY_ASSERT (op.is_reference_operand ());
+
   const jsp_operand_t res = tmp_operand ();
-  dump_post_decrement (res, op);
-  return res;
-}
 
-/**
- * Check if operand of prefix operation is correct
- */
-static void
-check_operand_in_prefix_operation (jsp_operand_t obj) /**< operand, which type should be Reference */
-{
-  const op_meta last = last_dumped_op_meta ();
-  if (last.op.op_idx != VM_OP_PROP_GETTER)
+  if (op.is_value_based_reference_operand ())
   {
-    if (obj.is_register_operand ())
-    {
-      /*
-       * FIXME:
-       *       Implement correct handling of references through parser operands
-       */
-      PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE,
-                   "Invalid left-hand-side expression in prefix operation",
-                   LIT_ITERATOR_POS_ZERO);
-    }
-  }
-} /* check_operand_in_prefix_operation */
+    const jsp_operand_t val = tmp_operand ();
 
-void
-dump_pre_increment (jsp_operand_t res, jsp_operand_t obj)
-{
-  check_operand_in_prefix_operation (obj);
-  dump_double_address (VM_OP_PRE_INCR, res, obj);
+    dump_prop_getter (val, op);
+
+    dump_double_address (VM_OP_POST_DECR, res, val);
+
+    dump_prop_setter (op, val);
+  }
+  else
+  {
+    dump_double_address (VM_OP_POST_DECR, res, op);
+  }
+
+  return res;
 }
 
 jsp_operand_t
 dump_pre_increment_res (jsp_operand_t op)
 {
-  const jsp_operand_t res = tmp_operand ();
-  dump_pre_increment (res, op);
-  return res;
-}
+  jsp_raise_reference_error_if_not_reference (op);
+  JERRY_ASSERT (op.is_reference_operand ());
 
-void
-dump_pre_decrement (jsp_operand_t res, jsp_operand_t obj)
-{
-  check_operand_in_prefix_operation (obj);
-  dump_double_address (VM_OP_PRE_DECR, res, obj);
+  const jsp_operand_t res = tmp_operand ();
+
+  if (op.is_value_based_reference_operand ())
+  {
+    dump_prop_getter (res, op);
+
+    dump_double_address (VM_OP_PRE_INCR, res, res);
+
+    dump_prop_setter (op, res);
+  }
+  else
+  {
+    dump_double_address (VM_OP_PRE_INCR, res, op);
+  }
+
+  return res;
 }
 
 jsp_operand_t
 dump_pre_decrement_res (jsp_operand_t op)
 {
+  jsp_raise_reference_error_if_not_reference (op);
+  JERRY_ASSERT (op.is_reference_operand ());
+
   const jsp_operand_t res = tmp_operand ();
-  dump_pre_decrement (res, op);
+
+  if (op.is_value_based_reference_operand ())
+  {
+    dump_prop_getter (res, op);
+
+    dump_double_address (VM_OP_PRE_DECR, res, res);
+
+    dump_prop_setter (op, res);
+  }
+  else
+  {
+    dump_double_address (VM_OP_PRE_DECR, res, op);
+  }
+
   return res;
 }
 
@@ -1376,46 +1406,37 @@ dump_logical_not_res (jsp_operand_t op)
 void
 dump_delete (jsp_operand_t res, jsp_operand_t op, bool is_strict, locus loc)
 {
-  if (op.is_literal_operand ())
+  if (!op.is_reference_operand ())
   {
-    literal_t lit = lit_get_literal_by_cp (op.get_literal ());
-    if (lit->get_type () == LIT_STR_T
-        || lit->get_type () == LIT_MAGIC_STR_T
-        || lit->get_type () == LIT_MAGIC_STR_EX_T)
-    {
-      jsp_early_error_check_delete (is_strict, loc);
+    dump_boolean_assignment (res, true);
+  }
+  else if (op.is_identifier_operand ())
+  {
+    literal_t lit = lit_get_literal_by_cp (op.get_identifier_name ());
+    JERRY_ASSERT (lit->get_type () == LIT_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
 
-      dump_double_address (VM_OP_DELETE_VAR, res, op);
-    }
-    else if (lit->get_type ()  == LIT_NUMBER_T)
-    {
-      dump_boolean_assignment (res, true);
-    }
+    jsp_early_error_check_delete (is_strict, loc);
+
+    dump_double_address (VM_OP_DELETE_VAR, res, op);
   }
   else
   {
-    JERRY_ASSERT (op.is_register_operand ());
+    JERRY_ASSERT (op.is_value_based_reference_operand ());
 
-    const op_meta last_op_meta = last_dumped_op_meta ();
-    switch (last_op_meta.op.op_idx)
+    jsp_operand_t prop_name = op.get_value_based_ref_prop_name ();
+
+    if (prop_name.is_literal_operand ())
     {
-      case VM_OP_PROP_GETTER:
-      {
-        const vm_instr_counter_t oc = (vm_instr_counter_t) (serializer_get_current_instr_counter () - 1);
-        serializer_set_writing_position (oc);
-        dump_triple_address (VM_OP_DELETE_PROP,
-                             res,
-                             create_operand_from_tmp_and_lit (last_op_meta.op.data.prop_getter.obj,
-                                                              last_op_meta.lit_id[1]),
-                             create_operand_from_tmp_and_lit (last_op_meta.op.data.prop_getter.prop,
-                                                              last_op_meta.lit_id[2]));
-        break;
-      }
-      default:
-      {
-        dump_boolean_assignment (res, true);
-      }
+      /*
+       * TODO:
+       *      Introduce delete_prop instruction that accepts property name as a literal-represented string
+       */
+      prop_name = dump_string_assignment_res (prop_name.get_literal ());
     }
+
+    dump_triple_address (VM_OP_DELETE_PROP, res, op.get_value_based_ref_base (), prop_name);
   }
 }
 
@@ -1864,38 +1885,21 @@ rewrite_jump_to_end (void)
   STACK_DROP (jumps_to_end, 1);
 }
 
-void
-start_dumping_assignment_expression (void)
-{
-  const op_meta last = last_dumped_op_meta ();
-  if (last.op.op_idx == VM_OP_PROP_GETTER)
-  {
-    serializer_set_writing_position ((vm_instr_counter_t) (serializer_get_current_instr_counter () - 1));
-  }
-  STACK_PUSH (prop_getters, last);
-}
-
 jsp_operand_t
 dump_prop_setter_or_variable_assignment_res (jsp_operand_t res, jsp_operand_t op)
 {
-  const op_meta last = STACK_TOP (prop_getters);
-  if (last.op.op_idx == VM_OP_PROP_GETTER)
+  jsp_raise_reference_error_if_not_reference (res);
+  JERRY_ASSERT (res.is_reference_operand ());
+
+  if (res.is_value_based_reference_operand ())
   {
-    dump_prop_setter_op_meta (last, op);
+    dump_prop_setter (res, op);
   }
   else
   {
-    if (res.is_register_operand ())
-    {
-      /*
-       * FIXME:
-       *       Implement correct handling of references through parser operands
-       */
-      PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", LIT_ITERATOR_POS_ZERO);
-    }
     dump_variable_assignment (res, op);
   }
-  STACK_DROP (prop_getters, 1);
+
   return op;
 }
 
@@ -2499,7 +2503,6 @@ dumper_init (void)
   STACK_INIT (logical_or_checks);
   STACK_INIT (conditional_checks);
   STACK_INIT (jumps_to_end);
-  STACK_INIT (prop_getters);
   STACK_INIT (next_iterations);
   STACK_INIT (case_clauses);
   STACK_INIT (catches);
@@ -2518,7 +2521,6 @@ dumper_free (void)
   STACK_FREE (logical_or_checks);
   STACK_FREE (conditional_checks);
   STACK_FREE (jumps_to_end);
-  STACK_FREE (prop_getters);
   STACK_FREE (next_iterations);
   STACK_FREE (case_clauses);
   STACK_FREE (catches);
