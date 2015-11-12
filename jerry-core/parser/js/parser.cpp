@@ -64,7 +64,7 @@ static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 static void parse_statement (jsp_label_t *outermost_stmt_label_p);
 static jsp_operand_t parse_assignment_expression (bool);
 static void parse_source_element_list (bool, bool);
-static jsp_operand_t parse_argument_list (varg_list_type, jsp_operand_t, jsp_operand_t *);
+static jsp_operand_t parse_argument_list (varg_list_type, jsp_operand_t);
 
 static bool
 token_is (token_type tt)
@@ -289,6 +289,72 @@ jsp_find_next_token_before_the_locus (token_type token_to_find, /**< token to se
   return false;
 } /* jsp_find_next_token_before_the_locus */
 
+static jsp_operand_t
+dump_evaluate_if_reference (jsp_operand_t lhs)
+{
+  if (lhs.is_identifier_operand ())
+  {
+    return dump_variable_assignment_res (lhs);
+  }
+  else if (lhs.is_value_based_reference_operand () && !lhs.is_evaluated_value_based_reference_operand ())
+  {
+    jsp_operand_t base = lhs.get_value_based_ref_base_identifier ();
+    jsp_operand_t prop_name = lhs.get_value_based_ref_prop_name ();
+
+    base = dump_variable_assignment_res (base);
+
+    if (prop_name.is_literal_operand ())
+    {
+      return jsp_operand_t::make_value_based_ref_operand_vl (base, prop_name.get_literal ());
+    }
+    else
+    {
+      return jsp_operand_t::make_value_based_ref_operand_vv (base, prop_name);
+    }
+  }
+  else
+  {
+    return lhs;
+  }
+}
+
+/*
+ * FIXME:
+ *       Move the functionality to dumper
+ */
+static jsp_operand_t
+dump_assignment_of_lhs_if_value_based_reference (jsp_operand_t lhs)
+{
+  if (lhs.is_value_based_reference_operand ())
+  {
+    return dump_prop_getter_res (lhs);
+  }
+  else
+  {
+    return lhs;
+  }
+}
+
+static jsp_operand_t
+dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
+{
+  if (lhs.is_reference_operand ())
+  {
+    if (lhs.is_value_based_reference_operand ())
+    {
+      return dump_prop_getter_res (lhs);
+    }
+    else
+    {
+      return dump_variable_assignment_res (lhs);
+    }
+  }
+  else
+  {
+    return lhs;
+  }
+}
+
 /* property_name
   : Identifier
   | Keyword
@@ -363,7 +429,8 @@ parse_property_name_and_value (void)
   token_after_newlines_must_be (TOK_COLON);
   skip_newlines ();
   const jsp_operand_t value = parse_assignment_expression (true);
-  dump_prop_name_and_value (name, value);
+
+  dump_prop_name_and_value (name, dump_assignment_of_lhs_if_value_based_reference (value));
   jsp_early_error_add_prop_name (name, PROP_DATA);
 }
 
@@ -421,7 +488,7 @@ parse_property_assignment (void)
     jsp_early_error_start_checking_of_vargs ();
 
     skip_newlines ();
-    const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand (), NULL);
+    const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand ());
 
     dump_function_end_for_rewrite ();
 
@@ -476,12 +543,10 @@ parse_property_assignment (void)
     For each ALT dumps appropriate bytecode. Uses OBJ during dump if neccesary.
     Result tmp. */
 static jsp_operand_t
-parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_arg_p)
+parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
 {
   token_type close_tt = TOK_CLOSE_PAREN;
   size_t args_num = 0;
-
-  JERRY_ASSERT (!(vlt != VARG_CALL_EXPR && this_arg_p != NULL));
 
   switch (vlt)
   {
@@ -490,6 +555,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
     case VARG_CONSTRUCT_EXPR:
     {
       current_token_must_be (TOK_OPEN_PAREN);
+      obj = dump_assignment_of_lhs_if_value_based_reference (obj);
       dump_varg_header_for_rewrite (vlt, obj);
       break;
     }
@@ -499,30 +565,17 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
 
       opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
 
-      jsp_operand_t this_arg = empty_operand ();
-      if (this_arg_p != NULL
-          && !operand_is_empty (*this_arg_p))
+      if (obj.is_value_based_reference_operand ())
       {
+        if (!obj.is_evaluated_value_based_reference_operand ())
+        {
+          obj = dump_evaluate_if_reference (obj);
+        }
+
         call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
 
-        if (this_arg_p->is_literal_operand ())
-        {
-          /*
-           * FIXME:
-           *       Base of CallExpression should be evaluated only once during evaluation of CallExpression
-           *
-           * See also:
-           *          Evaluation of MemberExpression (ECMA-262 v5, 11.2.1)
-           */
-          this_arg = dump_variable_assignment_res (*this_arg_p);
-        }
-        else
-        {
-          this_arg = *this_arg_p;
-        }
-
         /*
-         * Presence of explicit 'this' argument implies that it is not Direct call to Eval
+         * Presence of explicit 'this' argument implies that this is not Direct call to Eval
          *
          * See also:
          *          ECMA-262 v5, 15.2.2.1
@@ -546,14 +599,14 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
          */
       }
 
-      dump_varg_header_for_rewrite (vlt, obj);
+      jsp_operand_t val = dump_assignment_of_lhs_if_reference (obj);
+      dump_varg_header_for_rewrite (vlt, val);
 
       if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
       {
         if (call_flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
         {
-          JERRY_ASSERT (!operand_is_empty (this_arg));
-          dump_call_additional_info (call_flags, this_arg);
+          dump_call_additional_info (call_flags, obj.get_value_based_ref_base_value ());
         }
         else
         {
@@ -600,6 +653,8 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj, jsp_operand_t *this_
              || vlt == VARG_CALL_EXPR)
     {
       op = parse_assignment_expression (true);
+      op = dump_assignment_of_lhs_if_reference (op);
+
       dump_varg (op);
       skip_newlines ();
     }
@@ -696,7 +751,7 @@ parse_function_declaration (void)
   skip_newlines ();
 
   jsp_early_error_start_checking_of_vargs ();
-  parse_argument_list (VARG_FUNC_DECL, name, NULL);
+  parse_argument_list (VARG_FUNC_DECL, name);
 
   dump_function_end_for_rewrite ();
 
@@ -755,13 +810,13 @@ parse_function_expression (void)
     name = literal_operand (token_data_as_lit_cp ());
 
     skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, name, NULL);
+    res = parse_argument_list (VARG_FUNC_EXPR, name);
   }
   else
   {
     lexer_save_token (tok);
     skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, empty_operand (), NULL);
+    res = parse_argument_list (VARG_FUNC_EXPR, empty_operand ());
   }
 
   dump_function_end_for_rewrite ();
@@ -805,7 +860,7 @@ parse_function_expression (void)
 static jsp_operand_t
 parse_array_literal (void)
 {
-  return parse_argument_list (VARG_ARRAY_DECL, empty_operand (), NULL);
+  return parse_argument_list (VARG_ARRAY_DECL, empty_operand ());
 }
 
 /* object_literal
@@ -814,7 +869,7 @@ parse_array_literal (void)
 static jsp_operand_t
 parse_object_literal (void)
 {
-  return parse_argument_list (VARG_OBJ_DECL, empty_operand (), NULL);
+  return parse_argument_list (VARG_OBJ_DECL, empty_operand ());
 }
 
 /* literal
@@ -874,7 +929,10 @@ parse_primary_expression (void)
     case TOK_SMALL_INT:
     case TOK_NUMBER:
     case TOK_REGEXP:
-    case TOK_STRING: return parse_literal ();
+    case TOK_STRING:
+    {
+      return parse_literal ();
+    }
     case TOK_NAME:
     {
       if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
@@ -885,7 +943,7 @@ parse_primary_expression (void)
       {
         scopes_tree_set_eval_used (STACK_TOP (scopes));
       }
-      return literal_operand (token_data_as_lit_cp ());
+      return jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
     }
     case TOK_OPEN_SQUARE: return parse_array_literal ();
     case TOK_OPEN_BRACE: return parse_object_literal ();
@@ -929,7 +987,7 @@ parse_primary_expression (void)
   : '.' LT!* Identifier
   ; */
 static jsp_operand_t
-parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
+parse_member_expression (void)
 {
   jsp_operand_t expr;
   if (is_keyword (KW_FUNCTION))
@@ -939,12 +997,12 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
   else if (is_keyword (KW_NEW))
   {
     skip_newlines ();
-    expr = parse_member_expression (this_arg, prop_gl);
+    expr = parse_member_expression ();
 
     skip_newlines ();
     if (token_is (TOK_OPEN_PAREN))
     {
-      expr = parse_argument_list (VARG_CONSTRUCT_EXPR, expr, NULL);
+      expr = parse_argument_list (VARG_CONSTRUCT_EXPR, expr);
     }
     else
     {
@@ -965,16 +1023,25 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
 
     if (token_is (TOK_OPEN_SQUARE))
     {
+      expr = dump_assignment_of_lhs_if_reference (expr);
+
       skip_newlines ();
       prop = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
       next_token_must_be (TOK_CLOSE_SQUARE);
+
+      prop = dump_assignment_of_lhs_if_reference (prop);
+
+      expr = jsp_operand_t::make_value_based_ref_operand_vv (expr, prop);
     }
     else if (token_is (TOK_DOT))
     {
       skip_newlines ();
+
+      lit_cpointer_t prop_name_lit_id;
+
       if (token_is (TOK_NAME))
       {
-        prop = dump_string_assignment_res (token_data_as_lit_cp ());
+        prop_name_lit_id = token_data_as_lit_cp ();
       }
       else if (token_is (TOK_KEYWORD))
       {
@@ -985,7 +1052,8 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
         {
           EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected identifier");
         }
-        prop = dump_string_assignment_res (lit_cpointer_t::compress (lit));
+
+        prop_name_lit_id = lit_cpointer_t::compress (lit);
       }
       else if (token_is (TOK_BOOL) || token_is (TOK_NULL))
       {
@@ -994,24 +1062,27 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
                                     : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
         literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
                                                                      lit_get_magic_string_size (id));
-        prop = dump_string_assignment_res (lit_cpointer_t::compress (lit));
+
+        prop_name_lit_id = lit_cpointer_t::compress (lit);
       }
       else
       {
         EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected identifier");
       }
-    }
-    skip_newlines ();
 
-    if (this_arg)
-    {
-      *this_arg = expr;
+      if (expr.is_identifier_operand ())
+      {
+        expr = jsp_operand_t::make_value_based_ref_operand_ll (expr.get_identifier_name (), prop_name_lit_id);
+      }
+      else
+      {
+        expr = dump_assignment_of_lhs_if_reference (expr);
+
+        expr = jsp_operand_t::make_value_based_ref_operand_vl (expr, prop_name_lit_id);
+      }
     }
-    if (prop_gl)
-    {
-      *prop_gl = prop;
-    }
-    expr = dump_prop_getter_res (expr, prop);
+
+    skip_newlines ();
   }
 
   lexer_save_token (tok);
@@ -1032,62 +1103,59 @@ parse_member_expression (jsp_operand_t *this_arg, jsp_operand_t *prop_gl)
   : '(' LT!* assignment_expression LT!* (',' LT!* assignment_expression * LT!*)* ')'
   ; */
 static jsp_operand_t
-parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
+parse_call_expression (void)
 {
-  jsp_operand_t this_arg = empty_operand ();
-  jsp_operand_t expr = parse_member_expression (&this_arg, prop_gl);
+  jsp_operand_t expr = parse_member_expression ();
   jsp_operand_t prop;
 
   skip_newlines ();
   if (!token_is (TOK_OPEN_PAREN))
   {
     lexer_save_token (tok);
-    if (this_arg_gl != NULL)
-    {
-      *this_arg_gl = this_arg;
-    }
+
     return expr;
   }
 
-  expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
-  this_arg = empty_operand ();
+  expr = parse_argument_list (VARG_CALL_EXPR, expr);
 
   skip_newlines ();
-  while (token_is (TOK_OPEN_PAREN) || token_is (TOK_OPEN_SQUARE)
+  while (token_is (TOK_OPEN_PAREN)
+         || token_is (TOK_OPEN_SQUARE)
          || token_is (TOK_DOT))
   {
     if (tok.type == TOK_OPEN_PAREN)
     {
-      expr = parse_argument_list (VARG_CALL_EXPR, expr, &this_arg);
+      expr = parse_argument_list (VARG_CALL_EXPR, expr);
       skip_newlines ();
     }
     else
     {
-      this_arg = expr;
       if (tok.type == TOK_OPEN_SQUARE)
       {
         skip_newlines ();
+
+        expr = dump_evaluate_if_reference (expr);
+
         prop = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
         next_token_must_be (TOK_CLOSE_SQUARE);
+
+        expr = jsp_operand_t::make_value_based_ref_operand_vv (expr, prop);
       }
       else if (tok.type == TOK_DOT)
       {
         token_after_newlines_must_be (TOK_NAME);
-        prop = dump_string_assignment_res (token_data_as_lit_cp ());
+
+        expr = dump_assignment_of_lhs_if_reference (expr);
+
+        expr = jsp_operand_t::make_value_based_ref_operand_vl (expr, token_data_as_lit_cp ());
       }
-      expr = dump_prop_getter_res (expr, prop);
+
       skip_newlines ();
     }
   }
+
   lexer_save_token (tok);
-  if (this_arg_gl != NULL)
-  {
-    *this_arg_gl = this_arg;
-  }
-  if (prop_gl != NULL)
-  {
-    *prop_gl = prop;
-  }
+
   return expr;
 }
 
@@ -1096,24 +1164,18 @@ parse_call_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
   | new_expression
   ; */
 static jsp_operand_t
-parse_left_hand_side_expression (jsp_operand_t *this_arg, jsp_operand_t *prop)
+parse_left_hand_side_expression (void)
 {
-  return parse_call_expression (this_arg, prop);
+  return parse_call_expression ();
 }
 
 /* postfix_expression
   : left_hand_side_expression ('++' | '--')?
   ; */
 static jsp_operand_t
-parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if expression evaluates to object-based
-                                                       *          reference - the reference's base;
-                                                       *        otherwise - empty jsp_operand_t */
-                          jsp_operand_t *out_prop_gl_p) /**< out: if expression evaluates to object-based
-                                                   *          reference - the reference's name;
-                                                   *        otherwise - empty jsp_operand_t */
+parse_postfix_expression (void)
 {
-  jsp_operand_t this_arg = empty_operand (), prop = empty_operand ();
-  jsp_operand_t expr = parse_left_hand_side_expression (&this_arg, &prop);
+  jsp_operand_t expr = parse_left_hand_side_expression ();
 
   if (lexer_prev_token ().type == TOK_NEWLINE)
   {
@@ -1125,40 +1187,20 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
   {
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
 
-    const jsp_operand_t res = dump_post_increment_res (expr);
-    if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-    {
-      dump_prop_setter (this_arg, prop, expr);
-    }
-    expr = res;
+    return dump_post_increment_res (expr);
   }
   else if (token_is (TOK_DOUBLE_MINUS))
   {
     jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
 
-    const jsp_operand_t res = dump_post_decrement_res (expr);
-    if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-    {
-      dump_prop_setter (this_arg, prop, expr);
-    }
-    expr = res;
+    return dump_post_decrement_res (expr);
   }
   else
   {
     lexer_save_token (tok);
-  }
 
-  if (out_this_arg_gl_p != NULL)
-  {
-    *out_this_arg_gl_p = this_arg;
+    return expr;
   }
-
-  if (out_prop_gl_p != NULL)
-  {
-    *out_prop_gl_p = prop;
-  }
-
-  return expr;
 } /* parse_postfix_expression */
 
 /* unary_expression
@@ -1166,60 +1208,57 @@ parse_postfix_expression (jsp_operand_t *out_this_arg_gl_p, /**< out: if express
   | ('delete' | 'void' | 'typeof' | '++' | '--' | '+' | '-' | '~' | '!') unary_expression
   ; */
 static jsp_operand_t
-parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
+parse_unary_expression (void)
 {
-  jsp_operand_t expr, this_arg = empty_operand (), prop = empty_operand ();
+  jsp_operand_t expr;
+
   switch (tok.type)
   {
     case TOK_DOUBLE_PLUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (&this_arg, &prop);
+      expr = parse_unary_expression ();
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
       expr = dump_pre_increment_res (expr);
-      if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-      {
-        dump_prop_setter (this_arg, prop, expr);
-      }
       break;
     }
     case TOK_DOUBLE_MINUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (&this_arg, &prop);
+      expr = parse_unary_expression ();
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
       expr = dump_pre_decrement_res (expr);
-      if (!operand_is_empty (this_arg) && !operand_is_empty (prop))
-      {
-        dump_prop_setter (this_arg, prop, expr);
-      }
       break;
     }
     case TOK_PLUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
+      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
       expr = dump_unary_plus_res (expr);
       break;
     }
     case TOK_MINUS:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
+      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
       expr = dump_unary_minus_res (expr);
       break;
     }
     case TOK_COMPL:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
+      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
       expr = dump_bitwise_not_res (expr);
       break;
     }
     case TOK_NOT:
     {
       skip_newlines ();
-      expr = parse_unary_expression (NULL, NULL);
+      expr = parse_unary_expression ();
+      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
       expr = dump_logical_not_res (expr);
       break;
     }
@@ -1230,22 +1269,24 @@ parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
         scopes_tree_set_contains_delete (STACK_TOP (scopes));
 
         skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
+        expr = parse_unary_expression ();
         expr = dump_delete_res (expr, is_strict_mode (), tok.loc);
         break;
       }
       else if (is_keyword (KW_VOID))
       {
         skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
-        expr = dump_variable_assignment_res (expr);
+        expr = parse_unary_expression ();
+        expr = dump_evaluate_if_reference (expr);
         dump_undefined_assignment (expr);
         break;
       }
       else if (is_keyword (KW_TYPEOF))
       {
         skip_newlines ();
-        expr = parse_unary_expression (NULL, NULL);
+        expr = parse_unary_expression ();
+        expr = dump_assignment_of_lhs_if_value_based_reference (expr);
+
         expr = dump_typeof_res (expr);
         break;
       }
@@ -1253,30 +1294,11 @@ parse_unary_expression (jsp_operand_t *this_arg_gl, jsp_operand_t *prop_gl)
     }
     default:
     {
-      expr = parse_postfix_expression (&this_arg, &prop);
+      expr = parse_postfix_expression ();
     }
   }
 
-  if (this_arg_gl != NULL)
-  {
-    *this_arg_gl = this_arg;
-  }
-  if (prop_gl != NULL)
-  {
-    *prop_gl = prop;
-  }
-
   return expr;
-}
-
-static jsp_operand_t
-dump_assignment_of_lhs_if_literal (jsp_operand_t lhs)
-{
-  if (lhs.is_literal_operand ())
-  {
-    lhs = dump_variable_assignment_res (lhs);
-  }
-  return lhs;
 }
 
 typedef enum
@@ -1524,7 +1546,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_unary_expression (NULL, NULL);
+      state.operand = parse_unary_expression ();
       skip_newlines (); /* FIXME: remove */
 
       /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
@@ -1580,6 +1602,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           if (state.op == JSP_OPERATOR_MUL)
           {
             dump_multiplication (state.operand, state.operand, subexpr_state.operand);
@@ -1603,7 +1627,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_MUL;
 
           jsp_state_push (state);
@@ -1613,7 +1637,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_DIV;
 
           jsp_state_push (state);
@@ -1623,7 +1647,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_MOD;
 
           jsp_state_push (state);
@@ -1651,6 +1675,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           if (state.op == JSP_OPERATOR_ADD)
           {
             dump_addition (state.operand, state.operand, subexpr_state.operand);
@@ -1670,7 +1696,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_ADD;
 
           jsp_state_push (state);
@@ -1680,7 +1706,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_SUB;
 
           jsp_state_push (state);
@@ -1708,6 +1734,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           if (state.op == JSP_OPERATOR_LSHIFT)
           {
             dump_left_shift (state.operand, state.operand, subexpr_state.operand);
@@ -1731,7 +1759,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_LSHIFT;
 
           jsp_state_push (state);
@@ -1741,7 +1769,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_RSHIFT;
 
           jsp_state_push (state);
@@ -1751,7 +1779,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_RSHIFT_U;
 
           jsp_state_push (state);
@@ -1779,6 +1807,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           if (state.op == JSP_OPERATOR_LESS)
           {
             dump_less_than (state.operand, state.operand, subexpr_state.operand);
@@ -1815,7 +1845,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_LESS;
 
           jsp_state_push (state);
@@ -1825,7 +1855,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_GREATER;
 
           jsp_state_push (state);
@@ -1835,7 +1865,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_LESS_OR_EQUAL;
 
           jsp_state_push (state);
@@ -1845,7 +1875,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_GREATER_OR_EQUAL;
 
           jsp_state_push (state);
@@ -1855,7 +1885,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_INSTANCEOF;
 
           jsp_state_push (state);
@@ -1865,7 +1895,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_IN;
 
           jsp_state_push (state);
@@ -1893,6 +1923,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           if (state.op == JSP_OPERATOR_EQUAL)
           {
             dump_equal_value (state.operand, state.operand, subexpr_state.operand);
@@ -1920,7 +1952,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_EQUAL;
 
           jsp_state_push (state);
@@ -1930,7 +1962,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_NOT_EQUAL;
 
           jsp_state_push (state);
@@ -1940,7 +1972,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_STRICT_EQUAL;
 
           jsp_state_push (state);
@@ -1950,7 +1982,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_STRICT_NOT_EQUAL;
 
           jsp_state_push (state);
@@ -1981,6 +2013,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           JERRY_ASSERT (state.op == JSP_OPERATOR_B_AND);
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -1992,7 +2026,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_B_AND;
 
           jsp_state_push (state);
@@ -2020,6 +2054,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           JERRY_ASSERT (state.op == JSP_OPERATOR_B_XOR);
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2031,7 +2067,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_B_XOR;
 
           jsp_state_push (state);
@@ -2059,6 +2095,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           JERRY_ASSERT (state.op == JSP_OPERATOR_B_OR);
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2070,7 +2108,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_newlines ();
 
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
           state.op = JSP_OPERATOR_B_OR;
 
           jsp_state_push (state);
@@ -2098,6 +2136,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_AND);
 
           JERRY_ASSERT (state.operand.is_register_operand ());
@@ -2201,6 +2241,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_OR);
 
           JERRY_ASSERT (state.operand.is_register_operand ());
@@ -2290,6 +2332,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
                       || op == JSP_OPERATOR_ASSIGN_B_XOR
                       || op == JSP_OPERATOR_ASSIGN_B_OR);
 
+        subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
         if (op == JSP_OPERATOR_ASSIGN)
         {
           state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, subexpr_state.operand);
@@ -2371,8 +2415,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           /* skip operator */
           skip_newlines ();
-
-          start_dumping_assignment_expression ();
 
           if (tt == TOK_EQ)
           {
@@ -2465,6 +2507,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
           JERRY_ASSERT (state.operand.is_register_operand ());
           JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
 
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           dump_variable_assignment (state.operand, subexpr_state.operand);
 
           dump_jump_to_end_for_rewrite ();
@@ -2524,7 +2568,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (!subexpr_state.operand.is_register_operand ())
         {
           /* evaluating, if reference */
-          subexpr_state.operand = dump_assignment_of_lhs_if_literal (subexpr_state.operand);
+          subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
         }
 
         state.operand = subexpr_state.operand;
@@ -2544,7 +2588,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_COMMA;
 
           /* ECMA-262 v5, 11.14, step 2 */
-          state.operand = dump_assignment_of_lhs_if_literal (state.operand);
+          state.operand = dump_assignment_of_lhs_if_reference (state.operand);
 
           jsp_state_push (state);
 
@@ -2630,7 +2674,8 @@ parse_variable_declaration (void)
   {
     skip_newlines ();
     const jsp_operand_t expr = parse_assignment_expression (true);
-    dump_variable_assignment (name, expr);
+
+    dump_variable_assignment (name, dump_assignment_of_lhs_if_value_based_reference (expr));
   }
   else
   {
@@ -2792,51 +2837,23 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
  * See also:
  *          jsp_parse_for_in_statement
  *
- * @return true - if iterator consists of base and property name,
- *         false - otherwise, iterator consists of an identifier name (without base).
+ * @return operand - result of iterator expression evaluation
  */
-static bool
-jsp_parse_for_in_statement_iterator (jsp_operand_t *base_p, /**< out: base value of member expression, if any,
-                                                       *        empty jsp_operand_t - otherwise */
-                                     jsp_operand_t *identifier_p) /**< out: property name (if base value is not empty),
-                                                             *        identifier - otherwise */
+static jsp_operand_t
+jsp_parse_for_in_statement_iterator (void)
 {
-  JERRY_ASSERT (base_p != NULL);
-  JERRY_ASSERT (identifier_p != NULL);
-
   if (is_keyword (KW_VAR))
   {
     skip_newlines ();
 
-    *base_p = empty_operand ();
-    *identifier_p = parse_variable_declaration ();
+    jsp_operand_t name = parse_variable_declaration ();
+    JERRY_ASSERT (name.is_literal_operand ());
 
-    return false;
+    return jsp_operand_t::make_identifier_operand (name.get_literal ());
   }
   else
   {
-    jsp_operand_t base, identifier;
-
-    /*
-     * FIXME:
-     *       Remove evaluation of last part of identifier chain
-     */
-    jsp_operand_t i = parse_left_hand_side_expression (&base, &identifier);
-
-    if (operand_is_empty (base))
-    {
-      *base_p = empty_operand ();
-      *identifier_p = i;
-
-      return false;
-    }
-    else
-    {
-      *base_p = base;
-      *identifier_p = identifier;
-
-      return true;
-    }
+    return parse_left_hand_side_expression ();
   }
 } /* jsp_parse_for_in_statement_iterator */
 
@@ -2915,17 +2932,18 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
   lexer_seek (iterator_loc);
   tok = lexer_next_token (false);
 
-  jsp_operand_t iterator_base, iterator_identifier, for_in_special_reg;
+  jsp_operand_t iterator, for_in_special_reg;
   for_in_special_reg = jsp_create_operand_for_in_special_reg ();
 
-  if (jsp_parse_for_in_statement_iterator (&iterator_base, &iterator_identifier))
+  iterator = jsp_parse_for_in_statement_iterator ();
+
+  if (iterator.is_value_based_reference_operand ())
   {
-    dump_prop_setter (iterator_base, iterator_identifier, for_in_special_reg);
+    dump_prop_setter (iterator, for_in_special_reg);
   }
   else
   {
-    JERRY_ASSERT (operand_is_empty (iterator_base));
-    dump_variable_assignment (iterator_identifier, for_in_special_reg);
+    dump_variable_assignment (iterator, for_in_special_reg);
   }
 
   // Body
@@ -3623,7 +3641,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     if (!token_is (TOK_SEMICOLON) && !token_is (TOK_NEWLINE) && !token_is (TOK_CLOSE_BRACE))
     {
       const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-      dump_retval (op);
+      dump_retval (dump_assignment_of_lhs_if_value_based_reference (op));
       insert_semicolon ();
       return;
     }
@@ -3653,7 +3671,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     skip_token ();
     const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
     insert_semicolon ();
-    dump_throw (op);
+    dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
     return;
   }
   if (is_keyword (KW_TRY))
@@ -3688,7 +3706,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
       lexer_save_token (tok);
       tok = temp;
       jsp_operand_t expr = parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-      dump_assignment_of_lhs_if_literal (expr);
+      dump_assignment_of_lhs_if_reference (expr);
       insert_semicolon ();
     }
   }

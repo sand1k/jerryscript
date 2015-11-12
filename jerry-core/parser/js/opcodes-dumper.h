@@ -32,6 +32,7 @@ public:
   {
     EMPTY, /**< empty operand */
     LITERAL, /**< operand contains literal value */
+    REFERENCE, /**< Identifier or value-based reference */
     TMP, /**< operand contains byte-code register index */
     IDX_CONST, /**< operand contains an integer constant that fits vm_idx_t */
     UNKNOWN, /**< operand, representing unknown value that would be rewritten later */
@@ -115,6 +116,103 @@ public:
 
     return ret;
   } /* make_lit_operand */
+
+  /**
+   * Construct identifier reference operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_identifier_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::REFERENCE;
+    ret._data.reference.identifier = lit_id;
+    ret._is_value_based_ref = false;
+
+    return ret;
+  } /* make_identifier_operand */
+
+  /**
+   * Construct value-based reference operand with unevaluated base
+   * and property name represented with a string literal
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_value_based_ref_operand_ll (lit_cpointer_t base_lit_id, /**< literal identifier
+                                                                *   for reference's base */
+                                   lit_cpointer_t prop_lit_id) /**< literal identifier
+                                                                *   for reference's property name */
+  {
+    JERRY_ASSERT (base_lit_id.packed_value != NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (prop_lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::REFERENCE;
+    ret._data.reference.value_based.base.lit_id = base_lit_id;
+    ret._data.reference.value_based.prop_name.lit_id = prop_lit_id;
+    ret._is_value_based_ref = true;
+    ret._is_base_evaluated = false;
+    ret._is_prop_name_value = false;
+
+    return ret;
+  } /* make_value_based_ref_operand_ll */
+
+  /**
+   * Construct value-based reference operand with unevaluated base
+   * and property name represented with a string literal
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_value_based_ref_operand_vl (jsp_operand_t base_value, /**< value of reference's base */
+                                   lit_cpointer_t prop_lit_id) /**< literal identifier
+                                                                *   for reference's property name */
+  {
+    JERRY_ASSERT (prop_lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+    jsp_operand_t ret;
+
+    JERRY_ASSERT (base_value.is_register_operand ());
+
+    ret._type = jsp_operand_t::REFERENCE;
+    ret._data.reference.value_based.base.uid = base_value.get_idx ();
+    ret._data.reference.value_based.prop_name.lit_id = prop_lit_id;
+    ret._is_value_based_ref = true;
+    ret._is_base_evaluated = true;
+    ret._is_prop_name_value = false;
+
+    return ret;
+  } /* make_value_based_ref_operand_vl */
+
+  /**
+   * Construct value-based reference operand with unevaluated base
+   * and property name represented with a value
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_value_based_ref_operand_vv (jsp_operand_t base_value, /**< value of reference's base */
+                                   jsp_operand_t prop_name_value) /**< value of reference's property name */
+  {
+    jsp_operand_t ret;
+
+    JERRY_ASSERT (prop_name_value.is_register_operand ());
+
+    ret._type = jsp_operand_t::REFERENCE;
+    ret._data.reference.value_based.base.uid = base_value.get_idx ();
+    ret._data.reference.value_based.prop_name.uid = prop_name_value.get_idx ();
+    ret._is_value_based_ref = true;
+    ret._is_base_evaluated = true;
+    ret._is_prop_name_value = true;
+
+    return ret;
+  } /* make_value_based_ref_operand_vv */
 
   /**
    * Construct register operand
@@ -210,6 +308,146 @@ public:
   } /* is_literal_operand */
 
   /**
+   * Is it reference operand?
+   *
+   * @return true / false
+   */
+  bool is_reference_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::REFERENCE);
+  } /* is_reference_operand */
+
+  /**
+   * Is it identifier reference operand?
+   *
+   * @return true / false
+   */
+  bool is_identifier_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::REFERENCE && !_is_value_based_ref);
+  } /* is_identifier_operand */
+
+  /**
+   * Is it value-based reference operand?
+   *
+   * @return true / false
+   */
+  bool is_value_based_reference_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::REFERENCE && _is_value_based_ref);
+  } /* is_value_based_reference_operand */
+
+  /**
+   * Is it evaluated value-based reference operand?
+   *
+   * @return true / false
+   */
+  bool is_evaluated_value_based_reference_operand (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE && _is_value_based_ref);
+
+    return (_is_base_evaluated);
+  } /* is_evaluated_value_based_reference_operand */
+
+  /**
+   * Get string literal - name of Identifier reference
+   *
+   * @return literal identifier
+   */
+  lit_cpointer_t get_identifier_name (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE && !_is_value_based_ref);
+
+    return (_data.reference.identifier);
+  } /* get_identifier_name */
+
+  /**
+   * Get Identifier name - non-evaluated base of a value-based reference
+   *
+   * @return identifier reference operand
+   */
+  jsp_operand_t get_value_based_ref_base_identifier (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE
+                  && _is_value_based_ref
+                  && !_is_base_evaluated);
+
+    return jsp_operand_t::make_identifier_operand (_data.reference.value_based.base.lit_id);
+  } /* get_value_based_ref_base_identifier */
+
+  /**
+   * Get evaluated base of a value-based reference
+   *
+   * @return register operand
+   */
+  jsp_operand_t get_value_based_ref_base_value (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE
+                  && _is_value_based_ref
+                  && _is_base_evaluated);
+
+    return jsp_operand_t::make_reg_operand (_data.reference.value_based.base.uid);
+  } /* get_value_based_ref_base_value */
+
+  /**
+   * Get base of a value-based reference
+   *
+   * @return operand
+   */
+  jsp_operand_t get_value_based_ref_base (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE && _is_value_based_ref);
+
+    if (_is_base_evaluated)
+    {
+      return get_value_based_ref_base_value ();
+    }
+    else
+    {
+      return get_value_based_ref_base_identifier ();
+    }
+  } /* get_value_based_ref_base */
+
+  /**
+   * Get property name of a value-based reference
+   *
+   * @return register / literal operand
+   */
+  jsp_operand_t get_value_based_ref_prop_name (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE && _is_value_based_ref);
+
+    if (_is_prop_name_value)
+    {
+      return jsp_operand_t::make_reg_operand (_data.reference.value_based.prop_name.uid);
+    }
+    else
+    {
+      return jsp_operand_t::make_lit_operand (_data.reference.value_based.prop_name.lit_id);
+    }
+  } /* get_value_based_ref_prop_name */
+
+  /**
+   * Get property name value of a value-based reference
+   *
+   * @return register operand
+   */
+  jsp_operand_t get_value_based_ref_prop_name_value (void) const
+  {
+    JERRY_ASSERT (_type == jsp_operand_t::REFERENCE
+                  && _is_value_based_ref
+                  && _is_prop_name_value);
+
+    return jsp_operand_t::make_reg_operand (_data.reference.value_based.prop_name.uid);
+  } /* get_value_based_ref_prop_name_value */
+
+  /**
    * Get idx for operand
    *
    * @return VM_IDX_REWRITE_LITERAL_UID (for jsp_operand_t::LITERAL),
@@ -275,16 +513,62 @@ public:
 
     return _data.idx_const;
   } /* get_idx_const */
+
 private:
   union
   {
     vm_idx_t idx_const; /**< idx constant value (for jsp_operand_t::IDX_CONST) */
-    vm_idx_t uid; /**< byte-code register index (for jsp_operand_t::TMP) */
+    vm_idx_t uid; /**< register index (for jsp_operand_t::TMP) */
     lit_cpointer_t lit_id; /**< literal (for jsp_operand_t::LITERAL) */
+
+    /**
+     * Reference (jsp_operand_t::REFERENCE)
+     */
+    union
+    {
+      /**
+       * Value-based reference (is_value_based_ref flag set)
+       */
+      struct
+      {
+        typedef union
+        {
+          vm_idx_t uid; /**< index of register with value */
+          lit_cpointer_t lit_id; /**< literal identifier - name of identifier that could be evaluated to a value */
+        } ref_part_descr_t;
+
+        ref_part_descr_t base; /**< base of reference */
+        ref_part_descr_t prop_name; /**< property name of reference */
+      } value_based;
+
+      /**
+       * Identifier reference (is_value_based_ref flag not set)
+       */
+      lit_cpointer_t identifier;
+    } reference; /**< reference descriptor */
   } _data;
 
   type_t _type; /**< type of operand */
+
+  /*
+   * Reference-related flags (only valid if reference's type is jsp_operand_t::REFERENCE)
+   *
+   * The flags are stored separately from corresponding reference
+   * description parts to reduce size of jsp_operand_t structure
+   * while avoiding __attr_packed___ usage.
+   */
+  uint8_t _is_value_based_ref : 1; /**< is reference, described by the operand, value-based (flag set)
+                                    *   or a simple Identifier reference (flag not set) */
+  uint8_t _is_base_evaluated : 1; /**< if is_value_based_ref is set, this flag indicates whether the base part of
+                                   *   reference is represented as a literal (i.e. not evaluated yet - flag not set),
+                                   *   or as an already evaluated part of reference - i.e. as a register with value
+                                   *   (flag set) */
+  uint8_t _is_prop_name_value : 1; /**< if is_value_based_ref is set, this flag indicates whether the property name
+                                    *   part of reference is represented with a string literal (flag not set),
+                                    *   or as a value - i.e. as a register with value (flag set) */
 };
+
+static_assert (sizeof (jsp_operand_t) == 6, "");
 
 typedef enum __attr_packed___
 {
@@ -345,9 +629,9 @@ void dump_varg (jsp_operand_t);
 void dump_prop_name_and_value (jsp_operand_t, jsp_operand_t);
 void dump_prop_getter_decl (jsp_operand_t, jsp_operand_t);
 void dump_prop_setter_decl (jsp_operand_t, jsp_operand_t);
-void dump_prop_getter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-jsp_operand_t dump_prop_getter_res (jsp_operand_t, jsp_operand_t);
-void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
+void dump_prop_getter (jsp_operand_t, jsp_operand_t);
+jsp_operand_t dump_prop_getter_res (jsp_operand_t);
+void dump_prop_setter (jsp_operand_t, jsp_operand_t);
 
 void dump_function_end_for_rewrite (void);
 void rewrite_function_end ();
@@ -426,7 +710,6 @@ void rewrite_conditional_check (void);
 void dump_jump_to_end_for_rewrite (void);
 void rewrite_jump_to_end (void);
 
-void start_dumping_assignment_expression (jsp_operand_t, locus);
 jsp_operand_t dump_prop_setter_or_variable_assignment_res (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_prop_setter_or_addition_res (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_prop_setter_or_multiplication_res (jsp_operand_t, jsp_operand_t);
