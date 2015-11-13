@@ -1414,7 +1414,7 @@ dump_logical_not_res (jsp_operand_t op)
 }
 
 void
-dump_delete (jsp_operand_t res, jsp_operand_t op, bool is_strict, locus loc)
+dump_delete (jsp_operand_t res, jsp_operand_t op)
 {
   if (!op.is_reference_operand ())
   {
@@ -1426,8 +1426,6 @@ dump_delete (jsp_operand_t res, jsp_operand_t op, bool is_strict, locus loc)
     JERRY_ASSERT (lit->get_type () == LIT_STR_T
                   || lit->get_type () == LIT_MAGIC_STR_T
                   || lit->get_type () == LIT_MAGIC_STR_EX_T);
-
-    jsp_early_error_check_delete (is_strict, loc);
 
     dump_double_address (VM_OP_DELETE_VAR, res, op);
   }
@@ -1451,10 +1449,10 @@ dump_delete (jsp_operand_t res, jsp_operand_t op, bool is_strict, locus loc)
 }
 
 jsp_operand_t
-dump_delete_res (jsp_operand_t op, bool is_strict, locus loc)
+dump_delete_res (jsp_operand_t op)
 {
   const jsp_operand_t res = tmp_operand ();
-  dump_delete (res, op, is_strict, loc);
+  dump_delete (res, op);
   return res;
 }
 
