@@ -1169,40 +1169,6 @@ parse_left_hand_side_expression (void)
   return parse_call_expression ();
 }
 
-/* postfix_expression
-  : left_hand_side_expression ('++' | '--')?
-  ; */
-static jsp_operand_t
-parse_postfix_expression (void)
-{
-  jsp_operand_t expr = parse_left_hand_side_expression ();
-
-  if (lexer_prev_token ().type == TOK_NEWLINE)
-  {
-    return expr;
-  }
-
-  skip_token ();
-  if (token_is (TOK_DOUBLE_PLUS))
-  {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-
-    return dump_post_increment_res (expr);
-  }
-  else if (token_is (TOK_DOUBLE_MINUS))
-  {
-    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-
-    return dump_post_decrement_res (expr);
-  }
-  else
-  {
-    lexer_save_token (tok);
-
-    return expr;
-  }
-} /* parse_postfix_expression */
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1515,37 +1481,222 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        state.operand = parse_postfix_expression ();
-        skip_newlines (); /* FIXME: remove */
+        state.operand = parse_left_hand_side_expression ();
 
-        /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
-        tt = tok.type;
-
-        if (tt == TOK_EQ
-            || tt == TOK_MULT_EQ
-            || tt == TOK_DIV_EQ
-            || tt == TOK_MOD_EQ
-            || tt == TOK_PLUS_EQ
-            || tt == TOK_MINUS_EQ
-            || tt == TOK_LSHIFT_EQ
-            || tt == TOK_RSHIFT_EQ
-            || tt == TOK_RSHIFT_EX_EQ
-            || tt == TOK_AND_EQ
-            || tt == TOK_XOR_EQ
-            || tt == TOK_OR_EQ)
-        {
-          /* LHSE */
-          state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
-        }
-        else
-        {
-          /* LOE */
-          state.state = JSP_STATE_EXPR_POSTFIX;
-        }
-
+        state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
         state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
 
         jsp_state_push (state);
+      }
+    }
+    else if (state.state == JSP_STATE_EXPR_LEFTHANDSIDE)
+    {
+      if (is_subexpr_end)
+      {
+        jsp_operator_t op = state.op;
+
+        state.state = JSP_STATE_EXPR_ASSIGNMENT;
+        state.op = JSP_OPERATOR_NO_OP;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN
+                      || op == JSP_OPERATOR_ASSIGN_MUL
+                      || op == JSP_OPERATOR_ASSIGN_DIV
+                      || op == JSP_OPERATOR_ASSIGN_MOD
+                      || op == JSP_OPERATOR_ASSIGN_ADD
+                      || op == JSP_OPERATOR_ASSIGN_SUB
+                      || op == JSP_OPERATOR_ASSIGN_LSHIFT
+                      || op == JSP_OPERATOR_ASSIGN_RSHIFT
+                      || op == JSP_OPERATOR_ASSIGN_RSHIFT_U
+                      || op == JSP_OPERATOR_ASSIGN_B_AND
+                      || op == JSP_OPERATOR_ASSIGN_B_XOR
+                      || op == JSP_OPERATOR_ASSIGN_B_OR);
+
+        subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
+        if (op == JSP_OPERATOR_ASSIGN)
+        {
+          state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_MUL)
+        {
+          state.operand = dump_prop_setter_or_multiplication_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_DIV)
+        {
+          state.operand = dump_prop_setter_or_division_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_MOD)
+        {
+          state.operand = dump_prop_setter_or_remainder_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_ADD)
+        {
+          state.operand = dump_prop_setter_or_addition_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_SUB)
+        {
+          state.operand = dump_prop_setter_or_substraction_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_LSHIFT)
+        {
+          state.operand = dump_prop_setter_or_left_shift_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_RSHIFT)
+        {
+          state.operand = dump_prop_setter_or_right_shift_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_RSHIFT_U)
+        {
+          state.operand = dump_prop_setter_or_right_shift_ex_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_B_AND)
+        {
+          state.operand = dump_prop_setter_or_bitwise_and_res (state.operand, subexpr_state.operand);
+        }
+        else if (op == JSP_OPERATOR_ASSIGN_B_XOR)
+        {
+          state.operand = dump_prop_setter_or_bitwise_xor_res (state.operand, subexpr_state.operand);
+        }
+        else
+        {
+          JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN_B_OR);
+
+          state.operand = dump_prop_setter_or_bitwise_or_res (state.operand, subexpr_state.operand);
+        }
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        /* parsed through parse_left_hand_side_expression */
+        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+        JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+        bool is_prev_token_newline = (lexer_prev_token ().type == TOK_NEWLINE);
+
+        bool is_finished = false;
+
+        if (!is_prev_token_newline)
+        {
+          skip_token ();
+
+          if (token_is (TOK_DOUBLE_PLUS))
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
+            state.operand = dump_post_increment_res (state.operand);
+
+            state.state = JSP_STATE_EXPR_POSTFIX;
+            JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+
+            jsp_state_push (state);
+
+            is_finished = true;
+          }
+          else if (token_is (TOK_DOUBLE_MINUS))
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
+            state.operand = dump_post_decrement_res (state.operand);
+
+            state.state = JSP_STATE_EXPR_POSTFIX;
+            JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+
+            jsp_state_push (state);
+
+            is_finished = true;
+          }
+          else
+          {
+            lexer_save_token (tok);
+          }
+        }
+
+        skip_newlines ();
+
+        if (!is_finished)
+        {
+          token_type tt = tok.type;
+
+          if (tt == TOK_EQ
+              || tt == TOK_MULT_EQ
+              || tt == TOK_DIV_EQ
+              || tt == TOK_MOD_EQ
+              || tt == TOK_PLUS_EQ
+              || tt == TOK_MINUS_EQ
+              || tt == TOK_LSHIFT_EQ
+              || tt == TOK_RSHIFT_EQ
+              || tt == TOK_RSHIFT_EX_EQ
+              || tt == TOK_AND_EQ
+              || tt == TOK_XOR_EQ
+              || tt == TOK_OR_EQ)
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
+
+            /* skip the operator */
+            skip_newlines ();
+
+            if (tt == TOK_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN;
+            }
+            else if (tt == TOK_MULT_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_MUL;
+            }
+            else if (tt == TOK_DIV_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_DIV;
+            }
+            else if (tt == TOK_MOD_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_MOD;
+            }
+            else if (tt == TOK_PLUS_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_ADD;
+            }
+            else if (tt == TOK_MINUS_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_SUB;
+            }
+            else if (tt == TOK_LSHIFT_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_LSHIFT;
+            }
+            else if (tt == TOK_RSHIFT_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_RSHIFT;
+            }
+            else if (tt == TOK_RSHIFT_EX_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_RSHIFT_U;
+            }
+            else if (tt == TOK_AND_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_B_AND;
+            }
+            else if (tt == TOK_XOR_EQ)
+            {
+              state.op = JSP_OPERATOR_ASSIGN_B_XOR;
+            }
+            else
+            {
+              JERRY_ASSERT (tt == TOK_OR_EQ);
+
+              state.op = JSP_OPERATOR_ASSIGN_B_OR;
+            }
+
+            jsp_state_push (state);
+            jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+          }
+          else
+          {
+            state.state = JSP_STATE_EXPR_POSTFIX;
+            JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+
+            jsp_state_push (state);
+          }
+        }
       }
     }
     else if (state.state == JSP_STATE_EXPR_POSTFIX)
@@ -1554,7 +1705,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       /* propagate to UnaryExpression */
       state.state = JSP_STATE_EXPR_UNARY;
-      // state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
     }
@@ -2350,175 +2500,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             jsp_state_push (state);
           }
-        }
-      }
-    }
-    else if (state.state == JSP_STATE_EXPR_LEFTHANDSIDE)
-    {
-      if (is_subexpr_end)
-      {
-        jsp_operator_t op = state.op;
-
-        state.state = JSP_STATE_EXPR_ASSIGNMENT;
-        state.op = JSP_OPERATOR_NO_OP;
-        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
-
-        JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN
-                      || op == JSP_OPERATOR_ASSIGN_MUL
-                      || op == JSP_OPERATOR_ASSIGN_DIV
-                      || op == JSP_OPERATOR_ASSIGN_MOD
-                      || op == JSP_OPERATOR_ASSIGN_ADD
-                      || op == JSP_OPERATOR_ASSIGN_SUB
-                      || op == JSP_OPERATOR_ASSIGN_LSHIFT
-                      || op == JSP_OPERATOR_ASSIGN_RSHIFT
-                      || op == JSP_OPERATOR_ASSIGN_RSHIFT_U
-                      || op == JSP_OPERATOR_ASSIGN_B_AND
-                      || op == JSP_OPERATOR_ASSIGN_B_XOR
-                      || op == JSP_OPERATOR_ASSIGN_B_OR);
-
-        subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-
-        if (op == JSP_OPERATOR_ASSIGN)
-        {
-          state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_MUL)
-        {
-          state.operand = dump_prop_setter_or_multiplication_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_DIV)
-        {
-          state.operand = dump_prop_setter_or_division_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_MOD)
-        {
-          state.operand = dump_prop_setter_or_remainder_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_ADD)
-        {
-          state.operand = dump_prop_setter_or_addition_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_SUB)
-        {
-          state.operand = dump_prop_setter_or_substraction_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_LSHIFT)
-        {
-          state.operand = dump_prop_setter_or_left_shift_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_RSHIFT)
-        {
-          state.operand = dump_prop_setter_or_right_shift_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_RSHIFT_U)
-        {
-          state.operand = dump_prop_setter_or_right_shift_ex_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_B_AND)
-        {
-          state.operand = dump_prop_setter_or_bitwise_and_res (state.operand, subexpr_state.operand);
-        }
-        else if (op == JSP_OPERATOR_ASSIGN_B_XOR)
-        {
-          state.operand = dump_prop_setter_or_bitwise_xor_res (state.operand, subexpr_state.operand);
-        }
-        else
-        {
-          JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN_B_OR);
-
-          state.operand = dump_prop_setter_or_bitwise_or_res (state.operand, subexpr_state.operand);
-        }
-
-        jsp_state_push (state);
-      }
-      else
-      {
-        /* parsed through parse_left_hand_side_expression */
-        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-        JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
-
-        /* currently post-increment / post-decrement are handled inside parse_postfix_expression, so can't occur here */
-        JERRY_ASSERT (!token_is (TOK_DOUBLE_PLUS) && !token_is (TOK_DOUBLE_MINUS));
-
-        token_type tt = tok.type;
-
-        if (tt == TOK_EQ
-            || tt == TOK_MULT_EQ
-            || tt == TOK_DIV_EQ
-            || tt == TOK_MOD_EQ
-            || tt == TOK_PLUS_EQ
-            || tt == TOK_MINUS_EQ
-            || tt == TOK_LSHIFT_EQ
-            || tt == TOK_RSHIFT_EQ
-            || tt == TOK_RSHIFT_EX_EQ
-            || tt == TOK_AND_EQ
-            || tt == TOK_XOR_EQ
-            || tt == TOK_OR_EQ)
-        {
-          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
-
-          /* skip operator */
-          skip_newlines ();
-
-          if (tt == TOK_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN;
-          }
-          else if (tt == TOK_MULT_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_MUL;
-          }
-          else if (tt == TOK_DIV_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_DIV;
-          }
-          else if (tt == TOK_MOD_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_MOD;
-          }
-          else if (tt == TOK_PLUS_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_ADD;
-          }
-          else if (tt == TOK_MINUS_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_SUB;
-          }
-          else if (tt == TOK_LSHIFT_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_LSHIFT;
-          }
-          else if (tt == TOK_RSHIFT_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_RSHIFT;
-          }
-          else if (tt == TOK_RSHIFT_EX_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_RSHIFT_U;
-          }
-          else if (tt == TOK_AND_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_B_AND;
-          }
-          else if (tt == TOK_XOR_EQ)
-          {
-            state.op = JSP_OPERATOR_ASSIGN_B_XOR;
-          }
-          else
-          {
-            JERRY_ASSERT (tt == TOK_OR_EQ);
-
-            state.op = JSP_OPERATOR_ASSIGN_B_OR;
-          }
-
-          jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
-        }
-        else
-        {
-          /* FIXME: propagate to PostfixExpression */
-
-          JERRY_UNREACHABLE ();
         }
       }
     }
