@@ -1203,104 +1203,6 @@ parse_postfix_expression (void)
   }
 } /* parse_postfix_expression */
 
-/* unary_expression
-  : postfix_expression
-  | ('delete' | 'void' | 'typeof' | '++' | '--' | '+' | '-' | '~' | '!') unary_expression
-  ; */
-static jsp_operand_t
-parse_unary_expression (void)
-{
-  jsp_operand_t expr;
-
-  switch (tok.type)
-  {
-    case TOK_DOUBLE_PLUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression ();
-      jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-      expr = dump_pre_increment_res (expr);
-      break;
-    }
-    case TOK_DOUBLE_MINUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression ();
-      jsp_early_error_check_for_eval_and_arguments_in_strict_mode (expr, is_strict_mode (), tok.loc);
-      expr = dump_pre_decrement_res (expr);
-      break;
-    }
-    case TOK_PLUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression ();
-      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
-      expr = dump_unary_plus_res (expr);
-      break;
-    }
-    case TOK_MINUS:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression ();
-      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
-      expr = dump_unary_minus_res (expr);
-      break;
-    }
-    case TOK_COMPL:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression ();
-      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
-      expr = dump_bitwise_not_res (expr);
-      break;
-    }
-    case TOK_NOT:
-    {
-      skip_newlines ();
-      expr = parse_unary_expression ();
-      expr = dump_assignment_of_lhs_if_value_based_reference (expr);
-      expr = dump_logical_not_res (expr);
-      break;
-    }
-    case TOK_KEYWORD:
-    {
-      if (is_keyword (KW_DELETE))
-      {
-        scopes_tree_set_contains_delete (STACK_TOP (scopes));
-
-        skip_newlines ();
-        expr = parse_unary_expression ();
-        expr = dump_delete_res (expr, is_strict_mode (), tok.loc);
-        break;
-      }
-      else if (is_keyword (KW_VOID))
-      {
-        skip_newlines ();
-        expr = parse_unary_expression ();
-        expr = dump_evaluate_if_reference (expr);
-        dump_undefined_assignment (expr);
-        break;
-      }
-      else if (is_keyword (KW_TYPEOF))
-      {
-        skip_newlines ();
-        expr = parse_unary_expression ();
-        expr = dump_assignment_of_lhs_if_value_based_reference (expr);
-
-        expr = dump_typeof_res (expr);
-        break;
-      }
-      /* FALLTHRU.  */
-    }
-    default:
-    {
-      expr = parse_postfix_expression ();
-    }
-  }
-
-  return expr;
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1543,50 +1445,192 @@ parse_expression_ (jsp_state_expr_t req_expr,
     {
       /* no subexpressions can occur, as expression parse is just started */
       JERRY_ASSERT (!is_subexpr_end);
-
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      state.operand = parse_unary_expression ();
-      skip_newlines (); /* FIXME: remove */
-
-      /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
       token_type tt = tok.type;
-
-      if (tt == TOK_EQ
-          || tt == TOK_MULT_EQ
-          || tt == TOK_DIV_EQ
-          || tt == TOK_MOD_EQ
-          || tt == TOK_PLUS_EQ
-          || tt == TOK_MINUS_EQ
-          || tt == TOK_LSHIFT_EQ
-          || tt == TOK_RSHIFT_EQ
-          || tt == TOK_RSHIFT_EX_EQ
-          || tt == TOK_AND_EQ
-          || tt == TOK_XOR_EQ
-          || tt == TOK_OR_EQ)
+      if (tt == TOK_DOUBLE_PLUS
+          || tt == TOK_DOUBLE_MINUS
+          || tt == TOK_PLUS
+          || tt == TOK_MINUS
+          || tt == TOK_COMPL
+          || tt == TOK_NOT
+          || (tt == TOK_KEYWORD
+              && (is_keyword (KW_DELETE)
+                  || is_keyword (KW_VOID)
+                  || is_keyword (KW_TYPEOF))))
       {
-        /* LHSE */
-        state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
+        /* ECMA-262 v5, 11.4 */
+        state.state = JSP_STATE_EXPR_UNARY;
+
+        if (tt == TOK_DOUBLE_PLUS)
+        {
+          state.op = JSP_OPERATOR_PREINCR;
+        }
+        else if (tt == TOK_DOUBLE_MINUS)
+        {
+          state.op = JSP_OPERATOR_PREDECR;
+        }
+        else if (tt == TOK_PLUS)
+        {
+          state.op = JSP_OPERATOR_PLUS;
+        }
+        else if (tt == TOK_MINUS)
+        {
+          state.op = JSP_OPERATOR_MINUS;
+        }
+        else if (tt == TOK_COMPL)
+        {
+          state.op = JSP_OPERATOR_INVERT;
+        }
+        else if (tt == TOK_NOT)
+        {
+          state.op = JSP_OPERATOR_NOT;
+        }
+        else
+        {
+          JERRY_ASSERT (tt == TOK_KEYWORD);
+
+          if (is_keyword (KW_DELETE))
+          {
+            state.op = JSP_OPERATOR_DELETE;
+
+            scopes_tree_set_contains_delete (STACK_TOP (scopes));
+          }
+          else if (is_keyword (KW_VOID))
+          {
+            state.op = JSP_OPERATOR_VOID;
+          }
+          else
+          {
+            JERRY_ASSERT (is_keyword (KW_TYPEOF));
+
+            state.op = JSP_OPERATOR_TYPEOF;
+          }
+        }
+
+        skip_newlines ();
+
+        jsp_state_push (state);
+        jsp_start_subexpr_parse (JSP_STATE_EXPR_UNARY, in_allowed);
       }
       else
       {
-        /* LOE */
-        state.state = JSP_STATE_EXPR_UNARY;
-      }
+        state.operand = parse_postfix_expression ();
+        skip_newlines (); /* FIXME: remove */
 
-      state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
+        /* FIXME: Parse as LHSE first, then if not AE, continue parse up to LOE and check for CndE */
+        tt = tok.type;
+
+        if (tt == TOK_EQ
+            || tt == TOK_MULT_EQ
+            || tt == TOK_DIV_EQ
+            || tt == TOK_MOD_EQ
+            || tt == TOK_PLUS_EQ
+            || tt == TOK_MINUS_EQ
+            || tt == TOK_LSHIFT_EQ
+            || tt == TOK_RSHIFT_EQ
+            || tt == TOK_RSHIFT_EX_EQ
+            || tt == TOK_AND_EQ
+            || tt == TOK_XOR_EQ
+            || tt == TOK_OR_EQ)
+        {
+          /* LHSE */
+          state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
+        }
+        else
+        {
+          /* LOE */
+          state.state = JSP_STATE_EXPR_POSTFIX;
+        }
+
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
+
+        jsp_state_push (state);
+      }
+    }
+    else if (state.state == JSP_STATE_EXPR_POSTFIX)
+    {
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+
+      /* propagate to UnaryExpression */
+      state.state = JSP_STATE_EXPR_UNARY;
+      // state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
       jsp_state_push (state);
     }
     else if (state.state == JSP_STATE_EXPR_UNARY)
     {
-      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to MultiplicativeExpression */
+        state.state = JSP_STATE_EXPR_MULTIPLICATIVE;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
-      /* propagate to MultiplicativeExpression */
-      state.state = JSP_STATE_EXPR_MULTIPLICATIVE;
-      state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
+      }
+      else
+      {
+        JERRY_ASSERT (is_subexpr_end);
 
-      jsp_state_push (state);
+        if (state.op == JSP_OPERATOR_PREINCR)
+        {
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_state.operand, is_strict_mode (), tok.loc);
+
+          state.operand = dump_pre_increment_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_PREDECR)
+        {
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_state.operand, is_strict_mode (), tok.loc);
+
+          state.operand = dump_pre_decrement_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_PLUS)
+        {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          state.operand = dump_unary_plus_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_MINUS)
+        {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          state.operand = dump_unary_minus_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_INVERT)
+        {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          state.operand = dump_bitwise_not_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_NOT)
+        {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          state.operand = dump_logical_not_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_DELETE)
+        {
+          if (subexpr_state.operand.is_identifier_operand ())
+          {
+            jsp_early_error_check_delete (is_strict_mode (), tok.loc);
+          }
+
+          state.operand = dump_delete_res (subexpr_state.operand);
+        }
+        else if (state.op == JSP_OPERATOR_VOID)
+        {
+          dump_evaluate_if_reference (subexpr_state.operand);
+          state.operand = dump_undefined_assignment_res ();
+        }
+        else
+        {
+          JERRY_ASSERT (state.op == JSP_OPERATOR_TYPEOF);
+
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          state.operand = dump_typeof_res (subexpr_state.operand);
+        }
+
+        state.op = JSP_OPERATOR_NO_OP;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
     }
     else if (state.state == JSP_STATE_EXPR_MULTIPLICATIVE)
     {

@@ -739,8 +739,8 @@ void rewrite_case_clause (void);
 void rewrite_default_clause (void);
 void finish_dumping_case_clauses (void);
 
-void dump_delete (jsp_operand_t, jsp_operand_t, bool, locus);
-jsp_operand_t dump_delete_res (jsp_operand_t, bool, locus);
+void dump_delete (jsp_operand_t, jsp_operand_t);
+jsp_operand_t dump_delete_res (jsp_operand_t);
 
 void dump_typeof (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_typeof_res (jsp_operand_t);
