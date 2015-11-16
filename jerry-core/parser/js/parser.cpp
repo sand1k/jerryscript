@@ -552,7 +552,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
   {
     case VARG_FUNC_DECL:
     case VARG_FUNC_EXPR:
-    case VARG_CONSTRUCT_EXPR:
     {
       current_token_must_be (TOK_OPEN_PAREN);
       obj = dump_assignment_of_lhs_if_value_based_reference (obj);
@@ -575,6 +574,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       break;
     }
     case VARG_CALL_EXPR:
+    case VARG_CONSTRUCT_EXPR:
     {
       JERRY_UNREACHABLE ();
     }
@@ -593,14 +593,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       current_token_must_be (TOK_NAME);
       op = literal_operand (token_data_as_lit_cp ());
       jsp_early_error_add_varg (op);
-      dump_varg (op);
-      skip_newlines ();
-    }
-    else if (vlt == VARG_CONSTRUCT_EXPR)
-    {
-      op = parse_assignment_expression (true);
-      op = dump_assignment_of_lhs_if_reference (op);
-
       dump_varg (op);
       skip_newlines ();
     }
@@ -649,7 +641,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       res = rewrite_varg_header_set_args_count (args_num);
       break;
     }
-    case VARG_CONSTRUCT_EXPR:
     case VARG_ARRAY_DECL:
     {
       /* Intrinsics are already processed.  */
@@ -663,6 +654,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       break;
     }
     case VARG_CALL_EXPR:
+    case VARG_CONSTRUCT_EXPR:
     {
       JERRY_UNREACHABLE ();
     }
