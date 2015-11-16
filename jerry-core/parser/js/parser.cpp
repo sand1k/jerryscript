@@ -1266,6 +1266,7 @@ typedef enum
   JSP_STATE_EXPR_CONDITION      = 0x14, /**< ConditionalExpression (11.12) */
   JSP_STATE_EXPR_ASSIGNMENT     = 0x15, /**< AssignmentExpression (11.13) */
   JSP_STATE_EXPR_EXPRESSION     = 0x16, /**< Expression (11.14) */
+  JSP_STATE_EXPR_ARG_LIST       = 0x17, /**< Argument lists (11.2.4) */
 } jsp_state_expr_t;
 
 typedef enum
@@ -1353,6 +1354,21 @@ jsp_start_subexpr_parse (jsp_state_expr_t req_expr,
 
   jsp_state_push (new_state);
 } /* jsp_start_subexpr_parse */
+
+static void __attr_unused___ /* TODO: Remove attribute */
+jsp_start_arg_list_parse (void)
+{
+  jsp_state_t new_state;
+
+  new_state.state = JSP_STATE_EXPR_ARG_LIST;
+  new_state.req_expr_type = JSP_STATE_EXPR_ARG_LIST;
+  new_state.operand = jsp_operand_t::make_idx_const_operand (0);
+  new_state.op = JSP_OPERATOR_NO_OP;
+  new_state.rewrite_chain = MAX_OPCODES; /* empty chain */
+  new_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
+
+  jsp_state_push (new_state);
+} /* jsp_start_arg_list_parse */
 
 /**
  * Parse an expression
@@ -2625,6 +2641,54 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_state_push (state);
         }
+      }
+    }
+    else if (state.state == JSP_STATE_EXPR_ARG_LIST)
+    {
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
+
+      if (is_subexpr_end)
+      {
+        if (!token_is (TOK_CLOSE_PAREN))
+        {
+          current_token_must_be (TOK_COMMA);
+
+          skip_newlines ();
+        }
+
+        dump_varg (subexpr_state.operand);
+
+        dumper_finish_varg_code_sequence ();
+
+        vm_idx_t args_num = state.operand.get_idx_const ();
+
+        if (args_num == 255)
+        {
+          PARSE_ERROR (JSP_EARLY_ERROR_SYNTAX,
+                       "No more than 255 formal parameters / arguments are currently supported",
+                       LIT_ITERATOR_POS_ZERO);
+        }
+        else
+        {
+          args_num++;
+
+          state.operand = jsp_operand_t::make_idx_const_operand (args_num);
+        }
+      }
+      else if (token_is (TOK_CLOSE_PAREN))
+      {
+        skip_newlines ();
+
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        jsp_state_push (state);
+        jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+
+        dumper_start_varg_code_sequence ();
       }
     }
     else
