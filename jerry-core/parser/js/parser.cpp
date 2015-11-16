@@ -559,63 +559,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       dump_varg_header_for_rewrite (vlt, obj);
       break;
     }
-    case VARG_CALL_EXPR:
-    {
-      current_token_must_be (TOK_OPEN_PAREN);
-
-      opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
-
-      if (obj.is_value_based_reference_operand ())
-      {
-        if (!obj.is_evaluated_value_based_reference_operand ())
-        {
-          obj = dump_evaluate_if_reference (obj);
-        }
-
-        call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
-
-        /*
-         * Presence of explicit 'this' argument implies that this is not Direct call to Eval
-         *
-         * See also:
-         *          ECMA-262 v5, 15.2.2.1
-         */
-      }
-      else if (dumper_is_eval_literal (obj))
-      {
-        call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
-      }
-      else
-      {
-        /*
-         * Note:
-         *      If function is called through Identifier, then the obj should be an Identifier reference,
-         *      not register variable.
-         *      Otherwise, if function is called immediately, without reference (for example, through anonymous
-         *      function expression), the obj should be a register variable.
-         *
-         * See also:
-         *          vm_helper_call_get_call_flags_and_this_arg
-         */
-      }
-
-      jsp_operand_t val = dump_assignment_of_lhs_if_reference (obj);
-      dump_varg_header_for_rewrite (vlt, val);
-
-      if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
-      {
-        if (call_flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
-        {
-          dump_call_additional_info (call_flags, obj.get_value_based_ref_base_value ());
-        }
-        else
-        {
-          dump_call_additional_info (call_flags, empty_operand ());
-        }
-      }
-
-      break;
-    }
     case VARG_ARRAY_DECL:
     {
       current_token_must_be (TOK_OPEN_SQUARE);
@@ -630,6 +573,10 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       dump_varg_header_for_rewrite (vlt, obj);
       jsp_early_error_start_checking_of_prop_names ();
       break;
+    }
+    case VARG_CALL_EXPR:
+    {
+      JERRY_UNREACHABLE ();
     }
   }
 
@@ -649,8 +596,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       dump_varg (op);
       skip_newlines ();
     }
-    else if (vlt == VARG_CONSTRUCT_EXPR
-             || vlt == VARG_CALL_EXPR)
+    else if (vlt == VARG_CONSTRUCT_EXPR)
     {
       op = parse_assignment_expression (true);
       op = dump_assignment_of_lhs_if_reference (op);
@@ -705,7 +651,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
     }
     case VARG_CONSTRUCT_EXPR:
     case VARG_ARRAY_DECL:
-    case VARG_CALL_EXPR:
     {
       /* Intrinsics are already processed.  */
       res = rewrite_varg_header_set_args_count (args_num);
@@ -716,6 +661,10 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
       res = rewrite_varg_header_set_args_count (args_num);
       break;
+    }
+    case VARG_CALL_EXPR:
+    {
+      JERRY_UNREACHABLE ();
     }
   }
   return res;
@@ -987,9 +936,12 @@ parse_primary_expression (void)
   : '.' LT!* Identifier
   ; */
 static jsp_operand_t
-parse_member_expression (void)
+parse_member_expression (bool *out_is_new_expr_p)
 {
   jsp_operand_t expr;
+
+  *out_is_new_expr_p = false;
+
   if (is_keyword (KW_FUNCTION))
   {
     expr = parse_function_expression ();
@@ -997,7 +949,9 @@ parse_member_expression (void)
   else if (is_keyword (KW_NEW))
   {
     skip_newlines ();
-    expr = parse_member_expression ();
+
+    bool is_new_expr;
+    expr = parse_member_expression (&is_new_expr);
 
     skip_newlines ();
     if (token_is (TOK_OPEN_PAREN))
@@ -1009,6 +963,8 @@ parse_member_expression (void)
       lexer_save_token (tok);
       dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, expr);
       expr = rewrite_varg_header_set_args_count (0);
+
+      *out_is_new_expr_p = true;
     }
   }
   else
@@ -1089,86 +1045,6 @@ parse_member_expression (void)
   return expr;
 }
 
-/* call_expression
-  : member_expression LT!* arguments (LT!* call_expression_suffix)*
-  ;
-
-   call_expression_suffix
-  : arguments
-  | index_suffix
-  | property_reference_suffix
-  ;
-
-   arguments
-  : '(' LT!* assignment_expression LT!* (',' LT!* assignment_expression * LT!*)* ')'
-  ; */
-static jsp_operand_t
-parse_call_expression (void)
-{
-  jsp_operand_t expr = parse_member_expression ();
-  jsp_operand_t prop;
-
-  skip_newlines ();
-  if (!token_is (TOK_OPEN_PAREN))
-  {
-    lexer_save_token (tok);
-
-    return expr;
-  }
-
-  expr = parse_argument_list (VARG_CALL_EXPR, expr);
-
-  skip_newlines ();
-  while (token_is (TOK_OPEN_PAREN)
-         || token_is (TOK_OPEN_SQUARE)
-         || token_is (TOK_DOT))
-  {
-    if (tok.type == TOK_OPEN_PAREN)
-    {
-      expr = parse_argument_list (VARG_CALL_EXPR, expr);
-      skip_newlines ();
-    }
-    else
-    {
-      if (tok.type == TOK_OPEN_SQUARE)
-      {
-        skip_newlines ();
-
-        expr = dump_evaluate_if_reference (expr);
-
-        prop = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-        next_token_must_be (TOK_CLOSE_SQUARE);
-
-        expr = jsp_operand_t::make_value_based_ref_operand_vv (expr, prop);
-      }
-      else if (tok.type == TOK_DOT)
-      {
-        token_after_newlines_must_be (TOK_NAME);
-
-        expr = dump_assignment_of_lhs_if_reference (expr);
-
-        expr = jsp_operand_t::make_value_based_ref_operand_vl (expr, token_data_as_lit_cp ());
-      }
-
-      skip_newlines ();
-    }
-  }
-
-  lexer_save_token (tok);
-
-  return expr;
-}
-
-/* left_hand_side_expression
-  : call_expression
-  | new_expression
-  ; */
-static jsp_operand_t
-parse_left_hand_side_expression (void)
-{
-  return parse_call_expression ();
-}
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1233,7 +1109,9 @@ typedef enum
   JSP_OPERATOR_LESS_OR_EQUAL,
   JSP_OPERATOR_GREATER_OR_EQUAL,
   JSP_OPERATOR_INSTANCEOF,
-  JSP_OPERATOR_IN
+  JSP_OPERATOR_IN,
+
+  JSP_OPERATOR_PROP_ACCESSOR
 } jsp_operator_t;
 
 typedef enum
@@ -1355,7 +1233,7 @@ jsp_start_subexpr_parse (jsp_state_expr_t req_expr,
   jsp_state_push (new_state);
 } /* jsp_start_subexpr_parse */
 
-static void __attr_unused___ /* TODO: Remove attribute */
+static void
 jsp_start_arg_list_parse (void)
 {
   jsp_state_t new_state;
@@ -1369,6 +1247,95 @@ jsp_start_arg_list_parse (void)
 
   jsp_state_push (new_state);
 } /* jsp_start_arg_list_parse */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static void
+jsp_start_call_dump (jsp_operand_t obj)
+{
+  opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
+
+  if (obj.is_value_based_reference_operand ())
+  {
+    if (!obj.is_evaluated_value_based_reference_operand ())
+    {
+      obj = dump_evaluate_if_reference (obj);
+    }
+
+    call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
+
+    /*
+     * Presence of explicit 'this' argument implies that this is not Direct call to Eval
+     *
+     * See also:
+     *          ECMA-262 v5, 15.2.2.1
+     */
+  }
+  else if (dumper_is_eval_literal (obj))
+  {
+    call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
+  }
+  else
+  {
+    /*
+     * Note:
+     *      If function is called through Identifier, then the obj should be an Identifier reference,
+     *      not register variable.
+     *      Otherwise, if function is called immediately, without reference (for example, through anonymous
+     *      function expression), the obj should be a register variable.
+     *
+     * See also:
+     *          vm_helper_call_get_call_flags_and_this_arg
+     */
+  }
+
+  jsp_operand_t val = dump_assignment_of_lhs_if_reference (obj);
+  dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
+
+  if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
+  {
+    if (call_flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
+    {
+      dump_call_additional_info (call_flags, obj.get_value_based_ref_base_value ());
+    }
+    else
+    {
+      dump_call_additional_info (call_flags, empty_operand ());
+    }
+  }
+} /* jsp_start_call_dump */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static jsp_operand_t
+jsp_finish_call_dump (jsp_operand_t args_num)
+{
+  return rewrite_varg_header_set_args_count (args_num.get_idx_const ());
+} /* jsp_finish_call_dump */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static void __attr_unused___
+jsp_start_construct_dump (jsp_operand_t obj)
+{
+  dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, dump_assignment_of_lhs_if_value_based_reference (obj));
+} /* jsp_start_construct_dump */
+
+/*
+ * FIXME:
+ *       Move to dumper
+ */
+static jsp_operand_t __attr_unused___
+jsp_finish_constructor_dump (jsp_operand_t args_num)
+{
+  return rewrite_varg_header_set_args_count (args_num.get_idx_const ());
+} /* jsp_finish_constructor_dump */
 
 /**
  * Parse an expression
@@ -1419,6 +1386,18 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         JERRY_ASSERT ((subexpr_state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
       }
+    }
+    else
+    {
+      /*
+       * Any expression production, if parse of the production is not stopped because required
+       * production type was reached, eventually becomes Expression production.
+       *
+       * Because there are no any expression production higher than Expression,
+       * its invalid to reach Expression production type if required production is lower
+       * (i.e. is not Expression production type).
+       */
+      JERRY_ASSERT (!(state.state == JSP_STATE_EXPR_EXPRESSION && state.req_expr_type != JSP_STATE_EXPR_EXPRESSION));
     }
 
     const bool in_allowed = ((state.flags & JSP_STATE_EXPR_FLAG_NO_IN) == 0);
@@ -1497,12 +1476,132 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        state.operand = parse_left_hand_side_expression ();
+        bool is_new_expr;
+        state.operand = parse_member_expression (&is_new_expr);
+        skip_newlines ();
 
-        state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
-        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED; /* FIXME: introduce interface for the operation */
+        if (is_new_expr)
+        {
+          state.state = JSP_STATE_EXPR_NEW;
+        }
+        else
+        {
+          state.state = JSP_STATE_EXPR_MEMBER;
+        }
+
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
 
         jsp_state_push (state);
+      }
+    }
+    else if (state.state == JSP_STATE_EXPR_MEMBER)
+    {
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+      JERRY_ASSERT (!is_subexpr_end);
+
+      if (token_is (TOK_OPEN_PAREN))
+      {
+        state.state = JSP_STATE_EXPR_CALL;
+        state.flags &= ~(JSP_STATE_EXPR_FLAG_COMPLETED);
+
+        /* propagate to CallExpression */
+        state.state = JSP_STATE_EXPR_CALL;
+      }
+      else
+      {
+        /* propagate to NewExpression */
+        state.state = JSP_STATE_EXPR_NEW;
+      }
+
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_NEW)
+    {
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+      JERRY_ASSERT (!is_subexpr_end);
+
+      /* propagate to LeftHandSideExpression */
+      state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
+
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_CALL)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        /* propagate to LeftHandSideExpression */
+        state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          if (subexpr_state.state == JSP_STATE_EXPR_ARG_LIST)
+          {
+            JERRY_ASSERT ((subexpr_state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+            JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
+
+            state.operand = jsp_finish_call_dump (subexpr_state.operand);
+          }
+          else
+          {
+            JERRY_ASSERT (state.op == JSP_OPERATOR_PROP_ACCESSOR);
+            state.op = JSP_OPERATOR_NO_OP;
+
+            current_token_must_be (TOK_CLOSE_SQUARE);
+            skip_newlines ();
+
+            state.operand = jsp_operand_t::make_value_based_ref_operand_vv (state.operand,
+                                                                            subexpr_state.operand);
+          }
+
+          jsp_state_push (state);
+        }
+        else
+        {
+          if (token_is (TOK_OPEN_PAREN))
+          {
+            skip_newlines ();
+
+            jsp_start_call_dump (state.operand);
+
+            jsp_state_push (state);
+            jsp_start_arg_list_parse ();
+          }
+          else if (token_is (TOK_OPEN_SQUARE))
+          {
+            skip_newlines ();
+
+            state.op = JSP_OPERATOR_PROP_ACCESSOR;
+            state.operand = dump_evaluate_if_reference (state.operand);
+
+            jsp_state_push (state);
+            jsp_start_subexpr_parse (JSP_STATE_EXPR_EXPRESSION, true);
+          }
+          else if (token_is (TOK_DOT))
+          {
+            skip_newlines ();
+
+            current_token_must_be (TOK_NAME);
+
+            state.operand = dump_assignment_of_lhs_if_reference (state.operand);
+
+            state.operand = jsp_operand_t::make_value_based_ref_operand_vl (state.operand,
+                                                                            token_data_as_lit_cp ());
+
+            jsp_state_push (state);
+
+            skip_newlines ();
+          }
+          else
+          {
+            state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+            jsp_state_push (state);
+          }
+        }
       }
     }
     else if (state.state == JSP_STATE_EXPR_LEFTHANDSIDE)
@@ -1585,7 +1684,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        /* parsed through parse_left_hand_side_expression */
         JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
         JERRY_ASSERT (state.op == JSP_OPERATOR_NO_OP);
 
@@ -1595,8 +1693,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         if (!is_prev_token_newline)
         {
-          skip_token ();
-
           if (token_is (TOK_DOUBLE_PLUS))
           {
             jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
@@ -1608,6 +1704,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
             jsp_state_push (state);
 
             is_finished = true;
+
+            skip_newlines ();
           }
           else if (token_is (TOK_DOUBLE_MINUS))
           {
@@ -1620,14 +1718,10 @@ parse_expression_ (jsp_state_expr_t req_expr,
             jsp_state_push (state);
 
             is_finished = true;
-          }
-          else
-          {
-            lexer_save_token (tok);
+
+            skip_newlines ();
           }
         }
-
-        skip_newlines ();
 
         if (!is_finished)
         {
@@ -2649,13 +2743,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       if (is_subexpr_end)
       {
-        if (!token_is (TOK_CLOSE_PAREN))
-        {
-          current_token_must_be (TOK_COMMA);
-
-          skip_newlines ();
-        }
-
+        subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
         dump_varg (subexpr_state.operand);
 
         dumper_finish_varg_code_sequence ();
@@ -2674,6 +2762,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state.operand = jsp_operand_t::make_idx_const_operand (args_num);
         }
+
+        if (!token_is (TOK_CLOSE_PAREN))
+        {
+          current_token_must_be (TOK_COMMA);
+
+          skip_newlines ();
+        }
+
+        jsp_state_push (state);
       }
       else if (token_is (TOK_CLOSE_PAREN))
       {
@@ -2942,7 +3039,7 @@ jsp_parse_for_in_statement_iterator (void)
   }
   else
   {
-    return parse_left_hand_side_expression ();
+    return parse_expression_ (JSP_STATE_EXPR_LEFTHANDSIDE, true);
   }
 } /* jsp_parse_for_in_statement_iterator */
 
