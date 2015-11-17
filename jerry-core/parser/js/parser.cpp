@@ -3196,6 +3196,7 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
   skip_token ();
 
   // Dump for-in instruction
+  collection = dump_assignment_of_lhs_if_value_based_reference (collection);
   vm_instr_counter_t for_in_oc = dump_for_in_for_rewrite (collection);
 
   // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
