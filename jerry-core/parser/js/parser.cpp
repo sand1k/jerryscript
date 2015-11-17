@@ -347,6 +347,11 @@ dump_evaluate_if_reference (jsp_operand_t lhs)
       return jsp_operand_t::make_value_based_ref_operand_vv (base, prop_name);
     }
   }
+  else if (lhs.is_register_operand ()
+           && !(lhs.get_idx () >= VM_REG_GENERAL_FIRST && lhs.get_idx () <= VM_REG_GENERAL_LAST))
+  {
+    return dump_variable_assignment_res (lhs);
+  }
   else
   {
     return lhs;
@@ -383,6 +388,11 @@ dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
     {
       return dump_variable_assignment_res (lhs);
     }
+  }
+  else if (lhs.is_register_operand ()
+           && !(lhs.get_idx () >= VM_REG_GENERAL_FIRST && lhs.get_idx () <= VM_REG_GENERAL_LAST))
+  {
+    return dump_variable_assignment_res (lhs);
   }
   else
   {
@@ -915,7 +925,7 @@ typedef struct
 } jsp_state_t;
 
 /* FIXME: change to dynamic */
-#define JSP_STATE_STACK_MAX 32
+#define JSP_STATE_STACK_MAX 64
 jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
 uint32_t jsp_state_stack_pos = 0;
 
@@ -1018,7 +1028,7 @@ jsp_start_call_dump (jsp_operand_t obj)
      */
   }
 
-  jsp_operand_t val = dump_assignment_of_lhs_if_reference (obj);
+  jsp_operand_t val = dump_assignment_of_lhs_if_value_based_reference (obj);
   dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
 
   if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
@@ -1378,6 +1388,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         if (is_subexpr_end)
         {
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           dump_varg (subexpr_state.operand);
 
           state.arg_list_length++;
@@ -1389,6 +1401,10 @@ parse_expression_ (jsp_state_expr_t req_expr,
           if (token_is (TOK_COMMA))
           {
             skip_newlines ();
+          }
+          else
+          {
+            current_token_must_be (TOK_CLOSE_SQUARE);
           }
         }
         else
@@ -1499,7 +1515,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             JERRY_ASSERT (state.op == JSP_OPERATOR_NEW);
             JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
 
-            subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
+            subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
             dump_varg (subexpr_state.operand);
 
             dumper_finish_varg_code_sequence ();
@@ -1642,7 +1658,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           {
             JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
 
-            subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
+            subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
             dump_varg (subexpr_state.operand);
 
             dumper_finish_varg_code_sequence ();
@@ -2583,6 +2599,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
           JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_AND);
 
           JERRY_ASSERT (state.operand.is_register_operand ());
+
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+
           dump_variable_assignment (state.operand, subexpr_state.operand);
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2610,6 +2629,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
               JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) == 0);
 
               jsp_operand_t ret = tmp_operand ();
+
+              state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
               dump_variable_assignment (ret, state.operand);
 
               start_dumping_logical_and_checks ();
@@ -2715,6 +2736,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
               JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) == 0);
 
               jsp_operand_t ret = tmp_operand ();
+
+              state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
               dump_variable_assignment (ret, state.operand);
 
               start_dumping_logical_or_checks ();
@@ -2800,6 +2823,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
           JERRY_ASSERT (state.operand.is_register_operand ());
           JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+
+          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
 
           dump_variable_assignment (state.operand, subexpr_state.operand);
           rewrite_jump_to_end ();
@@ -2904,6 +2929,8 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
       && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
       && !inside_function)
   {
+    expr = dump_assignment_of_lhs_if_value_based_reference (expr);
+
     dump_variable_assignment (eval_ret_operand (), expr);
   }
 
