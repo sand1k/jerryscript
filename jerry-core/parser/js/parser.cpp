@@ -72,7 +72,6 @@ typedef enum
   JSP_STATE_EXPR_PRIMARY        = 0x02, /**< PrimaryExpression (11.1) */
   JSP_STATE_EXPR_FUNCTION       = 0x03, /**< FunctionExpression (11.2.5) */
   JSP_STATE_EXPR_MEMBER         = 0x04, /**< MemberExpression (11.2) */
-  JSP_STATE_EXPR_NEW            = 0x05, /**< MemberExpression (11.2) */
   JSP_STATE_EXPR_CALL           = 0x06, /**< CallExpression (11.2) */
   JSP_STATE_EXPR_LEFTHANDSIDE   = 0x07, /**< LeftHandSideExpression (11.2) */
   JSP_STATE_EXPR_POSTFIX        = 0x08, /**< PostfixExpression (11.3) */
@@ -1485,8 +1484,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
         }
         else
         {
-          /* propagate to NewExpression */
-          state.state = JSP_STATE_EXPR_NEW;
+          /* propagate to LeftHandSideExpression */
+          state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
         }
 
         jsp_state_push (state);
@@ -1571,7 +1570,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
               if (is_arg_list_implicit)
               {
-                state.state = JSP_STATE_EXPR_NEW;
+                state.state = JSP_STATE_EXPR_MEMBER;
                 state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
               }
 
@@ -1625,16 +1624,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
           jsp_state_push (state);
         }
       }
-    }
-    else if (state.state == JSP_STATE_EXPR_NEW)
-    {
-      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-      JERRY_ASSERT (!is_subexpr_end);
-
-      /* propagate to LeftHandSideExpression */
-      state.state = JSP_STATE_EXPR_LEFTHANDSIDE;
-
-      jsp_state_push (state);
     }
     else if (state.state == JSP_STATE_EXPR_CALL)
     {
