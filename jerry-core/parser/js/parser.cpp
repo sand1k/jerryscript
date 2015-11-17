@@ -3337,7 +3337,8 @@ parse_if_statement (void)
 {
   assert_keyword (KW_IF);
 
-  const jsp_operand_t cond = parse_expression_inside_parens ();
+  jsp_operand_t cond = parse_expression_inside_parens ();
+  cond = dump_assignment_of_lhs_if_value_based_reference (cond);
   dump_conditional_check_for_rewrite (cond);
 
   skip_newlines ();
@@ -3494,7 +3495,8 @@ parse_switch_statement (void)
     if (is_keyword (KW_CASE))
     {
       skip_newlines ();
-      const jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
+      jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
+      case_expr = dump_assignment_of_lhs_if_value_based_reference (case_expr);
       next_token_must_be (TOK_COLON);
       dump_case_clause_check_for_rewrite (switch_expr, case_expr);
       skip_newlines ();
