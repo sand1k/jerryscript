@@ -1568,8 +1568,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
             else
             {
               state.op = JSP_OPERATOR_NO_OP;
-              state.state = JSP_STATE_EXPR_NEW;
-              state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+              if (is_arg_list_implicit)
+              {
+                state.state = JSP_STATE_EXPR_NEW;
+                state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+              }
 
               state.operand = jsp_finish_construct_dump (0);
 
