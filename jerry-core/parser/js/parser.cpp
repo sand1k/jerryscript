@@ -91,6 +91,7 @@ typedef enum
   JSP_STATE_EXPR_EXPRESSION     = 0x16, /**< Expression (11.14) */
 
   JSP_STATE_EXPR_ARRAY_LITERAL  = 0x17, /**< ArrayLiteral (11.1.4) */
+  JSP_STATE_EXPR_OBJECT_LITERAL = 0x18, /**< ObjectLiteral (11.1.5) */
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -400,6 +401,18 @@ dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
   }
 }
 
+static bool
+jsp_can_current_token_be_property_name (void)
+{
+  return (tok.type == TOK_NAME
+          || tok.type == TOK_STRING
+          || tok.type == TOK_NUMBER
+          || tok.type == TOK_SMALL_INT
+          || tok.type == TOK_KEYWORD
+          || tok.type == TOK_NULL
+          || tok.type == TOK_BOOL);
+} /* jsp_can_current_token_be_property_name */
+
 /* property_name
   : Identifier
   | Keyword
@@ -464,126 +477,6 @@ parse_property_name (void)
   }
 }
 
-/* property_name_and_value
-  : property_name LT!* ':' LT!* assignment_expression
-  ; */
-static void
-parse_property_name_and_value (void)
-{
-  const jsp_operand_t name = parse_property_name ();
-  token_after_newlines_must_be (TOK_COLON);
-  skip_newlines ();
-  const jsp_operand_t value = parse_expression_ (JSP_STATE_EXPR_ASSIGNMENT, true);
-
-  dump_prop_name_and_value (name, dump_assignment_of_lhs_if_value_based_reference (value));
-  jsp_early_error_add_prop_name (name, PROP_DATA);
-}
-
-/* property_assignment
-  : property_name_and_value
-  | get LT!* property_name LT!* '(' LT!* ')' LT!* '{' LT!* function_body LT!* '}'
-  | set LT!* property_name LT!* '(' identifier ')' LT!* '{' LT!* function_body LT!* '}'
-  ; */
-static void
-parse_property_assignment (void)
-{
-  if (token_is (TOK_NAME))
-  {
-    bool is_setter;
-
-    if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "get"))
-    {
-      is_setter = false;
-    }
-    else if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "set"))
-    {
-      is_setter = true;
-    }
-    else
-    {
-      parse_property_name_and_value ();
-
-      return;
-    }
-
-    const token temp = tok;
-    skip_newlines ();
-    if (token_is (TOK_COLON))
-    {
-      lexer_save_token (tok);
-      tok = temp;
-
-      parse_property_name_and_value ();
-
-      return;
-    }
-
-    STACK_DECLARE_USAGE (scopes);
-
-    const jsp_operand_t name = parse_property_name ();
-    jsp_early_error_add_prop_name (name, is_setter ? PROP_SET : PROP_GET);
-
-    scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-    STACK_PUSH (scopes, scopes_tree_init (NULL, SCOPE_TYPE_FUNCTION));
-    serializer_set_scope (STACK_TOP (scopes));
-    scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-    lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-    jsp_early_error_start_checking_of_vargs ();
-
-    skip_newlines ();
-    const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand ());
-
-    dump_function_end_for_rewrite ();
-
-    token_after_newlines_must_be (TOK_OPEN_BRACE);
-    skip_newlines ();
-
-    bool was_in_function = inside_function;
-    inside_function = true;
-
-    jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-    parse_source_element_list (false, true);
-
-    jsp_label_restore_set (masked_label_set_p);
-
-    token_after_newlines_must_be (TOK_CLOSE_BRACE);
-
-    dump_ret ();
-    rewrite_function_end ();
-
-    inside_function = was_in_function;
-
-    jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-    scopes_tree fe_scope_tree = STACK_TOP (scopes);
-
-    STACK_DROP (scopes, 1);
-    serializer_set_scope (STACK_TOP (scopes));
-    lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-    serializer_dump_subscope (fe_scope_tree);
-    scopes_tree_free (fe_scope_tree);
-
-    STACK_CHECK_USAGE (scopes);
-
-    if (is_setter)
-    {
-      dump_prop_setter_decl (name, func);
-    }
-    else
-    {
-      dump_prop_getter_decl (name, func);
-    }
-  }
-  else
-  {
-    parse_property_name_and_value ();
-  }
-}
-
 /** Parse list of identifiers, assigment expressions or properties, splitted by comma.
     For each ALT dumps appropriate bytecode. Uses OBJ during dump if neccesary.
     Result tmp. */
@@ -604,13 +497,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       break;
     }
     case VARG_OBJ_DECL:
-    {
-      current_token_must_be (TOK_OPEN_BRACE);
-      close_tt = TOK_CLOSE_BRACE;
-      dump_varg_header_for_rewrite (vlt, obj);
-      jsp_early_error_start_checking_of_prop_names ();
-      break;
-    }
     case VARG_ARRAY_DECL:
     case VARG_CALL_EXPR:
     case VARG_CONSTRUCT_EXPR:
@@ -626,22 +512,13 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
 
     jsp_operand_t op;
 
-    if (vlt == VARG_FUNC_DECL
-        || vlt == VARG_FUNC_EXPR)
-    {
-      current_token_must_be (TOK_NAME);
-      op = literal_operand (token_data_as_lit_cp ());
-      jsp_early_error_add_varg (op);
-      dump_varg (op);
-      skip_newlines ();
-    }
-    else
-    {
-      JERRY_ASSERT (vlt == VARG_OBJ_DECL);
+    JERRY_ASSERT (vlt == VARG_FUNC_DECL || vlt == VARG_FUNC_EXPR);
 
-      parse_property_assignment ();
-      skip_newlines ();
-    }
+    current_token_must_be (TOK_NAME);
+    op = literal_operand (token_data_as_lit_cp ());
+    jsp_early_error_add_varg (op);
+    dump_varg (op);
+    skip_newlines ();
 
     if (token_is (TOK_COMMA))
     {
@@ -667,11 +544,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       break;
     }
     case VARG_OBJ_DECL:
-    {
-      jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
-      res = rewrite_varg_header_set_args_count (args_num);
-      break;
-    }
     case VARG_ARRAY_DECL:
     case VARG_CALL_EXPR:
     case VARG_CONSTRUCT_EXPR:
@@ -1278,6 +1150,19 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         jsp_state_push (state);
       }
+      else if (token_is (TOK_OPEN_BRACE))
+      {
+        skip_newlines ();
+
+        dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
+        jsp_early_error_start_checking_of_prop_names ();
+
+        state.state = JSP_STATE_EXPR_OBJECT_LITERAL;
+        state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
+        state.arg_list_length = 0;
+
+        jsp_state_push (state);
+      }
       else
       {
         state.state = JSP_STATE_EXPR_PRIMARY;
@@ -1367,6 +1252,165 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
 
           skip_newlines ();
+          jsp_state_push (state);
+        }
+      }
+    }
+    else if (state.state == JSP_STATE_EXPR_OBJECT_LITERAL)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        JERRY_ASSERT (!is_subexpr_end);
+
+        /* propagate to PrimaryExpression */
+        state.state = JSP_STATE_EXPR_PRIMARY;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_ARG_LIST) != 0);
+
+        if (token_is (TOK_CLOSE_BRACE))
+        {
+          jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
+
+          skip_newlines ();
+
+          state.operand = rewrite_varg_header_set_args_count (state.arg_list_length);
+
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+          state.flags &= ~JSP_STATE_EXPR_FLAG_ARG_LIST;
+
+          jsp_state_push (state);
+        }
+        else
+        {
+          dumper_start_varg_code_sequence ();
+
+          if (!jsp_can_current_token_be_property_name ())
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Wrong property name");
+          }
+
+          jsp_operand_t prop_name = parse_property_name ();
+
+          bool is_getter = false, is_setter = false;
+
+          if (token_is (TOK_NAME)
+              && lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "get"))
+          {
+            skip_newlines ();
+
+            if (!token_is (TOK_COLON))
+            {
+              is_getter = true;
+            }
+          }
+          else if (token_is (TOK_NAME)
+                   && lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "set"))
+          {
+            skip_newlines ();
+
+            if (!token_is (TOK_COLON))
+            {
+              is_setter = true;
+            }
+          }
+          else
+          {
+            skip_newlines ();
+          }
+
+          if (is_getter || is_setter)
+          {
+            STACK_DECLARE_USAGE (scopes);
+
+            prop_name = parse_property_name ();
+            jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
+
+            scopes_tree_set_contains_functions (STACK_TOP (scopes));
+
+            STACK_PUSH (scopes, scopes_tree_init (NULL, SCOPE_TYPE_FUNCTION));
+            serializer_set_scope (STACK_TOP (scopes));
+            scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
+            lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
+
+            jsp_early_error_start_checking_of_vargs ();
+
+            skip_newlines ();
+            const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand ());
+
+            dump_function_end_for_rewrite ();
+
+            token_after_newlines_must_be (TOK_OPEN_BRACE);
+            skip_newlines ();
+
+            bool was_in_function = inside_function;
+            inside_function = true;
+
+            jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
+
+            parse_source_element_list (false, true);
+
+            jsp_label_restore_set (masked_label_set_p);
+
+            token_after_newlines_must_be (TOK_CLOSE_BRACE);
+
+            skip_newlines ();
+
+            dump_ret ();
+            rewrite_function_end ();
+
+            inside_function = was_in_function;
+
+            jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
+
+            scopes_tree fe_scope_tree = STACK_TOP (scopes);
+
+            STACK_DROP (scopes, 1);
+            serializer_set_scope (STACK_TOP (scopes));
+            lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
+
+            serializer_dump_subscope (fe_scope_tree);
+            scopes_tree_free (fe_scope_tree);
+
+            STACK_CHECK_USAGE (scopes);
+
+            if (is_setter)
+            {
+              dump_prop_setter_decl (prop_name, func);
+            }
+            else
+            {
+              dump_prop_getter_decl (prop_name, func);
+            }
+          }
+          else
+          {
+            current_token_must_be (TOK_COLON);
+            skip_newlines ();
+
+            const jsp_operand_t value = parse_expression_ (JSP_STATE_EXPR_ASSIGNMENT, true);
+            skip_newlines ();
+
+            dump_prop_name_and_value (prop_name, dump_assignment_of_lhs_if_value_based_reference (value));
+            jsp_early_error_add_prop_name (prop_name, PROP_DATA);
+          }
+
+          state.arg_list_length++;
+
+          dumper_finish_varg_code_sequence ();
+
+          if (token_is (TOK_COMMA))
+          {
+            skip_newlines ();
+          }
+          else
+          {
+            current_token_must_be (TOK_CLOSE_BRACE);
+          }
+
           jsp_state_push (state);
         }
       }
