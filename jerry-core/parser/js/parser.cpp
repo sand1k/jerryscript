@@ -1262,7 +1262,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
         skip_newlines ();
 
         dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
-        dumper_start_varg_code_sequence ();
 
         state.state = JSP_STATE_EXPR_ARRAY_LITERAL;
         state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
