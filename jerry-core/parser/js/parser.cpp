@@ -90,6 +90,8 @@ typedef enum
   JSP_STATE_EXPR_CONDITION      = 0x14, /**< ConditionalExpression (11.12) */
   JSP_STATE_EXPR_ASSIGNMENT     = 0x15, /**< AssignmentExpression (11.13) */
   JSP_STATE_EXPR_EXPRESSION     = 0x16, /**< Expression (11.14) */
+
+  JSP_STATE_EXPR_ARRAY_LITERAL  = 0x17, /**< ArrayLiteral (11.1.4) */
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -592,13 +594,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       dump_varg_header_for_rewrite (vlt, obj);
       break;
     }
-    case VARG_ARRAY_DECL:
-    {
-      current_token_must_be (TOK_OPEN_SQUARE);
-      close_tt = TOK_CLOSE_SQUARE;
-      dump_varg_header_for_rewrite (vlt, obj);
-      break;
-    }
     case VARG_OBJ_DECL:
     {
       current_token_must_be (TOK_OPEN_BRACE);
@@ -607,6 +602,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       jsp_early_error_start_checking_of_prop_names ();
       break;
     }
+    case VARG_ARRAY_DECL:
     case VARG_CALL_EXPR:
     case VARG_CONSTRUCT_EXPR:
     {
@@ -629,20 +625,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       jsp_early_error_add_varg (op);
       dump_varg (op);
       skip_newlines ();
-    }
-    else if (vlt == VARG_ARRAY_DECL)
-    {
-      if (token_is (TOK_COMMA))
-      {
-        op = dump_array_hole_assignment_res ();
-        dump_varg (op);
-      }
-      else
-      {
-        op = parse_expression_ (JSP_STATE_EXPR_ASSIGNMENT, true);
-        dump_varg (op);
-        skip_newlines ();
-      }
     }
     else
     {
@@ -675,18 +657,13 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
       res = rewrite_varg_header_set_args_count (args_num);
       break;
     }
-    case VARG_ARRAY_DECL:
-    {
-      /* Intrinsics are already processed.  */
-      res = rewrite_varg_header_set_args_count (args_num);
-      break;
-    }
     case VARG_OBJ_DECL:
     {
       jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
       res = rewrite_varg_header_set_args_count (args_num);
       break;
     }
+    case VARG_ARRAY_DECL:
     case VARG_CALL_EXPR:
     case VARG_CONSTRUCT_EXPR:
     {
@@ -828,15 +805,6 @@ parse_function_expression (void)
   STACK_CHECK_USAGE (scopes);
   return res;
 } /* parse_function_expression */
-
-/* array_literal
-  : '[' LT!* assignment_expression? (LT!* ',' (LT!* assignment_expression)?)* LT!* ']' LT!*
-  ; */
-static jsp_operand_t
-parse_array_literal (void)
-{
-  return parse_argument_list (VARG_ARRAY_DECL, empty_operand ());
-}
 
 /* object_literal
   : '{' LT!* property_assignment (LT!* ',' LT!* property_assignment)* LT!* '}'
@@ -1289,6 +1257,19 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_state_push (state);
         jsp_start_subexpr_parse (JSP_STATE_EXPR_MEMBER, true);
       }
+      else if (token_is (TOK_OPEN_SQUARE))
+      {
+        skip_newlines ();
+
+        dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
+        dumper_start_varg_code_sequence ();
+
+        state.state = JSP_STATE_EXPR_ARRAY_LITERAL;
+        state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
+        state.arg_list_length = 0;
+
+        jsp_state_push (state);
+      }
       else
       {
         state.state = JSP_STATE_EXPR_PRIMARY;
@@ -1364,11 +1345,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
                   break;
                 }
-                case TOK_OPEN_SQUARE:
-                {
-                  state.operand = parse_array_literal ();
-                  break;
-                }
                 case TOK_OPEN_BRACE:
                 {
                   state.operand = parse_object_literal ();
@@ -1384,6 +1360,77 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           skip_newlines ();
           jsp_state_push (state);
+        }
+      }
+    }
+    else if (state.state == JSP_STATE_EXPR_ARRAY_LITERAL)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        JERRY_ASSERT (!is_subexpr_end);
+
+        /* propagate to PrimaryExpression */
+        state.state = JSP_STATE_EXPR_PRIMARY;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_ARG_LIST) != 0);
+
+        if (is_subexpr_end)
+        {
+          dump_varg (subexpr_state.operand);
+
+          state.arg_list_length++;
+
+          dumper_finish_varg_code_sequence ();
+
+          jsp_state_push (state);
+
+          if (token_is (TOK_COMMA))
+          {
+            skip_newlines ();
+          }
+        }
+        else
+        {
+          if (token_is (TOK_CLOSE_SQUARE))
+          {
+            skip_newlines ();
+
+            state.operand = rewrite_varg_header_set_args_count (state.arg_list_length);
+
+            state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+            state.flags &= ~JSP_STATE_EXPR_FLAG_ARG_LIST;
+
+            jsp_state_push (state);
+          }
+          else if (token_is (TOK_COMMA))
+          {
+            while (token_is (TOK_COMMA))
+            {
+              skip_newlines ();
+
+              dumper_start_varg_code_sequence ();
+
+              dump_varg (dump_array_hole_assignment_res ());
+
+              state.arg_list_length++;
+
+              dumper_finish_varg_code_sequence ();
+            }
+
+            jsp_state_push (state);
+          }
+          else
+          {
+            jsp_state_push (state);
+
+            dumper_start_varg_code_sequence ();
+
+            jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+          }
         }
       }
     }
