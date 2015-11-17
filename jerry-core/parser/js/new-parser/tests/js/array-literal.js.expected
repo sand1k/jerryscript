@@ -1,0 +1,139 @@
+
+--- Script parsing start ---
+
+  [  1] CBC_PUSH_IDENT idx:0->ident(next_statement)
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_EXT_CREATE_ARRAY
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_PUSH_IDENT idx:0->ident(next_statement)
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_EXT_CREATE_ARRAY
+  [  2] CBC_EXT_PUSH_ELISION
+  [  1] CBC_EXT_ARRAY_APPEND byte_arg:1
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_PUSH_IDENT idx:0->ident(next_statement)
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_EXT_CREATE_ARRAY
+  [  2] CBC_ADD_TWO_LITERALS idx:1->string(xx) idx:2->string(yy)
+  [  1] CBC_EXT_ARRAY_APPEND byte_arg:1
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_PUSH_IDENT idx:0->ident(next_statement)
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_EXT_CREATE_ARRAY
+  [  2] CBC_EXT_PUSH_ELISION
+  [  3] CBC_ADD_TWO_LITERALS idx:3->ident(a) idx:4->ident(b)
+  [  1] CBC_EXT_ARRAY_APPEND byte_arg:2
+  [  2] CBC_EXT_CREATE_ARRAY
+
+--- Function parsing start ---
+
+  [  1] CBC_EXT_CREATE_ARRAY
+  [  0] CBC_RETURN
+
+Final byte code dump:
+
+  Maximum stack depth: 1
+  Literal encoding: small
+  Argument range end: 0
+  Register range end: 0
+  Identifier range end: 0
+  Const literal range end: 0
+  Literal range end: 0
+
+   0 : CBC_EXT_CREATE_ARRAY
+   2 : CBC_RETURN
+
+Byte code size: 3 bytes
+
+--- Function parsing end ---
+
+  [  3] CBC_PUSH_LITERAL idx:5->function
+  [  4] CBC_EXT_PUSH_ELISION
+  [  5] CBC_CALL_IDENT_PUSH_RESULT idx:3->ident(a) byte_arg:0
+  [  6] CBC_PUSH_IDENT idx:7->ident(magic)
+  [  5] CBC_EXT_ASSIGN_LEFT_SHIFT_PROP_STRING_PUSH_RESULT idx:6->string(b)
+  [  2] CBC_EXT_ARRAY_APPEND byte_arg:3
+  [  1] CBC_MULTIPLY
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_PUSH_IDENT idx:0->ident(next_statement)
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_EXT_CREATE_ARRAY
+  [  2] CBC_EXT_CREATE_ARRAY
+  [  3] CBC_EXT_CREATE_ARRAY
+  [  4] CBC_PUSH_IDENT idx:3->ident(a)
+  [  3] CBC_EXT_ARRAY_APPEND byte_arg:1
+  [  4] CBC_EXT_PUSH_ELISION
+  [  5] CBC_PUSH_IDENT idx:3->ident(a)
+  [  6] CBC_CALL_IDENT_PUSH_RESULT idx:9->ident(x) byte_arg:0
+  [  5] CBC_PROP_GET
+  [  1] CBC_EXT_ARRAY_APPEND byte_arg:4
+  [  1] CBC_CALL_IDENT_PUSH_RESULT idx:8->ident(f) byte_arg:1
+  [  0] CBC_POP_BLOCK
+  [  1] CBC_PUSH_IDENT idx:0->ident(next_statement)
+  [  0] CBC_POP_BLOCK
+
+Final byte code dump:
+
+  Maximum stack depth: 6
+  Literal encoding: small
+  Argument range end: 0
+  Register range end: 0
+  Identifier range end: 6
+  Const literal range end: 9
+  Literal range end: 10
+
+   0 : CBC_PUSH_IDENT idx:0(ident)->ident(next_statement)
+   2 : CBC_POP_BLOCK
+   3 : CBC_EXT_CREATE_ARRAY
+   5 : CBC_POP_BLOCK
+   6 : CBC_PUSH_IDENT idx:0(ident)->ident(next_statement)
+   8 : CBC_POP_BLOCK
+   9 : CBC_EXT_CREATE_ARRAY
+  11 : CBC_EXT_PUSH_ELISION
+  13 : CBC_EXT_ARRAY_APPEND byte_arg:1
+  16 : CBC_POP_BLOCK
+  17 : CBC_PUSH_IDENT idx:0(ident)->ident(next_statement)
+  19 : CBC_POP_BLOCK
+  20 : CBC_EXT_CREATE_ARRAY
+  22 : CBC_ADD_TWO_LITERALS idx:6(lit)->string(xx) idx:7(lit)->string(yy)
+  25 : CBC_EXT_ARRAY_APPEND byte_arg:1
+  28 : CBC_POP_BLOCK
+  29 : CBC_PUSH_IDENT idx:0(ident)->ident(next_statement)
+  31 : CBC_POP_BLOCK
+  32 : CBC_EXT_CREATE_ARRAY
+  34 : CBC_EXT_PUSH_ELISION
+  36 : CBC_ADD_TWO_LITERALS idx:1(ident)->ident(a) idx:2(ident)->ident(b)
+  39 : CBC_EXT_ARRAY_APPEND byte_arg:2
+  42 : CBC_EXT_CREATE_ARRAY
+  44 : CBC_PUSH_LITERAL idx:9(lit)->function
+  46 : CBC_EXT_PUSH_ELISION
+  48 : CBC_CALL_IDENT_PUSH_RESULT byte_arg:0 idx:1(ident)->ident(a)
+  51 : CBC_PUSH_IDENT idx:3(ident)->ident(magic)
+  53 : CBC_EXT_ASSIGN_LEFT_SHIFT_PROP_STRING_PUSH_RESULT idx:8(lit)->string(b)
+  56 : CBC_EXT_ARRAY_APPEND byte_arg:3
+  59 : CBC_MULTIPLY
+  60 : CBC_POP_BLOCK
+  61 : CBC_PUSH_IDENT idx:0(ident)->ident(next_statement)
+  63 : CBC_POP_BLOCK
+  64 : CBC_EXT_CREATE_ARRAY
+  66 : CBC_EXT_CREATE_ARRAY
+  68 : CBC_EXT_CREATE_ARRAY
+  70 : CBC_PUSH_IDENT idx:1(ident)->ident(a)
+  72 : CBC_EXT_ARRAY_APPEND byte_arg:1
+  75 : CBC_EXT_PUSH_ELISION
+  77 : CBC_PUSH_IDENT idx:1(ident)->ident(a)
+  79 : CBC_CALL_IDENT_PUSH_RESULT byte_arg:0 idx:5(ident)->ident(x)
+  82 : CBC_PROP_GET
+  83 : CBC_EXT_ARRAY_APPEND byte_arg:4
+  86 : CBC_CALL_IDENT_PUSH_RESULT byte_arg:1 idx:4(ident)->ident(f)
+  89 : CBC_POP_BLOCK
+  90 : CBC_PUSH_IDENT idx:0(ident)->ident(next_statement)
+  92 : CBC_POP_BLOCK
+  93 : CBC_RETURN_WITH_UNDEFINED
+
+Byte code size: 94 bytes
+
+Script parsing successfully completed. Total byte code size: 97 bytes
+
+--- Script parsing end ---
+
