@@ -101,6 +101,7 @@ typedef enum
   JSP_STATE_STAT_IF_BRANCH_END      = 0x32, /**< IfStatement branch start */
   JSP_STATE_STAT_STATEMENT          = 0x33, /**< Statement */
   JSP_STATE_STAT_STATEMENT_LIST     = 0x34, /**< Statement list */
+  JSP_STATE_STAT_VAR_DECL           = 0x35,
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -3410,6 +3411,25 @@ jsp_start_statement_parse (jsp_state_expr_t req_stat)
   jsp_state_push (new_state);
 } /* jsp_start_subexpr_parse */
 
+static void
+insert_semicolon (void)
+{
+  // We cannot use tok, since we may use lexer_save_token
+  skip_token ();
+
+  bool is_new_line_occured = (token_is (TOK_NEWLINE) || lexer_prev_token ().type == TOK_NEWLINE);
+  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
+
+  if (is_new_line_occured || is_close_brace_or_eof)
+  {
+    lexer_save_token (tok);
+  }
+  else if (!token_is (TOK_SEMICOLON) && !token_is (TOK_EOF))
+  {
+    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
+  }
+}
+
 /**
  * Parse statement
  */
@@ -3451,7 +3471,8 @@ parse_statement_ (void)
     {
       if (is_keyword (KW_IF)) /* IfStatement */
       {
-        const jsp_operand_t cond = parse_expression_inside_parens ();
+        jsp_operand_t cond = parse_expression_inside_parens ();
+        cond = dump_assignment_of_lhs_if_value_based_reference (cond);
         dump_conditional_check_for_rewrite (cond);
 
         skip_newlines ();
@@ -3475,6 +3496,11 @@ parse_statement_ (void)
           state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
           jsp_state_push (state);
         }
+      }
+      else if (is_keyword (KW_VAR))
+      {
+        state.state = JSP_STATE_STAT_VAR_DECL;
+        jsp_state_push (state);
       }
       else
       {
@@ -3537,6 +3563,60 @@ parse_statement_ (void)
       {
         jsp_state_push (state);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+      }
+    }
+    else if (state.state == JSP_STATE_STAT_VAR_DECL)
+    {
+      skip_newlines ();
+
+      current_token_must_be (TOK_NAME);
+
+      const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+      const jsp_operand_t name = literal_operand (lit_cp);
+
+      if (!scopes_tree_variable_declaration_exists (STACK_TOP (scopes), lit_cp))
+      {
+        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
+
+        dump_variable_declaration (lit_cp);
+      }
+
+      skip_newlines ();
+
+      if (token_is (TOK_EQ))
+      {
+        skip_newlines ();
+        const jsp_operand_t expr = parse_expression_ (JSP_STATE_EXPR_ASSIGNMENT, true);
+
+        dump_variable_assignment (name, dump_assignment_of_lhs_if_value_based_reference (expr));
+      }
+      else
+      {
+        lexer_save_token (tok);
+      }
+
+      skip_newlines ();
+
+      if (!token_is (TOK_COMMA))
+      {
+        lexer_save_token (tok);
+
+        if (token_is (TOK_SEMICOLON))
+        {
+          skip_newlines ();
+        }
+        else
+        {
+          insert_semicolon ();
+        }
+
+        state.state = JSP_STATE_STAT_STATEMENT;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
+      }
+      else
+      {
+        jsp_state_push (state);
       }
     }
   }
@@ -3904,25 +3984,6 @@ parse_try_statement (void)
   if (is_raised)
   {
     jsp_label_remove_nested_jumpable_border ();
-  }
-}
-
-static void
-insert_semicolon (void)
-{
-  // We cannot use tok, since we may use lexer_save_token
-  skip_token ();
-
-  bool is_new_line_occured = (token_is (TOK_NEWLINE) || lexer_prev_token ().type == TOK_NEWLINE);
-  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
-
-  if (is_new_line_occured || is_close_brace_or_eof)
-  {
-    lexer_save_token (tok);
-  }
-  else if (!token_is (TOK_SEMICOLON) && !token_is (TOK_EOF))
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
   }
 }
 
