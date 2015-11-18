@@ -520,6 +520,72 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
   return rewrite_varg_header_set_args_count (args_num);
 }
 
+static jsp_operand_t
+parse_function_scope (jsp_operand_t func_name, /**< literal operand - function name,
+                                                *   or empty operand - for anonymous functions */
+                      bool is_function_expression) /**< true - the parsed scope part of a function expression,
+                                                    *   false - part of a function declaration */
+{
+  STACK_DECLARE_USAGE (scopes);
+
+  scopes_tree_set_contains_functions (STACK_TOP (scopes));
+
+  STACK_PUSH (scopes, scopes_tree_init (is_function_expression ? NULL : STACK_TOP (scopes), SCOPE_TYPE_FUNCTION));
+  serializer_set_scope (STACK_TOP (scopes));
+  scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
+  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
+
+  jsp_early_error_start_checking_of_vargs ();
+
+  const jsp_operand_t func = parse_argument_list (is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL, func_name);
+
+  dump_function_end_for_rewrite ();
+
+  token_after_newlines_must_be (TOK_OPEN_BRACE);
+  skip_newlines ();
+
+  bool was_in_function = inside_function;
+  inside_function = true;
+
+  jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
+
+  parse_source_element_list (false, true);
+
+  jsp_label_restore_set (masked_label_set_p);
+
+  token_after_newlines_must_be (TOK_CLOSE_BRACE);
+
+  dump_ret ();
+  rewrite_function_end ();
+
+  inside_function = was_in_function;
+
+  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
+  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
+
+  if (is_function_expression)
+  {
+    scopes_tree new_scope_tree = STACK_TOP (scopes);
+
+    STACK_DROP (scopes, 1);
+    serializer_set_scope (STACK_TOP (scopes));
+
+    serializer_dump_subscope (new_scope_tree);
+    scopes_tree_free (new_scope_tree);
+  }
+  else
+  {
+    STACK_DROP (scopes, 1);
+    serializer_set_scope (STACK_TOP (scopes));
+  }
+
+  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
+
+  STACK_CHECK_USAGE (scopes);
+
+  return func;
+} /* parse_function_scope */
+
 /* function_declaration
   : 'function' LT!* Identifier LT!*
     '(' (LT!* Identifier (LT!* ',' LT!* Identifier)*) ? LT!* ')' LT!* function_body
@@ -530,55 +596,14 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
 static void
 parse_function_declaration (void)
 {
-  STACK_DECLARE_USAGE (scopes);
-
   assert_keyword (KW_FUNCTION);
-
-  jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-  scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-  STACK_PUSH (scopes, scopes_tree_init (STACK_TOP (scopes), SCOPE_TYPE_FUNCTION));
-  serializer_set_scope (STACK_TOP (scopes));
-  scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
 
   token_after_newlines_must_be (TOK_NAME);
 
-  const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
-
+  const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
   skip_newlines ();
 
-  jsp_early_error_start_checking_of_vargs ();
-  parse_argument_list (VARG_FUNC_DECL, name);
-
-  dump_function_end_for_rewrite ();
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-
-  bool was_in_function = inside_function;
-  inside_function = true;
-
-  parse_source_element_list (false, true);
-
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  dump_ret ();
-  rewrite_function_end ();
-
-  inside_function = was_in_function;
-
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
-  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-  STACK_DROP (scopes, 1);
-  serializer_set_scope (STACK_TOP (scopes));
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-  jsp_label_restore_set (masked_label_set_p);
-
-  STACK_CHECK_USAGE (scopes);
+  parse_function_scope (func_name, false);
 }
 
 /* function_expression
@@ -587,70 +612,21 @@ parse_function_declaration (void)
 static jsp_operand_t
 parse_function_expression (void)
 {
-  STACK_DECLARE_USAGE (scopes);
   assert_keyword (KW_FUNCTION);
-
-  jsp_operand_t res;
-
-  jsp_early_error_start_checking_of_vargs ();
-
-  scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-  STACK_PUSH (scopes, scopes_tree_init (NULL, SCOPE_TYPE_FUNCTION));
-  serializer_set_scope (STACK_TOP (scopes));
-  scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
   skip_newlines ();
 
-  jsp_operand_t name = empty_operand ();
+  jsp_operand_t name;
   if (token_is (TOK_NAME))
   {
     name = literal_operand (token_data_as_lit_cp ());
-
     skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, name);
   }
   else
   {
-    lexer_save_token (tok);
-    skip_newlines ();
-    res = parse_argument_list (VARG_FUNC_EXPR, empty_operand ());
+    name = empty_operand ();
   }
 
-  dump_function_end_for_rewrite ();
-
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
-  skip_newlines ();
-
-  bool was_in_function = inside_function;
-  inside_function = true;
-
-  jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-  parse_source_element_list (false, true);
-
-  jsp_label_restore_set (masked_label_set_p);
-
-
-  next_token_must_be (TOK_CLOSE_BRACE);
-
-  dump_ret ();
-  rewrite_function_end ();
-
-  inside_function = was_in_function;
-
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
-  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-  serializer_set_scope (STACK_HEAD (scopes, 2));
-  serializer_dump_subscope (STACK_TOP (scopes));
-  scopes_tree_free (STACK_TOP (scopes));
-  STACK_DROP (scopes, 1);
-  lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-  STACK_CHECK_USAGE (scopes);
-  return res;
+  return parse_function_scope (name, true);
 } /* parse_function_expression */
 
 typedef enum
@@ -1266,58 +1242,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       skip_newlines ();
 
-      STACK_DECLARE_USAGE (scopes);
-
       jsp_operand_t prop_name = parse_property_name ();
+      skip_newlines ();
+
       jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
 
-      scopes_tree_set_contains_functions (STACK_TOP (scopes));
-
-      STACK_PUSH (scopes, scopes_tree_init (NULL, SCOPE_TYPE_FUNCTION));
-      serializer_set_scope (STACK_TOP (scopes));
-      scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
-      lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-      jsp_early_error_start_checking_of_vargs ();
+      const jsp_operand_t func = parse_function_scope (empty_operand (), true);
 
       skip_newlines ();
-      const jsp_operand_t func = parse_argument_list (VARG_FUNC_EXPR, empty_operand ());
-
-      dump_function_end_for_rewrite ();
-
-      token_after_newlines_must_be (TOK_OPEN_BRACE);
-      skip_newlines ();
-
-      bool was_in_function = inside_function;
-      inside_function = true;
-
-      jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
-      parse_source_element_list (false, true);
-
-      jsp_label_restore_set (masked_label_set_p);
-
-      token_after_newlines_must_be (TOK_CLOSE_BRACE);
-
-      skip_newlines ();
-
-      dump_ret ();
-      rewrite_function_end ();
-
-      inside_function = was_in_function;
-
-      jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
-      scopes_tree fe_scope_tree = STACK_TOP (scopes);
-
-      STACK_DROP (scopes, 1);
-      serializer_set_scope (STACK_TOP (scopes));
-      lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
-
-      serializer_dump_subscope (fe_scope_tree);
-      scopes_tree_free (fe_scope_tree);
-
-      STACK_CHECK_USAGE (scopes);
 
       if (is_setter)
       {
