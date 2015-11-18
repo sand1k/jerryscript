@@ -477,24 +477,11 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
   token_type close_tt = TOK_CLOSE_PAREN;
   size_t args_num = 0;
 
-  switch (vlt)
-  {
-    case VARG_FUNC_DECL:
-    case VARG_FUNC_EXPR:
-    {
-      current_token_must_be (TOK_OPEN_PAREN);
-      obj = dump_assignment_of_lhs_if_value_based_reference (obj);
-      dump_varg_header_for_rewrite (vlt, obj);
-      break;
-    }
-    case VARG_OBJ_DECL:
-    case VARG_ARRAY_DECL:
-    case VARG_CALL_EXPR:
-    case VARG_CONSTRUCT_EXPR:
-    {
-      JERRY_UNREACHABLE ();
-    }
-  }
+  JERRY_ASSERT (vlt == VARG_FUNC_DECL || vlt == VARG_FUNC_EXPR);
+
+  current_token_must_be (TOK_OPEN_PAREN);
+  obj = dump_assignment_of_lhs_if_value_based_reference (obj);
+  dump_varg_header_for_rewrite (vlt, obj);
 
   skip_newlines ();
   while (!token_is (close_tt))
@@ -502,8 +489,6 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
     dumper_start_varg_code_sequence ();
 
     jsp_operand_t op;
-
-    JERRY_ASSERT (vlt == VARG_FUNC_DECL || vlt == VARG_FUNC_EXPR);
 
     current_token_must_be (TOK_NAME);
     op = literal_operand (token_data_as_lit_cp ());
@@ -525,24 +510,7 @@ parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
     dumper_finish_varg_code_sequence ();
   }
 
-  jsp_operand_t res;
-  switch (vlt)
-  {
-    case VARG_FUNC_DECL:
-    case VARG_FUNC_EXPR:
-    {
-      res = rewrite_varg_header_set_args_count (args_num);
-      break;
-    }
-    case VARG_OBJ_DECL:
-    case VARG_ARRAY_DECL:
-    case VARG_CALL_EXPR:
-    case VARG_CONSTRUCT_EXPR:
-    {
-      JERRY_UNREACHABLE ();
-    }
-  }
-  return res;
+  return rewrite_varg_header_set_args_count (args_num);
 }
 
 /* function_declaration
@@ -677,15 +645,6 @@ parse_function_expression (void)
   STACK_CHECK_USAGE (scopes);
   return res;
 } /* parse_function_expression */
-
-/* object_literal
-  : '{' LT!* property_assignment (LT!* ',' LT!* property_assignment)* LT!* '}'
-  ; */
-static jsp_operand_t
-parse_object_literal (void)
-{
-  return parse_argument_list (VARG_OBJ_DECL, empty_operand ());
-}
 
 typedef enum
 {
@@ -1227,11 +1186,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
                   state.operand = jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
 
-                  break;
-                }
-                case TOK_OPEN_BRACE:
-                {
-                  state.operand = parse_object_literal ();
                   break;
                 }
                 default:
