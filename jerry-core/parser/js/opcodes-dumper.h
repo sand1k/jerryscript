@@ -164,7 +164,7 @@ public:
   } /* make_value_based_ref_operand_ll */
 
   /**
-   * Construct value-based reference operand with unevaluated base
+   * Construct value-based reference operand with evaluated base
    * and property name represented with a string literal
    *
    * @return constructed operand
@@ -189,6 +189,32 @@ public:
 
     return ret;
   } /* make_value_based_ref_operand_vl */
+
+  /**
+   * Construct value-based reference operand with unevaluated base
+   * and property name represented with a value
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_value_based_ref_operand_lv (lit_cpointer_t base_lit_id, /**< literal identifier
+                                                                *   for reference's base */
+                                   jsp_operand_t prop_name_value) /**< value of reference's property name */
+  {
+    jsp_operand_t ret;
+
+    JERRY_ASSERT (base_lit_id.packed_value != NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (prop_name_value.is_register_operand ());
+
+    ret._type = jsp_operand_t::REFERENCE;
+    ret._data.reference.value_based.base.lit_id = base_lit_id;
+    ret._data.reference.value_based.prop_name.uid = prop_name_value.get_idx ();
+    ret._is_value_based_ref = true;
+    ret._is_base_evaluated = false;
+    ret._is_prop_name_value = true;
+
+    return ret;
+  } /* make_value_based_ref_operand_lv */
 
   /**
    * Construct value-based reference operand with unevaluated base
