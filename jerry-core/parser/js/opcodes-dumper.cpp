@@ -1942,7 +1942,7 @@ dump_prop_setter_or_bitwise_or_res (jsp_operand_t res, jsp_operand_t op)
 }
 
 void
-dumper_set_next_interation_target (void)
+dumper_set_next_iteration_target (void)
 {
   STACK_PUSH (next_iterations, serializer_get_current_instr_counter ());
 }
