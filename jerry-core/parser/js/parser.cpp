@@ -95,6 +95,13 @@ typedef enum
 
   JSP_STATE_EXPR_DATA_PROP_DECL     = 0x19, /**< a data property (ObjectLiteral, 11.1.5) */
   JSP_STATE_EXPR_ACCESSOR_PROP_DECL = 0x20, /**< an accessor's property getter / setter (ObjectLiteral, 11.1.5) */
+
+  JSP_STATE_STAT_EMPTY              = 0x30, /**< no statement yet (at start) */
+  JSP_STATE_STAT_IF_BRANCH_START    = 0x31, /**< IfStatement branch start */
+  JSP_STATE_STAT_IF_BRANCH_END      = 0x32, /**< IfStatement branch start */
+  JSP_STATE_STAT_STATEMENT          = 0x33, /**< Statement */
+  JSP_STATE_STAT_STATEMENT_LIST     = 0x34, /**< Statement list */
+  JSP_STATE_STAT_VAR_DECL           = 0x35,
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -3389,6 +3396,232 @@ parse_expression_inside_parens (void)
   return res;
 }
 
+static void
+jsp_start_statement_parse (jsp_state_expr_t req_stat)
+{
+  jsp_state_t new_state;
+
+  new_state.state = JSP_STATE_EXPR_EMPTY;
+  new_state.req_expr_type = req_stat;
+  new_state.operand = empty_operand ();
+  new_state.op = JSP_OPERATOR_NO_OP;
+  new_state.rewrite_chain = MAX_OPCODES; /* empty chain */
+  new_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
+
+  jsp_state_push (new_state);
+} /* jsp_start_subexpr_parse */
+
+static void
+insert_semicolon (void)
+{
+  // We cannot use tok, since we may use lexer_save_token
+  skip_token ();
+
+  bool is_new_line_occured = (token_is (TOK_NEWLINE) || lexer_prev_token ().type == TOK_NEWLINE);
+  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
+
+  if (is_new_line_occured || is_close_brace_or_eof)
+  {
+    lexer_save_token (tok);
+  }
+  else if (!token_is (TOK_SEMICOLON) && !token_is (TOK_EOF))
+  {
+    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
+  }
+}
+
+/**
+ * Parse statement
+ */
+static void
+parse_statement_ (void)
+{
+  uint32_t start_pos = jsp_state_stack_pos;
+
+  jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+
+  while (true)
+  {
+    jsp_state_t state, subexpr_state;
+
+    state = jsp_state_top ();
+    jsp_state_pop ();
+
+    if (state.state == state.req_expr_type
+        && ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0))
+    {
+      (void) jsp_is_stack_empty ();
+
+      if (start_pos == jsp_state_stack_pos) // FIXME: jsp_is_stack_empty ()
+      {
+        break;
+      }
+      else
+      {
+        subexpr_state = state;
+
+        state = jsp_state_top ();
+        jsp_state_pop ();
+
+        JERRY_ASSERT ((subexpr_state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
+      }
+    }
+
+    if (state.state == JSP_STATE_EXPR_EMPTY)
+    {
+      if (is_keyword (KW_IF)) /* IfStatement */
+      {
+        jsp_operand_t cond = parse_expression_inside_parens ();
+        cond = dump_assignment_of_lhs_if_value_based_reference (cond);
+        dump_conditional_check_for_rewrite (cond);
+
+        skip_newlines ();
+
+        state.state = JSP_STATE_STAT_IF_BRANCH_START;
+        jsp_state_push (state);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+      }
+      else if (token_is (TOK_OPEN_BRACE))
+      {
+        skip_newlines ();
+        if (!token_is (TOK_CLOSE_BRACE))
+        {
+          state.state = JSP_STATE_STAT_STATEMENT_LIST;
+          jsp_state_push (state);
+          jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+        }
+        else
+        {
+          state.state = JSP_STATE_STAT_STATEMENT;
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+          jsp_state_push (state);
+        }
+      }
+      else if (is_keyword (KW_VAR))
+      {
+        state.state = JSP_STATE_STAT_VAR_DECL;
+        jsp_state_push (state);
+      }
+      else
+      {
+        parse_statement (NULL);
+
+        state.state = JSP_STATE_STAT_STATEMENT;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
+      }
+    }
+    else if (state.state == JSP_STATE_STAT_IF_BRANCH_START)
+    {
+      skip_newlines ();
+      if (is_keyword (KW_ELSE))
+      {
+        dump_jump_to_end_for_rewrite ();
+        rewrite_conditional_check ();
+
+        skip_newlines ();
+        state.state = JSP_STATE_STAT_IF_BRANCH_END;
+        jsp_state_push (state);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+      }
+      else
+      {
+        lexer_save_token (tok);
+        rewrite_conditional_check ();
+
+        state.state = JSP_STATE_STAT_STATEMENT;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
+      }
+    }
+    else if (state.state == JSP_STATE_STAT_IF_BRANCH_END)
+    {
+      rewrite_jump_to_end ();
+
+      state.state = JSP_STATE_STAT_STATEMENT;
+      state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_STAT_STATEMENT_LIST)
+    {
+      skip_newlines ();
+      while (token_is (TOK_SEMICOLON))
+      {
+        skip_newlines ();
+      }
+
+      if (token_is (TOK_CLOSE_BRACE)
+          || (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT)))
+      {
+        //lexer_save_token (tok);
+
+        state.state = JSP_STATE_STAT_STATEMENT;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
+      }
+      else
+      {
+        jsp_state_push (state);
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+      }
+    }
+    else if (state.state == JSP_STATE_STAT_VAR_DECL)
+    {
+      skip_newlines ();
+
+      current_token_must_be (TOK_NAME);
+
+      const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+      const jsp_operand_t name = literal_operand (lit_cp);
+
+      if (!scopes_tree_variable_declaration_exists (STACK_TOP (scopes), lit_cp))
+      {
+        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
+
+        dump_variable_declaration (lit_cp);
+      }
+
+      skip_newlines ();
+
+      if (token_is (TOK_EQ))
+      {
+        skip_newlines ();
+        const jsp_operand_t expr = parse_expression_ (JSP_STATE_EXPR_ASSIGNMENT, true);
+
+        dump_variable_assignment (name, dump_assignment_of_lhs_if_value_based_reference (expr));
+      }
+      else
+      {
+        lexer_save_token (tok);
+      }
+
+      skip_newlines ();
+
+      if (!token_is (TOK_COMMA))
+      {
+        lexer_save_token (tok);
+
+        if (token_is (TOK_SEMICOLON))
+        {
+          skip_newlines ();
+        }
+        else
+        {
+          insert_semicolon ();
+        }
+
+        state.state = JSP_STATE_STAT_STATEMENT;
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
+      }
+      else
+      {
+        jsp_state_push (state);
+      }
+    }
+  }
+} /* parse_statement_ */
+
 /* statement_list
   : statement (LT!* statement)*
   ; */
@@ -3754,25 +3987,6 @@ parse_try_statement (void)
   }
 }
 
-static void
-insert_semicolon (void)
-{
-  // We cannot use tok, since we may use lexer_save_token
-  skip_token ();
-
-  bool is_new_line_occured = (token_is (TOK_NEWLINE) || lexer_prev_token ().type == TOK_NEWLINE);
-  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
-
-  if (is_new_line_occured || is_close_brace_or_eof)
-  {
-    lexer_save_token (tok);
-  }
-  else if (!token_is (TOK_SEMICOLON) && !token_is (TOK_EOF))
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
-  }
-}
-
 /**
  * iteration_statement
  *  : do_while_statement
@@ -4090,7 +4304,7 @@ parse_source_element (void)
   }
   else
   {
-    parse_statement (NULL);
+    parse_statement_ ();
   }
 }
 
