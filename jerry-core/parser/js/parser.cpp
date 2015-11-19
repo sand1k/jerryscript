@@ -525,11 +525,7 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
   token_after_newlines_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
 
-  jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
-
   parse_source_element_list (false, true);
-
-  jsp_label_restore_set (masked_label_set_p);
 
   token_after_newlines_must_be (TOK_CLOSE_BRACE);
 
@@ -4250,6 +4246,8 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
                                                                       *   to try moving local function
                                                                       *   variables to registers */
 {
+  jsp_label_t *prev_label_set_p = jsp_label_new_set ();
+
   const token_type end_tt = is_global ? TOK_EOF : TOK_CLOSE_BRACE;
 
   dumper_new_scope ();
@@ -4495,6 +4493,8 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
   rewrite_scope_code_flags (scope_code_flags_oc, scope_flags);
   rewrite_reg_var_decl (reg_var_decl_oc);
   dumper_finish_scope ();
+
+  jsp_label_restore_previous_set (prev_label_set_p);
 } /* parse_source_element_list */
 
 /**

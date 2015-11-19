@@ -290,34 +290,33 @@ jsp_label_remove_nested_jumpable_border (void)
 } /* jsp_label_remove_nested_jumpable_border */
 
 /**
- * Mask current label set to restore it later, and start new label set
+ * Create new label set
  *
- * @return pointer to masked label set's list of labels
+ * @return pointer to previous label set (see also: jsp_label_restore_set)
  */
 jsp_label_t*
-jsp_label_mask_set (void)
+jsp_label_new_set (void)
 {
   jsp_label_t *ret_p = label_set_p;
 
   label_set_p = NULL;
 
   return ret_p;
-} /* jsp_label_mask_set */
+} /* jsp_label_new_set */
 
 /**
- * Restore previously masked label set
+ * Restore previous label set
  *
  * Note:
  *      current label set should be empty
  */
 void
-jsp_label_restore_set (jsp_label_t *masked_label_set_list_p) /**< list of labels of
-                                                              *   a masked label set */
+jsp_label_restore_previous_set (jsp_label_t *prev_label_set_p) /**< label set, returned by jsp_label_new_set*/
 {
   JERRY_ASSERT (label_set_p == NULL);
 
-  label_set_p = masked_label_set_list_p;
-} /* jsp_label_restore_set */
+  label_set_p = prev_label_set_p;
+} /* jsp_label_restore_previous_set */
 
 /**
  * @}
