@@ -137,11 +137,15 @@ scopes_tree_count_instructions (scopes_tree t)
 {
   assert_tree (t);
   vm_instr_counter_t res = (vm_instr_counter_t) (t->instrs_count + linked_list_get_length (t->var_decls));
-  for (uint8_t i = 0; i < t->t.children_num; i++)
+
+  if (t->t.children != null_list)
   {
-    res = (vm_instr_counter_t) (
-      res + scopes_tree_count_instructions (
-        *(scopes_tree *) linked_list_element (t->t.children, i)));
+    for (uint8_t i = 0; i < linked_list_get_length (t->t.children); i++)
+    {
+      res = (vm_instr_counter_t) (
+        res + scopes_tree_count_instructions (
+          *(scopes_tree *) linked_list_element (t->t.children, i)));
+    }
   }
   return res;
 }
@@ -639,9 +643,12 @@ scopes_tree_count_literals_in_blocks (scopes_tree tree) /**< scope */
     result += count_new_literals_in_instr (om_p);
   }
 
-  for (uint8_t child_id = 0; child_id < tree->t.children_num; child_id++)
+  if (tree->t.children != null_list)
   {
-    result += scopes_tree_count_literals_in_blocks (*(scopes_tree *) linked_list_element (tree->t.children, child_id));
+    for (uint8_t child_id = 0; child_id < linked_list_get_length (tree->t.children); child_id++)
+    {
+      result += scopes_tree_count_literals_in_blocks (*(scopes_tree *) linked_list_element (tree->t.children, child_id));
+    }
   }
 
   for (; instr_pos < tree->instrs_count; instr_pos++)
@@ -702,10 +709,13 @@ merge_subscopes (scopes_tree tree, /**< scopes tree to merge */
     global_oc++;
   }
 
-  for (uint8_t child_id = 0; child_id < tree->t.children_num; child_id++)
+  if (tree->t.children != null_list)
   {
-    merge_subscopes (*(scopes_tree *) linked_list_element (tree->t.children, child_id),
-                     data_p, lit_ids_p);
+    for (uint8_t child_id = 0; child_id < linked_list_get_length (tree->t.children); child_id++)
+    {
+      merge_subscopes (*(scopes_tree *) linked_list_element (tree->t.children, child_id),
+                       data_p, lit_ids_p);
+    }
   }
 
   for (; instr_pos < tree->instrs_count; instr_pos++)
@@ -842,17 +852,17 @@ scopes_tree_init (scopes_tree parent, /**< parent scope */
   memset (tree, 0, sizeof (scopes_tree_int));
   tree->t.parent = (tree_header *) parent;
   tree->t.children = null_list;
-  tree->t.children_num = 0;
   if (parent != NULL)
   {
-    if (parent->t.children_num == 0)
+    if (parent->t.children == null_list)
     {
       parent->t.children = linked_list_init (sizeof (scopes_tree));
     }
-    linked_list_set_element (parent->t.children, parent->t.children_num, &tree);
-    void *added = linked_list_element (parent->t.children, parent->t.children_num);
-    JERRY_ASSERT (*(scopes_tree *) added == tree);
-    parent->t.children_num++;
+
+    size_t new_index = linked_list_get_length (parent->t.children);
+    linked_list_set_element (parent->t.children, new_index, &tree);
+
+    JERRY_ASSERT (*(scopes_tree *) linked_list_element (parent->t.children, new_index) == tree);
   }
   tree->instrs_count = 0;
   tree->type = type;
@@ -872,15 +882,39 @@ void
 scopes_tree_free (scopes_tree tree)
 {
   assert_tree (tree);
-  if (tree->t.children_num != 0)
+
+  if (tree->t.parent != NULL)
   {
-    for (uint8_t i = 0; i < tree->t.children_num; ++i)
+    scopes_tree parent = (scopes_tree) tree->t.parent;
+
+    size_t i, num_before_remove = linked_list_get_length (parent->t.children);
+    for (i = 0; i < num_before_remove; i++)
     {
-      scopes_tree_free (*(scopes_tree *) linked_list_element (tree->t.children, i));
+      if (* (scopes_tree *) linked_list_element (parent->t.children, i) == tree)
+      {
+        linked_list_remove_element (parent->t.children, i);
+        break;
+      }
     }
+
+    JERRY_ASSERT (i < num_before_remove);
+  }
+
+  if (tree->t.children != null_list)
+  {
+    if (linked_list_get_length (tree->t.children) != 0)
+    {
+      while (linked_list_get_length (tree->t.children) != 0)
+      {
+        scopes_tree_free (*(scopes_tree *) linked_list_element (tree->t.children, 0));
+      }
+    }
+
     linked_list_free (tree->t.children);
   }
+
   linked_list_free (tree->instrs);
   linked_list_free (tree->var_decls);
+
   jsp_mm_free (tree);
 }
