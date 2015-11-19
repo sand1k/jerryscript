@@ -730,7 +730,7 @@ typedef struct
 } jsp_state_t;
 
 /* FIXME: change to dynamic */
-#define JSP_STATE_STACK_MAX 64
+#define JSP_STATE_STACK_MAX 128
 jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
 uint32_t jsp_state_stack_pos = 0;
 
