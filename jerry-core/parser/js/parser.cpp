@@ -104,7 +104,6 @@ static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 
 static void parse_statement (jsp_label_t *outermost_stmt_label_p);
 static void parse_source_element_list (bool, bool);
-static jsp_operand_t parse_argument_list (varg_list_type, jsp_operand_t);
 
 static bool
 token_is (token_type tt)
@@ -469,56 +468,13 @@ parse_property_name (void)
   }
 }
 
-/** Parse list of identifiers, assigment expressions or properties, splitted by comma.
-    For each ALT dumps appropriate bytecode. Uses OBJ during dump if neccesary.
-    Result tmp. */
-static jsp_operand_t
-parse_argument_list (varg_list_type vlt, jsp_operand_t obj)
-{
-  token_type close_tt = TOK_CLOSE_PAREN;
-  size_t args_num = 0;
-
-  JERRY_ASSERT (vlt == VARG_FUNC_DECL || vlt == VARG_FUNC_EXPR);
-
-  current_token_must_be (TOK_OPEN_PAREN);
-  obj = dump_assignment_of_lhs_if_value_based_reference (obj);
-  dump_varg_header_for_rewrite (vlt, obj);
-
-  skip_newlines ();
-  while (!token_is (close_tt))
-  {
-    dumper_start_varg_code_sequence ();
-
-    jsp_operand_t op;
-
-    current_token_must_be (TOK_NAME);
-    op = literal_operand (token_data_as_lit_cp ());
-    jsp_early_error_add_varg (op);
-    dump_varg (op);
-    skip_newlines ();
-
-    if (token_is (TOK_COMMA))
-    {
-      skip_newlines ();
-    }
-    else
-    {
-      current_token_must_be (close_tt);
-    }
-
-    args_num++;
-
-    dumper_finish_varg_code_sequence ();
-  }
-
-  return rewrite_varg_header_set_args_count (args_num);
-}
-
 static jsp_operand_t
 parse_function_scope (jsp_operand_t func_name, /**< literal operand - function name,
                                                 *   or empty operand - for anonymous functions */
-                      bool is_function_expression) /**< true - the parsed scope part of a function expression,
+                      bool is_function_expression, /**< true - the parsed scope part of a function expression,
                                                     *   false - part of a function declaration */
+                      size_t *out_formal_parameters_num_p) /**< out: number of formal parameters
+                                                            *        (optional - can be NULL) */
 {
   scopes_tree parent_scope = serializer_get_scope ();
   scopes_tree_set_contains_functions (parent_scope);
@@ -529,9 +485,42 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
   scopes_tree_set_strict_mode (new_scope_tree, scopes_tree_strict_mode (parent_scope));
   lexer_set_strict_mode (scopes_tree_strict_mode (new_scope_tree));
 
+  /* parse formal parameters list */
+  size_t formal_parameters_num = 0;
   jsp_early_error_start_checking_of_vargs ();
 
-  const jsp_operand_t func = parse_argument_list (is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL, func_name);
+  current_token_must_be (TOK_OPEN_PAREN);
+  skip_newlines ();
+
+  JERRY_ASSERT (func_name.is_empty_operand () || func_name.is_literal_operand ());
+  dump_varg_header_for_rewrite (is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL, func_name);
+
+  while (!token_is (TOK_CLOSE_PAREN))
+  {
+    dumper_start_varg_code_sequence ();
+
+    current_token_must_be (TOK_NAME);
+    jsp_operand_t formal_parameter_name = literal_operand (token_data_as_lit_cp ());
+    skip_newlines ();
+
+    jsp_early_error_add_varg (formal_parameter_name);
+    dump_varg (formal_parameter_name);
+
+    formal_parameters_num++;
+
+    dumper_finish_varg_code_sequence ();
+
+    if (token_is (TOK_COMMA))
+    {
+      skip_newlines ();
+    }
+    else
+    {
+      current_token_must_be (TOK_CLOSE_PAREN);
+    }
+  }
+
+  const jsp_operand_t func = rewrite_varg_header_set_args_count (formal_parameters_num);
 
   dump_function_end_for_rewrite ();
 
@@ -567,6 +556,11 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
 
   lexer_set_strict_mode (scopes_tree_strict_mode (parent_scope));
 
+  if (out_formal_parameters_num_p != NULL)
+  {
+    *out_formal_parameters_num_p = formal_parameters_num;
+  }
+
   return func;
 } /* parse_function_scope */
 
@@ -587,7 +581,7 @@ parse_function_declaration (void)
   const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
   skip_newlines ();
 
-  parse_function_scope (func_name, false);
+  parse_function_scope (func_name, false, NULL);
 }
 
 typedef enum
@@ -1027,7 +1021,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           name = empty_operand ();
         }
 
-        state.operand = parse_function_scope (name, true);
+        state.operand = parse_function_scope (name, true, NULL);
         skip_newlines ();
 
         state.state = JSP_STATE_EXPR_FUNCTION;
@@ -1221,9 +1215,17 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
 
-      const jsp_operand_t func = parse_function_scope (empty_operand (), true);
+      size_t formal_parameters_num;
+      const jsp_operand_t func = parse_function_scope (empty_operand (), true, &formal_parameters_num);
 
       skip_newlines ();
+
+      size_t req_num_of_formal_parameters = is_setter ? 1 : 0;
+
+      if (req_num_of_formal_parameters != formal_parameters_num)
+      {
+        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid number of formal parameters");
+      }
 
       if (is_setter)
       {
