@@ -598,25 +598,6 @@ jsp_finish_parse_function_scope (bool is_function_expression)
   lexer_set_strict_mode (scopes_tree_strict_mode (parent_scope));
 }
 
-static jsp_operand_t
-parse_function_scope (jsp_operand_t func_name, /**< literal operand - function name,
-                                                *   or empty operand - for anonymous functions */
-                      bool is_function_expression, /**< true - the parsed scope part of a function expression,
-                                                    *   false - part of a function declaration */
-                      size_t *out_formal_parameters_num_p) /**< out: number of formal parameters
-                                                            *        (optional - can be NULL) */
-{
-  jsp_operand_t func = jsp_start_parse_function_scope (func_name,
-                                                       is_function_expression,
-                                                       out_formal_parameters_num_p);
-
-  parse_source_element_list (false, true);
-
-  jsp_finish_parse_function_scope (is_function_expression);
-
-  return func;
-} /* parse_function_scope */
-
 /* function_declaration
   : 'function' LT!* Identifier LT!*
     '(' (LT!* Identifier (LT!* ',' LT!* Identifier)*) ? LT!* ')' LT!* function_body
@@ -628,13 +609,16 @@ static void
 parse_function_declaration (void)
 {
   assert_keyword (KW_FUNCTION);
-
   token_after_newlines_must_be (TOK_NAME);
 
   const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
   skip_newlines ();
 
-  parse_function_scope (func_name, false, NULL);
+  jsp_start_parse_function_scope (func_name, false, NULL);
+
+  parse_source_element_list (false, true);
+
+  jsp_finish_parse_function_scope (false);
 }
 
 typedef enum
@@ -1075,7 +1059,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
           name = empty_operand ();
         }
 
-        state.operand = parse_function_scope (name, true, NULL);
+        state.operand = jsp_start_parse_function_scope (name, true, NULL);
+
+        parse_source_element_list (false, true);
+
+        jsp_finish_parse_function_scope (true);
+
         skip_newlines ();
 
         state.state = JSP_STATE_EXPR_FUNCTION;
@@ -1270,7 +1259,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
       jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
 
       size_t formal_parameters_num;
-      const jsp_operand_t func = parse_function_scope (empty_operand (), true, &formal_parameters_num);
+      const jsp_operand_t func = jsp_start_parse_function_scope (empty_operand (), true, &formal_parameters_num);
+
+      parse_source_element_list (false, true);
+
+      jsp_finish_parse_function_scope (true);
 
       skip_newlines ();
 
