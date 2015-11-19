@@ -718,13 +718,14 @@ jsp_state_pop (void)
 } /* jsp_state_pop */
 
 static void
-jsp_start_subexpr_parse (jsp_state_expr_t req_expr,
+jsp_push_new_expr_state (jsp_state_expr_t expr_type,
+                         jsp_state_expr_t req_expr_type,
                          bool in_allowed)
 {
   jsp_state_t new_state;
 
-  new_state.state = JSP_STATE_EXPR_EMPTY;
-  new_state.req_expr_type = req_expr;
+  new_state.state = expr_type;
+  new_state.req_expr_type = req_expr_type;
   new_state.operand = empty_operand ();
   new_state.op = JSP_OPERATOR_NO_OP;
   new_state.rewrite_chain = MAX_OPCODES; /* empty chain */
@@ -736,7 +737,7 @@ jsp_start_subexpr_parse (jsp_state_expr_t req_expr,
   }
 
   jsp_state_push (new_state);
-} /* jsp_start_subexpr_parse */
+} /* jsp_push_new_expr_state */
 
 /*
  * FIXME:
@@ -877,7 +878,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 {
   uint32_t start_pos = jsp_state_stack_pos;
 
-  jsp_start_subexpr_parse (req_expr, in_allowed);
+  jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, req_expr, in_allowed);
 
   while (true)
   {
@@ -997,7 +998,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         skip_newlines ();
 
         jsp_state_push (state);
-        jsp_start_subexpr_parse (JSP_STATE_EXPR_UNARY, in_allowed);
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
       }
       else if (token_is (TOK_KEYWORD) && is_keyword (KW_FUNCTION))
       {
@@ -1030,7 +1031,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         state.op = JSP_OPERATOR_NEW;
 
         jsp_state_push (state);
-        jsp_start_subexpr_parse (JSP_STATE_EXPR_MEMBER, true);
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MEMBER, true);
       }
       else if (token_is (TOK_OPEN_SQUARE))
       {
@@ -1068,7 +1069,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_GROUP;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_EXPRESSION, true);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
         }
         else
         {
@@ -1175,7 +1176,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         skip_newlines ();
 
         jsp_state_push (state);
-        jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
       }
     }
     else if (state.state == JSP_STATE_EXPR_ACCESSOR_PROP_DECL)
@@ -1300,18 +1301,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           skip_newlines ();
 
           jsp_state_push (state);
-
-
-          jsp_state_t new_state;
-
-          new_state.state = expr_type;
-          new_state.req_expr_type = expr_type;
-          new_state.operand = empty_operand ();
-          new_state.op = JSP_OPERATOR_NO_OP;
-          new_state.rewrite_chain = MAX_OPCODES; /* empty chain */
-          new_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
-
-          jsp_state_push (new_state);
+          jsp_push_new_expr_state (expr_type, expr_type, true);
         }
       }
     }
@@ -1387,7 +1377,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             dumper_start_varg_code_sequence ();
 
-            jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
           }
         }
       }
@@ -1479,7 +1469,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
               current_token_must_be (TOK_COMMA);
 
               jsp_state_push (state);
-              jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+              jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
 
               dumper_start_varg_code_sequence ();
             }
@@ -1522,7 +1512,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
               jsp_state_push (state);
 
               dumper_start_varg_code_sequence ();
-              jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+              jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
             }
             else
             {
@@ -1570,7 +1560,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_EXPRESSION, true);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
         }
         else if (token_is (TOK_DOT))
         {
@@ -1638,7 +1628,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
               current_token_must_be (TOK_COMMA);
 
               jsp_state_push (state);
-              jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+              jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
 
               dumper_start_varg_code_sequence ();
             }
@@ -1676,7 +1666,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
               dumper_start_varg_code_sequence ();
 
-              jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+              jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
             }
             else
             {
@@ -1694,7 +1684,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             state.operand = dump_assignment_of_lhs_if_reference (state.operand);
 
             jsp_state_push (state);
-            jsp_start_subexpr_parse (JSP_STATE_EXPR_EXPRESSION, true);
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
           }
           else if (token_is (TOK_DOT))
           {
@@ -1917,7 +1907,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             }
 
             jsp_state_push (state);
-            jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
           }
           else
           {
@@ -2056,7 +2046,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_MUL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_UNARY, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
         }
         else if (token_is (TOK_DIV))
         {
@@ -2066,7 +2056,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_DIV;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_UNARY, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
         }
         else if (token_is (TOK_MOD))
         {
@@ -2076,7 +2066,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_MOD;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_UNARY, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
         }
         else
         {
@@ -2126,7 +2116,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_ADD;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
         }
         else if (token_is (TOK_MINUS))
         {
@@ -2136,7 +2126,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_SUB;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
         }
         else
         {
@@ -2190,7 +2180,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_LSHIFT;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ADDITIVE, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
         }
         else if (token_is (TOK_RSHIFT))
         {
@@ -2200,7 +2190,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_RSHIFT;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ADDITIVE, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
         }
         else if (token_is (TOK_RSHIFT_EX))
         {
@@ -2210,7 +2200,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_RSHIFT_U;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ADDITIVE, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
         }
         else
         {
@@ -2277,7 +2267,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_LESS;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else if (token_is (TOK_GREATER))
         {
@@ -2287,7 +2277,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_GREATER;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else if (token_is (TOK_LESS_EQ))
         {
@@ -2297,7 +2287,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_LESS_OR_EQUAL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else if (token_is (TOK_GREATER_EQ))
         {
@@ -2307,7 +2297,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_GREATER_OR_EQUAL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else if (token_is (TOK_KEYWORD) && is_keyword (KW_INSTANCEOF))
         {
@@ -2317,7 +2307,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_INSTANCEOF;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else if (in_allowed && token_is (TOK_KEYWORD) && is_keyword (KW_IN))
         {
@@ -2327,7 +2317,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_IN;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_SHIFT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else
         {
@@ -2385,7 +2375,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_EQUAL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
         }
         else if (token_is (TOK_NOT_EQ))
         {
@@ -2395,7 +2385,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_NOT_EQUAL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
         }
         else if (token_is (TOK_TRIPLE_EQ))
         {
@@ -2405,7 +2395,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_STRICT_EQUAL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
         }
         else if (token_is (TOK_NOT_DOUBLE_EQ))
         {
@@ -2415,7 +2405,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_STRICT_NOT_EQUAL;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_RELATIONAL, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
         }
         else
         {
@@ -2460,7 +2450,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_B_AND;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_EQUALITY, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EQUALITY, in_allowed);
         }
         else
         {
@@ -2502,7 +2492,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_B_XOR;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_BITWISE_AND, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_AND, in_allowed);
         }
         else
         {
@@ -2544,7 +2534,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.op = JSP_OPERATOR_B_OR;
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_BITWISE_XOR, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_XOR, in_allowed);
         }
         else
         {
@@ -2621,7 +2611,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             state.op = JSP_OPERATOR_LOGICAL_AND;
 
             jsp_state_push (state);
-            jsp_start_subexpr_parse (JSP_STATE_EXPR_BITWISE_OR, in_allowed);
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_OR, in_allowed);
           }
           else
           {
@@ -2667,7 +2657,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state.operand = tmp_operand ();
 
           jsp_state_push (state);
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, true);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
         }
         else
         {
@@ -2728,7 +2718,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             state.op = JSP_OPERATOR_LOGICAL_OR;
 
             jsp_state_push (state);
-            jsp_start_subexpr_parse (JSP_STATE_EXPR_LOGICAL_AND, in_allowed);
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LOGICAL_AND, in_allowed);
           }
           else
           {
@@ -2789,7 +2779,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_state_push (state);
 
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
         }
         else
         {
@@ -2865,7 +2855,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_state_push (state);
 
-          jsp_start_subexpr_parse (JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
         }
         else
         {
@@ -3309,7 +3299,7 @@ jsp_start_statement_parse (jsp_state_expr_t req_stat)
   new_state.flags = JSP_STATE_EXPR_FLAG_NO_FLAGS;
 
   jsp_state_push (new_state);
-} /* jsp_start_subexpr_parse */
+} /* jsp_start_statement_parse */
 
 static void
 insert_semicolon (void)
