@@ -606,29 +606,6 @@ parse_function_declaration (void)
   parse_function_scope (func_name, false);
 }
 
-/* function_expression
-  : 'function' LT!* Identifier? LT!* '(' formal_parameter_list? LT!* ')' LT!* function_body
-  ; */
-static jsp_operand_t
-parse_function_expression (void)
-{
-  assert_keyword (KW_FUNCTION);
-  skip_newlines ();
-
-  jsp_operand_t name;
-  if (token_is (TOK_NAME))
-  {
-    name = literal_operand (token_data_as_lit_cp ());
-    skip_newlines ();
-  }
-  else
-  {
-    name = empty_operand ();
-  }
-
-  return parse_function_scope (name, true);
-} /* parse_function_expression */
-
 typedef enum
 {
   JSP_OPERATOR_NO_OP,
@@ -1053,7 +1030,20 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_KEYWORD) && is_keyword (KW_FUNCTION))
       {
-        state.operand = parse_function_expression ();
+        skip_newlines ();
+
+        jsp_operand_t name;
+        if (token_is (TOK_NAME))
+        {
+          name = literal_operand (token_data_as_lit_cp ());
+          skip_newlines ();
+        }
+        else
+        {
+          name = empty_operand ();
+        }
+
+        state.operand = parse_function_scope (name, true);
         skip_newlines ();
 
         state.state = JSP_STATE_EXPR_FUNCTION;
