@@ -101,7 +101,7 @@ static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
 static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 
 static void parse_statement (jsp_label_t *outermost_stmt_label_p);
-static void parse_source_element_list (bool, bool);
+static void parse_source_element_list (void);
 
 static bool
 token_is (token_type tt)
@@ -616,7 +616,7 @@ parse_function_declaration (void)
 
   jsp_start_parse_function_scope (func_name, false, NULL);
 
-  parse_source_element_list (false, true);
+  parse_source_element_list ();
 
   jsp_finish_parse_function_scope (false);
 }
@@ -1185,7 +1185,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
       /* FIXME: merge with parse_statement_ */
-      parse_source_element_list (false, true);
+      parse_source_element_list ();
 
       state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
       jsp_state_push (state);
@@ -4313,14 +4313,23 @@ parse_source_element (void)
  *   ;
  */
 static void
-parse_source_element_list (bool is_global, /**< flag, indicating that we parsing global context */
-                           bool is_try_replace_local_vars_with_regs) /**< flag, indicating whether
-                                                                      *   to try moving local function
-                                                                      *   variables to registers */
+parse_source_element_list (void)
 {
   jsp_label_t *prev_label_set_p = jsp_label_new_set ();
 
-  const token_type end_tt = is_global ? TOK_EOF : TOK_CLOSE_BRACE;
+  bool is_function = (serializer_get_scope ()->type == SCOPE_TYPE_FUNCTION);
+
+
+  /*
+   * We don't try to perform replacement of local variables with registers for global code, eval code.
+   *
+   * For global and eval code the replacement can be connected with side effects,
+   * that currently can only be figured out in runtime. For example, a variable
+   * can be redefined as accessor property of the Global object.
+   */
+  bool is_try_replace_local_vars_with_regs = is_function;
+
+  const token_type end_tt = is_function? TOK_CLOSE_BRACE : TOK_EOF;
 
   dumper_new_scope ();
 
@@ -4627,21 +4636,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_parse_directive_prologue ();
 
-    /*
-     * We don't try to perform replacement of local variables with registers for global code, eval code,
-     * and code of dynamically constructed functions.
-     *
-     * For global and eval code the replacement can be connected with side effects,
-     * that currently can only be figured out in runtime. For example, a variable
-     * can be redefined as accessor property of the Global object.
-     *
-     * For dynamically constructed functions replacement is not performed due to missing
-     * information about argument names (the names array is not passed to parser_parse_program).
-     * This could be solved by providing general way to iterate argument names during the optimization,
-     * or by expanding the optimization to run-time. In the second case, argument values could also
-     * be moved to registers.
-     */
-    parse_source_element_list (true, false);
+    parse_source_element_list ();
 
     skip_newlines ();
     JERRY_ASSERT (token_is (TOK_EOF));
