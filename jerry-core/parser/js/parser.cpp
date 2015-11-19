@@ -717,8 +717,16 @@ typedef struct
   jsp_state_expr_t req_expr_type; /**< requested type of expression */
   int flags; /**< flags */
   jsp_operator_t op; /**< operator, applied to current and, if binary, to previous expression */
-  uint32_t arg_list_length; /**< length of arguments list associated with the expression
-                             *   (valid only if JSP_STATE_EXPR_FLAG_ARG_LIST flag is set) */
+  struct /* FIXME: switch to union */
+  {
+    uint32_t arg_list_length; /**< length of arguments list associated with the expression
+                               *   (valid only if JSP_STATE_EXPR_FLAG_ARG_LIST flag is set) */
+    struct
+    {
+      jsp_operand_t prop_name;
+      bool is_setter;
+    } accessor_prop_decl;
+  } u;
 } jsp_state_t;
 
 /* FIXME: change to dynamic */
@@ -1046,30 +1054,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_KEYWORD) && is_keyword (KW_FUNCTION))
       {
-        skip_newlines ();
-
-        jsp_operand_t name;
-        if (token_is (TOK_NAME))
-        {
-          name = literal_operand (token_data_as_lit_cp ());
-          skip_newlines ();
-        }
-        else
-        {
-          name = empty_operand ();
-        }
-
-        state.operand = jsp_start_parse_function_scope (name, true, NULL);
-
-        parse_source_element_list (false, true);
-
-        jsp_finish_parse_function_scope (true);
-
-        skip_newlines ();
-
         state.state = JSP_STATE_EXPR_FUNCTION;
-        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
-
         jsp_state_push (state);
       }
       else if (token_is (TOK_KEYWORD) && is_keyword (KW_NEW))
@@ -1090,7 +1075,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         state.state = JSP_STATE_EXPR_ARRAY_LITERAL;
         state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
-        state.arg_list_length = 0;
+        state.u.arg_list_length = 0;
 
         jsp_state_push (state);
       }
@@ -1103,7 +1088,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         state.state = JSP_STATE_EXPR_OBJECT_LITERAL;
         state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
-        state.arg_list_length = 0;
+        state.u.arg_list_length = 0;
 
         jsp_state_push (state);
       }
@@ -1195,6 +1180,60 @@ parse_expression_ (jsp_state_expr_t req_expr,
         }
       }
     }
+    else if (state.state == JSP_STATE_STAT_STATEMENT_LIST)
+    {
+      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
+
+      /* FIXME: merge with parse_statement_ */
+      parse_source_element_list (false, true);
+
+      state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+      jsp_state_push (state);
+    }
+    else if (state.state == JSP_STATE_EXPR_FUNCTION)
+    {
+      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
+      {
+        state.state = JSP_STATE_EXPR_MEMBER;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
+
+        jsp_state_push (state);
+      }
+      else
+      {
+        if (is_subexpr_end)
+        {
+          jsp_finish_parse_function_scope (true);
+
+          skip_newlines ();
+
+          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+
+          jsp_state_push (state);
+        }
+        else
+        {
+          assert_keyword (KW_FUNCTION);
+          skip_newlines ();
+
+          jsp_operand_t name;
+          if (token_is (TOK_NAME))
+          {
+            name = literal_operand (token_data_as_lit_cp ());
+            skip_newlines ();
+          }
+          else
+          {
+            name = empty_operand ();
+          }
+
+          state.operand = jsp_start_parse_function_scope (name, true, NULL);
+
+          jsp_state_push (state);
+          jsp_push_new_expr_state (JSP_STATE_STAT_STATEMENT_LIST, JSP_STATE_STAT_STATEMENT_LIST, true);
+        }
+      }
+    }
     else if (state.state == JSP_STATE_EXPR_DATA_PROP_DECL)
     {
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
@@ -1212,7 +1251,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_early_error_add_prop_name (prop_name, PROP_DATA);
 
         state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
-
         jsp_state_push (state);
       }
       else
@@ -1232,59 +1270,75 @@ parse_expression_ (jsp_state_expr_t req_expr,
     {
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      bool is_setter;
-
-      current_token_must_be (TOK_NAME);
-
-      lit_cpointer_t lit_cp = token_data_as_lit_cp ();
-
-      if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (lit_cp), "get"))
+      if (is_subexpr_end)
       {
-        is_setter = false;
-      }
-      else if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (lit_cp), "set"))
-      {
-        is_setter = true;
-      }
-      else
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid property declaration");
-      }
+        jsp_finish_parse_function_scope (true);
 
-      skip_newlines ();
+        skip_newlines ();
 
-      jsp_operand_t prop_name = parse_property_name ();
-      skip_newlines ();
+        jsp_operand_t prop_name = state.u.accessor_prop_decl.prop_name;
+        jsp_operand_t func = state.operand;
+        bool is_setter = state.u.accessor_prop_decl.is_setter;
 
-      jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
+        if (is_setter)
+        {
+          dump_prop_setter_decl (prop_name, func);
+        }
+        else
+        {
+          dump_prop_getter_decl (prop_name, func);
+        }
 
-      size_t formal_parameters_num;
-      const jsp_operand_t func = jsp_start_parse_function_scope (empty_operand (), true, &formal_parameters_num);
-
-      parse_source_element_list (false, true);
-
-      jsp_finish_parse_function_scope (true);
-
-      skip_newlines ();
-
-      size_t req_num_of_formal_parameters = is_setter ? 1 : 0;
-
-      if (req_num_of_formal_parameters != formal_parameters_num)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid number of formal parameters");
-      }
-
-      if (is_setter)
-      {
-        dump_prop_setter_decl (prop_name, func);
+        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+        jsp_state_push (state);
       }
       else
       {
-        dump_prop_getter_decl (prop_name, func);
-      }
+        bool is_setter;
 
-      state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
-      jsp_state_push (state);
+        current_token_must_be (TOK_NAME);
+
+        lit_cpointer_t lit_cp = token_data_as_lit_cp ();
+
+        if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (lit_cp), "get"))
+        {
+          is_setter = false;
+        }
+        else if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (lit_cp), "set"))
+        {
+          is_setter = true;
+        }
+        else
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid property declaration");
+        }
+
+        skip_newlines ();
+
+        jsp_operand_t prop_name = parse_property_name ();
+        skip_newlines ();
+
+        jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
+
+        size_t formal_parameters_num;
+        const jsp_operand_t func = jsp_start_parse_function_scope (empty_operand (), true, &formal_parameters_num);
+
+        size_t req_num_of_formal_parameters = is_setter ? 1 : 0;
+
+        if (req_num_of_formal_parameters != formal_parameters_num)
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Invalid number of formal parameters");
+        }
+
+        JERRY_ASSERT (state.operand.is_empty_operand ());
+        state.operand = func;
+
+        state.u.accessor_prop_decl.prop_name = prop_name;
+        state.u.accessor_prop_decl.is_setter = is_setter;
+
+        jsp_state_push (state);
+        jsp_push_new_expr_state (JSP_STATE_STAT_STATEMENT_LIST, JSP_STATE_STAT_STATEMENT_LIST, true);
+      }
     }
     else if (state.state == JSP_STATE_EXPR_OBJECT_LITERAL)
     {
@@ -1306,7 +1360,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_DATA_PROP_DECL
                         || subexpr_state.state == JSP_STATE_EXPR_ACCESSOR_PROP_DECL);
 
-          state.arg_list_length++;
+          state.u.arg_list_length++;
 
           dumper_finish_varg_code_sequence ();
 
@@ -1326,7 +1380,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           skip_newlines ();
 
-          state.operand = rewrite_varg_header_set_args_count (state.arg_list_length);
+          state.operand = rewrite_varg_header_set_args_count (state.u.arg_list_length);
 
           state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
           state.flags &= ~JSP_STATE_EXPR_FLAG_ARG_LIST;
@@ -1379,7 +1433,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           dump_varg (subexpr_state.operand);
 
-          state.arg_list_length++;
+          state.u.arg_list_length++;
 
           dumper_finish_varg_code_sequence ();
 
@@ -1400,7 +1454,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           {
             skip_newlines ();
 
-            state.operand = rewrite_varg_header_set_args_count (state.arg_list_length);
+            state.operand = rewrite_varg_header_set_args_count (state.u.arg_list_length);
 
             state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
             state.flags &= ~JSP_STATE_EXPR_FLAG_ARG_LIST;
@@ -1417,7 +1471,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
               dump_varg (dump_array_hole_assignment_res ());
 
-              state.arg_list_length++;
+              state.u.arg_list_length++;
 
               dumper_finish_varg_code_sequence ();
             }
@@ -1507,13 +1561,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             dumper_finish_varg_code_sequence ();
 
-            state.arg_list_length++;
+            state.u.arg_list_length++;
 
             if (token_is (TOK_CLOSE_PAREN))
             {
               state.op = JSP_OPERATOR_NO_OP;
               state.flags &= ~JSP_STATE_EXPR_FLAG_ARG_LIST;
-              state.operand = jsp_finish_construct_dump (state.arg_list_length);
+              state.operand = jsp_finish_construct_dump (state.u.arg_list_length);
 
               jsp_state_push (state);
             }
@@ -1561,7 +1615,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             if (!is_arg_list_implicit && !is_arg_list_empty)
             {
               state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
-              state.arg_list_length = 0;
+              state.u.arg_list_length = 0;
               jsp_state_push (state);
 
               dumper_start_varg_code_sequence ();
@@ -1666,13 +1720,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             dumper_finish_varg_code_sequence ();
 
-            state.arg_list_length++;
+            state.u.arg_list_length++;
 
             if (token_is (TOK_CLOSE_PAREN))
             {
               state.flags &= ~JSP_STATE_EXPR_FLAG_ARG_LIST;
 
-              state.operand = jsp_finish_call_dump (state.arg_list_length);
+              state.operand = jsp_finish_call_dump (state.u.arg_list_length);
 
               jsp_state_push (state);
             }
@@ -1714,7 +1768,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             if (!token_is (TOK_CLOSE_PAREN))
             {
               state.flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
-              state.arg_list_length = 0;
+              state.u.arg_list_length = 0;
               jsp_state_push (state);
 
               dumper_start_varg_code_sequence ();
