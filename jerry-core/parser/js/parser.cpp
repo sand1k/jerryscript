@@ -47,8 +47,6 @@ typedef enum
 } jsp_eval_ret_store_t;
 
 static token tok;
-static bool inside_eval = false;
-static bool inside_function = false;
 static bool parser_show_instrs = false;
 
 #define EMIT_ERROR(type, MESSAGE) PARSE_ERROR(type, MESSAGE, tok.loc)
@@ -527,9 +525,6 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
   token_after_newlines_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
 
-  bool was_in_function = inside_function;
-  inside_function = true;
-
   jsp_label_t *masked_label_set_p = jsp_label_mask_set ();
 
   parse_source_element_list (false, true);
@@ -540,8 +535,6 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
 
   dump_ret ();
   rewrite_function_end ();
-
-  inside_function = was_in_function;
 
   jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
   jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
@@ -2907,9 +2900,8 @@ parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed insid
 {
   jsp_operand_t expr = parse_expression_ (JSP_STATE_EXPR_EXPRESSION, in_allowed);
 
-  if (inside_eval
-      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP
-      && !inside_function)
+  if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL
+      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP)
   {
     expr = dump_assignment_of_lhs_if_value_based_reference (expr);
 
@@ -4114,7 +4106,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
   }
   if (is_keyword (KW_RETURN))
   {
-    if (!inside_function)
+    if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
     {
       EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Return is illegal");
     }
@@ -4278,8 +4270,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
 
   vm_instr_counter_t reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
 
-  if (inside_eval
-      && !inside_function)
+  if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL)
   {
     dump_undefined_assignment (eval_ret_operand ());
   }
@@ -4540,9 +4531,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 {
   JERRY_ASSERT (out_bytecode_data_p != NULL);
 
-  inside_eval = in_eval;
-
-  scope_type_t scope_type = (in_eval ? SCOPE_TYPE_EVAL : SCOPE_TYPE_GLOBAL);
+  const scope_type_t scope_type = (in_eval ? SCOPE_TYPE_EVAL : SCOPE_TYPE_GLOBAL);
 
 #ifndef JERRY_NDEBUG
   volatile bool is_parse_finished = false;
@@ -4595,7 +4584,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
     skip_newlines ();
     JERRY_ASSERT (token_is (TOK_EOF));
 
-    if (inside_eval)
+    if (scope_type == SCOPE_TYPE_EVAL)
     {
       dump_retval (eval_ret_operand ());
     }
