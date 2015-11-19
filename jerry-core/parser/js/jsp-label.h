@@ -80,8 +80,8 @@ extern void jsp_label_setup_continue_target (jsp_label_t *, vm_instr_counter_t);
 extern bool jsp_label_raise_nested_jumpable_border (void);
 extern void jsp_label_remove_nested_jumpable_border (void);
 
-extern jsp_label_t *jsp_label_mask_set (void);
-extern void jsp_label_restore_set (jsp_label_t *);
+extern jsp_label_t *jsp_label_new_set (void);
+extern void jsp_label_restore_previous_set (jsp_label_t *);
 
 /**
  * @}
