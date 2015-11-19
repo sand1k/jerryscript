@@ -530,7 +530,7 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
 
   scopes_tree_set_contains_functions (STACK_TOP (scopes));
 
-  STACK_PUSH (scopes, scopes_tree_init (is_function_expression ? NULL : STACK_TOP (scopes), SCOPE_TYPE_FUNCTION));
+  STACK_PUSH (scopes, scopes_tree_init (STACK_TOP (scopes), SCOPE_TYPE_FUNCTION));
   serializer_set_scope (STACK_TOP (scopes));
   scopes_tree_set_strict_mode (STACK_TOP (scopes), scopes_tree_strict_mode (STACK_HEAD (scopes, 2)));
   lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
@@ -563,20 +563,15 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
   jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
   jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
 
+  scopes_tree new_scope_tree = STACK_TOP (scopes);
+
+  STACK_DROP (scopes, 1);
+  serializer_set_scope (STACK_TOP (scopes));
+
   if (is_function_expression)
   {
-    scopes_tree new_scope_tree = STACK_TOP (scopes);
-
-    STACK_DROP (scopes, 1);
-    serializer_set_scope (STACK_TOP (scopes));
-
     serializer_dump_subscope (new_scope_tree);
     scopes_tree_free (new_scope_tree);
-  }
-  else
-  {
-    STACK_DROP (scopes, 1);
-    serializer_set_scope (STACK_TOP (scopes));
   }
 
   lexer_set_strict_mode (scopes_tree_strict_mode (STACK_TOP (scopes)));
@@ -4355,7 +4350,7 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
     if (may_replace_vars_with_regs)
     {
       /* no subscopes, as no function declarations / eval etc. in the scope */
-      JERRY_ASSERT (fe_scope_tree->t.children_num == 0);
+      JERRY_ASSERT (fe_scope_tree->t.children == null_list);
 
       vm_instr_counter_t instr_pos = 0u;
 
