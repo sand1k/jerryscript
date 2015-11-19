@@ -466,22 +466,58 @@ parse_property_name (void)
   }
 }
 
+/**
+ * Check for "use strict" in directive prologue
+ */
+static void
+jsp_parse_directive_prologue ()
+{
+  const locus start_loc = tok.loc;
+
+  /*
+   * Check Directive Prologue for Use Strict directive (see ECMA-262 5.1 section 14.1)
+   */
+  while (token_is (TOK_STRING))
+  {
+    if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "use strict")
+        && lexer_is_no_escape_sequences_in_token_string (tok))
+    {
+      scopes_tree_set_strict_mode (serializer_get_scope (), true);
+      lexer_set_strict_mode (scopes_tree_strict_mode (serializer_get_scope ()));
+      break;
+    }
+
+    skip_newlines ();
+
+    if (token_is (TOK_SEMICOLON))
+    {
+      skip_newlines ();
+    }
+  }
+
+  if (lit_utf8_iterator_pos_cmp (start_loc, tok.loc) != 0)
+  {
+    lexer_seek (start_loc);
+  }
+  else
+  {
+    lexer_save_token (tok);
+  }
+} /* jsp_parse_directive_prologue */
+
 static jsp_operand_t
-parse_function_scope (jsp_operand_t func_name, /**< literal operand - function name,
-                                                *   or empty operand - for anonymous functions */
-                      bool is_function_expression, /**< true - the parsed scope part of a function expression,
-                                                    *   false - part of a function declaration */
-                      size_t *out_formal_parameters_num_p) /**< out: number of formal parameters
-                                                            *        (optional - can be NULL) */
+jsp_start_parse_function_scope (jsp_operand_t func_name,
+                                bool is_function_expression,
+                                size_t *out_formal_parameters_num_p)
 {
   scopes_tree parent_scope = serializer_get_scope ();
   scopes_tree_set_contains_functions (parent_scope);
 
-  scopes_tree new_scope_tree = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
+  scopes_tree func_scope = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
 
-  serializer_set_scope (new_scope_tree);
-  scopes_tree_set_strict_mode (new_scope_tree, scopes_tree_strict_mode (parent_scope));
-  lexer_set_strict_mode (scopes_tree_strict_mode (new_scope_tree));
+  serializer_set_scope (func_scope);
+  scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
+  lexer_set_strict_mode (scopes_tree_strict_mode (func_scope));
 
   /* parse formal parameters list */
   size_t formal_parameters_num = 0;
@@ -525,30 +561,58 @@ parse_function_scope (jsp_operand_t func_name, /**< literal operand - function n
   token_after_newlines_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
 
-  parse_source_element_list (false, true);
+  jsp_parse_directive_prologue ();
+
+  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
+  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
+
+  if (out_formal_parameters_num_p != NULL)
+  {
+    *out_formal_parameters_num_p = formal_parameters_num;
+  }
+
+  return func;
+}
+
+static void
+jsp_finish_parse_function_scope (bool is_function_expression)
+{
+  scopes_tree func_scope = serializer_get_scope ();
+  JERRY_ASSERT (func_scope != NULL && func_scope->type == SCOPE_TYPE_FUNCTION);
+
+  scopes_tree parent_scope = (scopes_tree) func_scope->t.parent;
 
   token_after_newlines_must_be (TOK_CLOSE_BRACE);
 
   dump_ret ();
   rewrite_function_end ();
 
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
-  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
-
   serializer_set_scope (parent_scope);
 
   if (is_function_expression)
   {
-    serializer_dump_subscope (new_scope_tree);
-    scopes_tree_free (new_scope_tree);
+    serializer_dump_subscope (func_scope);
+    scopes_tree_free (func_scope);
   }
 
   lexer_set_strict_mode (scopes_tree_strict_mode (parent_scope));
+}
 
-  if (out_formal_parameters_num_p != NULL)
-  {
-    *out_formal_parameters_num_p = formal_parameters_num;
-  }
+static jsp_operand_t
+parse_function_scope (jsp_operand_t func_name, /**< literal operand - function name,
+                                                *   or empty operand - for anonymous functions */
+                      bool is_function_expression, /**< true - the parsed scope part of a function expression,
+                                                    *   false - part of a function declaration */
+                      size_t *out_formal_parameters_num_p) /**< out: number of formal parameters
+                                                            *        (optional - can be NULL) */
+{
+  jsp_operand_t func = jsp_start_parse_function_scope (func_name,
+                                                       is_function_expression,
+                                                       out_formal_parameters_num_p);
+
+  parse_source_element_list (false, true);
+
+  jsp_finish_parse_function_scope (is_function_expression);
 
   return func;
 } /* parse_function_scope */
@@ -4195,45 +4259,6 @@ parse_source_element (void)
 }
 
 /**
- * Check for "use strict" in directive prologue
- */
-static void
-check_directive_prologue_for_use_strict ()
-{
-  const locus start_loc = tok.loc;
-
-  /*
-   * Check Directive Prologue for Use Strict directive (see ECMA-262 5.1 section 14.1)
-   */
-  while (token_is (TOK_STRING))
-  {
-    if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "use strict")
-        && lexer_is_no_escape_sequences_in_token_string (tok))
-    {
-      scopes_tree_set_strict_mode (serializer_get_scope (), true);
-      lexer_set_strict_mode (scopes_tree_strict_mode (serializer_get_scope ()));
-      break;
-    }
-
-    skip_newlines ();
-
-    if (token_is (TOK_SEMICOLON))
-    {
-      skip_newlines ();
-    }
-  }
-
-  if (lit_utf8_iterator_pos_cmp (start_loc, tok.loc) != 0)
-  {
-    lexer_seek (start_loc);
-  }
-  else
-  {
-    lexer_save_token (tok);
-  }
-} /* check_directive_prologue_for_use_strict */
-
-/**
  * Parse source element list
  *
  *  source_element_list
@@ -4253,8 +4278,6 @@ parse_source_element_list (bool is_global, /**< flag, indicating that we parsing
   dumper_new_scope ();
 
   vm_instr_counter_t scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
-
-  check_directive_prologue_for_use_strict ();
 
   vm_instr_counter_t reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
 
@@ -4554,6 +4577,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
     lexer_set_strict_mode (scopes_tree_strict_mode (scope));
 
     skip_newlines ();
+
+    jsp_parse_directive_prologue ();
 
     /*
      * We don't try to perform replacement of local variables with registers for global code, eval code,
