@@ -102,7 +102,7 @@ static void parse_statement (jsp_label_t *outermost_stmt_label_p);
 static void parse_source_element_list (void);
 
 static bool
-token_is (token_type tt)
+token_is (jsp_token_type tt)
 {
   return (lexer_get_token_type (tok) == tt);
 }
@@ -144,13 +144,13 @@ rescan_regexp_token (void)
 } /* rescan_regexp_token */
 
 static bool
-is_keyword (token_type tt)
+is_keyword (jsp_token_type tt)
 {
   return (tt >= TOKEN_TYPE__KEYWORD_BEGIN && tt <= TOKEN_TYPE__KEYWORD_END);
 }
 
 static void
-assert_keyword (token_type kw)
+assert_keyword (jsp_token_type kw)
 {
   if (!token_is (kw))
   {
@@ -160,7 +160,7 @@ assert_keyword (token_type kw)
 }
 
 static void
-current_token_must_be (token_type tt)
+current_token_must_be (jsp_token_type tt)
 {
   if (!token_is (tt))
   {
@@ -185,11 +185,11 @@ is_strict_mode (void)
  *      token when the routine is called
  */
 static void
-jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
+jsp_skip_braces (jsp_token_type brace_type) /**< type of the opening brace */
 {
   current_token_must_be (brace_type);
 
-  token_type closing_bracket_type;
+  jsp_token_type closing_bracket_type;
 
   if (brace_type == TOK_OPEN_PAREN)
   {
@@ -235,7 +235,7 @@ jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
  *         false - otherwise (in the case, lexer locus points to end_loc).
  */
 static bool
-jsp_find_next_token_before_the_locus (token_type token_to_find, /**< token to search for (except TOK_EOF) */
+jsp_find_next_token_before_the_locus (jsp_token_type token_to_find, /**< token to search for (except TOK_EOF) */
                                       locus end_loc, /**< location to search before */
                                       bool skip_brace_blocks) /**< skip blocks, surrounded with { and } braces */
 {
@@ -368,7 +368,7 @@ dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
 static jsp_operand_t
 parse_property_name (void)
 {
-  token_type tt = lexer_get_token_type (tok);
+  jsp_token_type tt = lexer_get_token_type (tok);
 
   if (is_keyword (tt))
   {
@@ -955,7 +955,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       JERRY_ASSERT (!is_subexpr_end);
       JERRY_ASSERT ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      token_type tt = lexer_get_token_type (tok);
+      jsp_token_type tt = lexer_get_token_type (tok);
       if (tt == TOK_DOUBLE_PLUS
           || tt == TOK_DOUBLE_MINUS
           || tt == TOK_PLUS
@@ -1750,7 +1750,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         }
         else
         {
-          token_type tt = lexer_get_token_type (tok);
+          jsp_token_type tt = lexer_get_token_type (tok);
 
           if (tt == TOK_EQ
               || tt == TOK_MULT_EQ
@@ -4057,7 +4057,7 @@ parse_source_element_list (void)
    */
   bool is_try_replace_local_vars_with_regs = is_function;
 
-  const token_type end_tt = is_function? TOK_CLOSE_BRACE : TOK_EOF;
+  const jsp_token_type end_tt = is_function? TOK_CLOSE_BRACE : TOK_EOF;
 
   dumper_new_scope ();
 
