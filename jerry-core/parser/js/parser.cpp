@@ -1011,8 +1011,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
         }
 
-        skip_token ();
-
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
       }
       else if (token_is (TOK_KEYWORD) && is_keyword (KW_FUNCTION))
@@ -1021,8 +1019,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_KEYWORD) && is_keyword (KW_NEW))
       {
-        skip_token ();
-
         state_p->state = JSP_STATE_EXPR_MEMBER;
         state_p->op = JSP_OPERATOR_NEW;
 
@@ -1030,8 +1026,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_OPEN_SQUARE))
       {
-        skip_token ();
-
         dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
 
         state_p->state = JSP_STATE_EXPR_ARRAY_LITERAL;
@@ -1040,8 +1034,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_OPEN_BRACE))
       {
-        skip_token ();
-
         dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
         jsp_early_error_start_checking_of_prop_names ();
 
@@ -1053,8 +1045,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (token_is (TOK_OPEN_PAREN))
         {
-          skip_token ();
-
           state_p->state = JSP_STATE_EXPR_MEMBER;
           state_p->op = JSP_OPERATOR_GROUP;
 
@@ -1131,10 +1121,10 @@ parse_expression_ (jsp_state_expr_t req_expr,
               }
             }
           }
-
-          skip_token ();
         }
       }
+
+      skip_token ();
     }
     else if (state_p->state == JSP_STATE_STAT_STATEMENT_LIST)
     {
@@ -1159,9 +1149,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        assert_keyword (KW_FUNCTION);
-        skip_token ();
-
         jsp_operand_t name;
         if (token_is (TOK_NAME))
         {
@@ -1594,8 +1581,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             dumper_start_varg_code_sequence ();
           }
-
-          skip_token ();
         }
         else
         {
@@ -1603,12 +1588,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state_p->op = JSP_OPERATOR_NO_OP;
 
           current_token_must_be (TOK_CLOSE_SQUARE);
-          skip_token ();
 
           subexpr_operand = dump_assignment_of_lhs_if_reference (subexpr_operand);
           state_p->operand = jsp_operand_t::make_value_based_ref_operand_vv (state_p->operand,
                                                                              subexpr_operand);
         }
+
+        skip_token ();
       }
       else
       {
@@ -1618,7 +1604,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_start_call_dump (state_p->operand);
 
-          if (!token_is (TOK_CLOSE_PAREN))
+          if (token_is (TOK_CLOSE_PAREN))
+          {
+            skip_token ();
+
+            state_p->operand = jsp_finish_call_dump (0);
+          }
+          else
           {
             state_p->flags |= JSP_STATE_EXPR_FLAG_ARG_LIST;
             state_p->u.arg_list_length = 0;
@@ -1626,12 +1618,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
             dumper_start_varg_code_sequence ();
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
-          }
-          else
-          {
-            skip_token ();
-
-            state_p->operand = jsp_finish_call_dump (0);
           }
         }
         else if (token_is (TOK_OPEN_SQUARE))
@@ -1651,7 +1637,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state_p->operand = jsp_operand_t::make_value_based_ref_operand_vl (state_p->operand,
                                                                              jsp_get_prop_name_after_dot ());
-
           skip_token ();
         }
         else
