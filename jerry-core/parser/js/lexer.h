@@ -102,53 +102,83 @@ typedef enum __attr_packed___
   TOK_DOT, // .
   TOK_SEMICOLON, // ;
   TOK_COMMA, // ,
-  TOK_LESS, // <
-  TOK_GREATER, // >
 
-  TOK_LESS_EQ, // <=
-  TOK_GREATER_EQ, // <=
-  TOK_DOUBLE_EQ, // ==
-  TOK_NOT_EQ, // !=
-  TOK_TRIPLE_EQ, // ===
+  TOKEN_TYPE__UNARY_BEGIN,
+  TOKEN_TYPE__ADDITIVE_BEGIN = TOKEN_TYPE__UNARY_BEGIN,
 
-  TOK_NOT_DOUBLE_EQ, // !==
-  TOK_PLUS, // +
+  TOK_PLUS = TOKEN_TYPE__ADDITIVE_BEGIN, // +
   TOK_MINUS, // -
-  TOK_MULT, // *
-  TOK_MOD, // %
+
+  TOKEN_TYPE__ADDITIVE_END = TOK_MINUS,
 
   TOK_DOUBLE_PLUS, // ++
   TOK_DOUBLE_MINUS, // --
-  TOK_LSHIFT, // <<
+  TOK_NOT, // !
+  TOK_COMPL, // ~
+
+  TOKEN_TYPE__UNARY_END = TOK_COMPL, /* keywords are not listed
+                                      * in the range */
+
+  TOKEN_TYPE__MULTIPLICATIVE_BEGIN,
+
+  TOK_MULT = TOKEN_TYPE__MULTIPLICATIVE_BEGIN, // *
+  TOK_MOD, // %
+  TOK_DIV, // /
+
+  TOKEN_TYPE__MULTIPLICATIVE_END = TOK_DIV,
+
+  TOKEN_TYPE__SHIFT_BEGIN,
+
+  TOK_LSHIFT = TOKEN_TYPE__SHIFT_BEGIN, // <<
   TOK_RSHIFT, // >>
   TOK_RSHIFT_EX, // >>>
+
+  TOKEN_TYPE__SHIFT_END = TOK_RSHIFT_EX,
+
+  TOKEN_TYPE__RELATIONAL_BEGIN,
+
+  TOK_LESS = TOKEN_TYPE__RELATIONAL_BEGIN, // <
+  TOK_GREATER, // >
+  TOK_LESS_EQ, // <=
+  TOK_GREATER_EQ, // <=
+
+  TOKEN_TYPE__RELATIONAL_END = TOK_GREATER_EQ,
+
+  TOKEN_TYPE__EQUALITY_BEGIN,
+
+  TOK_DOUBLE_EQ = TOKEN_TYPE__EQUALITY_BEGIN, // ==
+  TOK_NOT_EQ, // !=
+  TOK_TRIPLE_EQ, // ===
+  TOK_NOT_DOUBLE_EQ, // !==
+
+  TOKEN_TYPE__EQUALITY_END = TOK_NOT_DOUBLE_EQ,
 
   TOK_AND, // &
   TOK_OR, // |
   TOK_XOR, // ^
-  TOK_NOT, // !
-  TOK_COMPL, // ~
 
   TOK_DOUBLE_AND, // &&
   TOK_DOUBLE_OR, // ||
   TOK_QUERY, // ?
   TOK_COLON, // :
-  TOK_EQ, // =
 
+  TOKEN_TYPE__ASSIGNMENTS_BEGIN,
+
+  TOK_EQ = TOKEN_TYPE__ASSIGNMENTS_BEGIN, // =
   TOK_PLUS_EQ, // +=
   TOK_MINUS_EQ, // -=
   TOK_MULT_EQ, // *=
   TOK_MOD_EQ, // %=
   TOK_LSHIFT_EQ, // <<=
-
   TOK_RSHIFT_EQ, // >>=
   TOK_RSHIFT_EX_EQ, // >>>=
   TOK_AND_EQ, // &=
   TOK_OR_EQ, // |=
   TOK_XOR_EQ, // ^=
-
-  TOK_DIV, // /
   TOK_DIV_EQ, // /=
+
+  TOKEN_TYPE__ASSIGNMENTS_END = TOK_DIV_EQ,
+
   TOK_EMPTY,
   TOK_REGEXP, // RegularExpressionLiteral (/.../gim)
 

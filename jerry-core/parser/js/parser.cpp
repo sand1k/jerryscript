@@ -883,12 +883,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       JERRY_ASSERT ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
       jsp_token_type tt = lexer_get_token_type (tok);
-      if (tt == TOK_DOUBLE_PLUS
-          || tt == TOK_DOUBLE_MINUS
-          || tt == TOK_PLUS
-          || tt == TOK_MINUS
-          || tt == TOK_COMPL
-          || tt == TOK_NOT
+      if ((tt >= TOKEN_TYPE__UNARY_BEGIN
+           && tt <= TOKEN_TYPE__UNARY_END)
           || tt == TOK_KW_DELETE
           || tt == TOK_KW_VOID
           || tt == TOK_KW_TYPEOF)
@@ -1549,18 +1545,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         state_p->token_type = TOK_EMPTY;
         state_p->flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
 
-        JERRY_ASSERT (tt == TOK_EQ
-                      || tt == TOK_MULT_EQ
-                      || tt == TOK_DIV_EQ
-                      || tt == TOK_MOD_EQ
-                      || tt == TOK_PLUS_EQ
-                      || tt == TOK_MINUS_EQ
-                      || tt == TOK_LSHIFT_EQ
-                      || tt == TOK_RSHIFT_EQ
-                      || tt == TOK_RSHIFT_EX_EQ
-                      || tt == TOK_AND_EQ
-                      || tt == TOK_XOR_EQ
-                      || tt == TOK_OR_EQ);
+        JERRY_ASSERT (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END);
 
         subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
@@ -1644,22 +1629,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           jsp_token_type tt = lexer_get_token_type (tok);
 
-          if (tt == TOK_EQ
-              || tt == TOK_MULT_EQ
-              || tt == TOK_DIV_EQ
-              || tt == TOK_MOD_EQ
-              || tt == TOK_PLUS_EQ
-              || tt == TOK_MINUS_EQ
-              || tt == TOK_LSHIFT_EQ
-              || tt == TOK_RSHIFT_EQ
-              || tt == TOK_RSHIFT_EX_EQ
-              || tt == TOK_AND_EQ
-              || tt == TOK_XOR_EQ
-              || tt == TOK_OR_EQ)
+          if (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END)
           {
             jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->operand, is_strict_mode (), tok.loc);
 
-            /* skip the operator */
+            /* skip the assignment operator */
             skip_token ();
             state_p->token_type = tt;
 
@@ -1780,32 +1754,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state_p->token_type = TOK_EMPTY;
         }
-        else if (token_is (TOK_MULT))
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__MULTIPLICATIVE_END)
         {
-          skip_token ();
-
           state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_MULT;
+          state_p->token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
-        }
-        else if (token_is (TOK_DIV))
-        {
+
           skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_DIV;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
-        }
-        else if (token_is (TOK_MOD))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_MOD;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
         }
         else
         {
@@ -1841,23 +1798,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state_p->token_type = TOK_EMPTY;
         }
-        else if (token_is (TOK_PLUS))
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__ADDITIVE_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__ADDITIVE_END)
         {
-          skip_token ();
-
           state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_PLUS;
+          state_p->token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
-        }
-        else if (token_is (TOK_MINUS))
-        {
+
           skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_MINUS;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
         }
         else
         {
@@ -1897,32 +1846,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state_p->token_type = TOK_EMPTY;
         }
-        else if (token_is (TOK_LSHIFT))
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__SHIFT_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__SHIFT_END)
         {
-          skip_token ();
-
           state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_LSHIFT;
+          state_p->token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
-        }
-        else if (token_is (TOK_RSHIFT))
-        {
+
           skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_RSHIFT;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
-        }
-        else if (token_is (TOK_RSHIFT_EX))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_RSHIFT_EX;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
         }
         else
         {
@@ -1975,59 +1907,17 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state_p->token_type = TOK_EMPTY;
         }
-        else if (token_is (TOK_LESS))
+        else if ((lexer_get_token_type (tok) >= TOKEN_TYPE__RELATIONAL_BEGIN
+                  && lexer_get_token_type (tok) <= TOKEN_TYPE__RELATIONAL_END)
+                 || lexer_get_token_type (tok) == TOK_KW_INSTANCEOF
+                 || (in_allowed && lexer_get_token_type (tok) == TOK_KW_IN))
         {
-          skip_token ();
-
           state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_LESS;
+          state_p->token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
-        }
-        else if (token_is (TOK_GREATER))
-        {
+
           skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_GREATER;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
-        }
-        else if (token_is (TOK_LESS_EQ))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_LESS_EQ;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
-        }
-        else if (token_is (TOK_GREATER_EQ))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_GREATER_EQ;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
-        }
-        else if (token_is (TOK_KW_INSTANCEOF))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_KW_INSTANCEOF;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
-        }
-        else if (in_allowed && token_is (TOK_KW_IN))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_KW_IN;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
         else
         {
@@ -2071,41 +1961,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           state_p->token_type = TOK_EMPTY;
         }
-        else if (token_is (TOK_DOUBLE_EQ))
+        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__EQUALITY_BEGIN
+                 && lexer_get_token_type (tok) <= TOKEN_TYPE__EQUALITY_END)
         {
-          skip_token ();
-
           state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_DOUBLE_EQ;
+          state_p->token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
-        }
-        else if (token_is (TOK_NOT_EQ))
-        {
+
           skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_NOT_EQ;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
-        }
-        else if (token_is (TOK_TRIPLE_EQ))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_TRIPLE_EQ;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
-        }
-        else if (token_is (TOK_NOT_DOUBLE_EQ))
-        {
-          skip_token ();
-
-          state_p->operand = dump_assignment_of_lhs_if_reference (state_p->operand);
-          state_p->token_type = TOK_NOT_DOUBLE_EQ;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
         }
         else
         {
