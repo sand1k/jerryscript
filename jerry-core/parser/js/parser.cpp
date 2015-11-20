@@ -4194,6 +4194,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     }
 
     lexer_save_token (tok);
+    insert_semicolon ();
 
     JERRY_ASSERT (label_p != NULL);
 
