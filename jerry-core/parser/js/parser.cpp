@@ -891,7 +891,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           || tt == TOK_KW_VOID
           || tt == TOK_KW_TYPEOF)
       {
-        /* ECMA-262 v5, 11.4 */
+        /* UnaryExpression */
         state_p->state = JSP_STATE_EXPR_UNARY;
         state_p->token_type = tt;
 
@@ -904,17 +904,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_KW_FUNCTION))
       {
+        /* FunctionExpression */
         state_p->state = JSP_STATE_EXPR_FUNCTION;
-      }
-      else if (token_is (TOK_KW_NEW))
-      {
-        state_p->state = JSP_STATE_EXPR_MEMBER;
-        state_p->token_type = TOK_KW_NEW;
-
-        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MEMBER, true);
       }
       else if (token_is (TOK_OPEN_SQUARE))
       {
+        /* ArrayLiteral */
         dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
 
         state_p->state = JSP_STATE_EXPR_ARRAY_LITERAL;
@@ -923,6 +918,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else if (token_is (TOK_OPEN_BRACE))
       {
+        /* ObjectLiteral */
         dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
         jsp_early_error_start_checking_of_prop_names ();
 
@@ -932,79 +928,81 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        if (token_is (TOK_OPEN_PAREN))
-        {
-          state_p->state = JSP_STATE_EXPR_MEMBER;
-          state_p->token_type = TOK_OPEN_PAREN;
+        /* MemberExpression (PrimaryExpression is immediately promoted to MemberExpression) */
+        state_p->state = JSP_STATE_EXPR_MEMBER;
 
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
-        }
-        else
+        switch (lexer_get_token_type (tok))
         {
-          state_p->state = JSP_STATE_EXPR_MEMBER;
+          case TOK_OPEN_PAREN:
+          {
+            state_p->token_type = TOK_OPEN_PAREN;
 
-          if (token_is (TOK_KW_THIS))
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+            break;
+          }
+          case TOK_KW_THIS:
           {
             state_p->operand = dump_this_res ();
+            break;
           }
-          else
+          case TOK_KW_NEW:
           {
-            if (lexer_get_token_type (tok) == TOK_REGEXP)
-            {
-              state_p->operand = dump_regexp_assignment_res (token_data_as_lit_cp ());
-            }
-            else
-            {
-              switch (lexer_get_token_type (tok))
-              {
-                case TOK_NULL:
-                {
-                  state_p->operand = dump_null_assignment_res ();
-                  break;
-                }
-                case TOK_BOOL:
-                {
-                  state_p->operand = dump_boolean_assignment_res ((bool) token_data ());
-                  break;
-                }
-                case TOK_SMALL_INT:
-                {
-                  state_p->operand = dump_smallint_assignment_res ((vm_idx_t) token_data ());
-                  break;
-                }
-                case TOK_NUMBER:
-                {
-                  state_p->operand = dump_number_assignment_res (token_data_as_lit_cp ());
-                  break;
-                }
-                case TOK_STRING:
-                {
-                  state_p->operand = dump_string_assignment_res (token_data_as_lit_cp ());
-                  break;
-                }
-                case TOK_NAME:
-                {
-                  if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
-                  {
-                    scopes_tree_set_arguments_used (serializer_get_scope ());
-                  }
-                  if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "eval"))
-                  {
-                    scopes_tree_set_eval_used (serializer_get_scope ());
-                  }
+            state_p->state = JSP_STATE_EXPR_MEMBER;
+            state_p->token_type = TOK_KW_NEW;
 
-                  state_p->operand = jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
-
-                  break;
-                }
-                default:
-                {
-                  EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
-                                   "Unknown token %s",
-                                   lexer_token_type_to_string (lexer_get_token_type (tok)));
-                }
-              }
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MEMBER, true);
+            break;
+          }
+          case TOK_REGEXP:
+          {
+            state_p->operand = dump_regexp_assignment_res (token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_NULL:
+          {
+            state_p->operand = dump_null_assignment_res ();
+            break;
+          }
+          case TOK_BOOL:
+          {
+            state_p->operand = dump_boolean_assignment_res ((bool) token_data ());
+            break;
+          }
+          case TOK_SMALL_INT:
+          {
+            state_p->operand = dump_smallint_assignment_res ((vm_idx_t) token_data ());
+            break;
+          }
+          case TOK_NUMBER:
+          {
+            state_p->operand = dump_number_assignment_res (token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_STRING:
+          {
+            state_p->operand = dump_string_assignment_res (token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_NAME:
+          {
+            if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
+            {
+              scopes_tree_set_arguments_used (serializer_get_scope ());
             }
+            if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "eval"))
+            {
+              scopes_tree_set_eval_used (serializer_get_scope ());
+            }
+
+            state_p->operand = jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
+
+            break;
+          }
+          default:
+          {
+            EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                             "Unknown token %s",
+                             lexer_token_type_to_string (lexer_get_token_type (tok)));
           }
         }
       }
