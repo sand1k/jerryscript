@@ -898,9 +898,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
   {
     bool is_subexpr_end = false;
     jsp_operand_t subexpr_operand;
-#ifndef JERRY_NDEBUG
     jsp_state_expr_t subexpr_type;
-#endif /* !JERRY_NDEBUG */
 
     jsp_state_t* state_p = jsp_state_top ();
 
@@ -924,9 +922,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         is_subexpr_end = true;
 
         subexpr_operand = state_p->operand;
-#ifndef JERRY_NDEBUG
         subexpr_type = state_p->state;
-#endif /* !JERRY_NDEBUG */
         JERRY_ASSERT ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
         jsp_state_pop ();
 
