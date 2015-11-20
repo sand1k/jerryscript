@@ -208,7 +208,7 @@ typedef enum __attr_packed___
   TOKEN_TYPE__KEYWORD_END = TOK_KW_YIELD,
 
   TOKEN_TYPE__END = TOKEN_TYPE__KEYWORD_END
-} token_type;
+} jsp_token_type;
 
 typedef enum
 {
@@ -241,9 +241,9 @@ token lexer_prev_token (void);
 void lexer_seek (locus);
 void lexer_locus_to_line_and_column (locus, size_t *, size_t *);
 void lexer_dump_line (size_t);
-const char *lexer_token_type_to_string (token_type);
+const char *lexer_token_type_to_string (jsp_token_type);
 
-token_type lexer_get_token_type (token);
+jsp_token_type lexer_get_token_type (token);
 bool lexer_is_preceded_by_newlines (token);
 
 void lexer_set_strict_mode (bool);

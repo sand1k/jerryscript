@@ -119,7 +119,7 @@ dump_current_line (void)
 } /* dump_current_line */
 
 static token
-create_token_from_lit (token_type type, literal_t lit)
+create_token_from_lit (jsp_token_type type, literal_t lit)
 {
   token ret;
 
@@ -136,7 +136,7 @@ create_token_from_lit (token_type type, literal_t lit)
  * @return token descriptor
  */
 static token
-create_token (token_type type,  /**< type of token */
+create_token (jsp_token_type type,  /**< type of token */
               uint16_t uid)     /**< uid of token */
 {
   token ret;
@@ -154,7 +154,7 @@ create_token (token_type type,  /**< type of token */
  * @return token descriptor
  */
 static token
-lexer_create_token_for_charset (token_type tt, /**< token type */
+lexer_create_token_for_charset (jsp_token_type tt, /**< token type */
                                 const lit_utf8_byte_t *charset_p, /**< charset buffer */
                                 lit_utf8_size_t size) /**< size of the charset */
 {
@@ -509,7 +509,7 @@ lexer_transform_escape_sequences (const jerry_api_char_t *source_str_p, /**< str
  * @return token descriptor
  */
 static token
-lexer_create_token_for_charset_transform_escape_sequences (token_type tt, /**< token type */
+lexer_create_token_for_charset_transform_escape_sequences (jsp_token_type tt, /**< token type */
                                                            const lit_utf8_byte_t *charset_p, /**< charset buffer */
                                                            lit_utf8_size_t size) /**< size of the charset */
 {
@@ -543,7 +543,7 @@ lexer_parse_reserved_word (const lit_utf8_byte_t *str_p, /**< characters buffer 
   typedef struct
   {
     const char *keyword_p;
-    token_type keyword_id;
+    jsp_token_type keyword_id;
   } kw_descr_t;
 
   const kw_descr_t keywords[] =
@@ -594,7 +594,7 @@ lexer_parse_reserved_word (const lit_utf8_byte_t *str_p, /**< characters buffer 
 #undef KW_DESCR
   };
 
-  token_type kw = TOK_EMPTY;
+  jsp_token_type kw = TOK_EMPTY;
 
   for (uint32_t i = 0; i < sizeof (keywords) / sizeof (kw_descr_t); i++)
   {
@@ -1688,7 +1688,7 @@ lexer_dump_line (size_t line) /**< line number */
 } /* lexer_dump_line */
 
 const char *
-lexer_token_type_to_string (token_type tt)
+lexer_token_type_to_string (jsp_token_type tt)
 {
   switch (tt)
   {
@@ -1813,12 +1813,12 @@ lexer_token_type_to_string (token_type tt)
   }
 }
 
-token_type __attr_always_inline___
+jsp_token_type __attr_always_inline___
 lexer_get_token_type (token t)
 {
   JERRY_ASSERT (t.type >= TOKEN_TYPE__BEGIN && t.type <= TOKEN_TYPE__END);
 
-  return (token_type) t.type;
+  return (jsp_token_type) t.type;
 } /* lexer_get_token_type */
 
 bool __attr_always_inline___
