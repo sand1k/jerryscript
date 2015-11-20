@@ -953,36 +953,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MEMBER, true);
             break;
           }
-          case TOK_REGEXP:
-          {
-            state_p->operand = dump_regexp_assignment_res (token_data_as_lit_cp ());
-            break;
-          }
-          case TOK_NULL:
-          {
-            state_p->operand = dump_null_assignment_res ();
-            break;
-          }
-          case TOK_BOOL:
-          {
-            state_p->operand = dump_boolean_assignment_res ((bool) token_data ());
-            break;
-          }
-          case TOK_SMALL_INT:
-          {
-            state_p->operand = dump_smallint_assignment_res ((vm_idx_t) token_data ());
-            break;
-          }
-          case TOK_NUMBER:
-          {
-            state_p->operand = dump_number_assignment_res (token_data_as_lit_cp ());
-            break;
-          }
-          case TOK_STRING:
-          {
-            state_p->operand = dump_string_assignment_res (token_data_as_lit_cp ());
-            break;
-          }
           case TOK_NAME:
           {
             if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
@@ -996,6 +966,42 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             state_p->operand = jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
 
+            break;
+          }
+          case TOK_REGEXP:
+          {
+            state_p->operand = tmp_operand ();
+            dump_regexp_assignment (state_p->operand, token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_NULL:
+          {
+            state_p->operand = tmp_operand ();
+            dump_null_assignment (state_p->operand);
+            break;
+          }
+          case TOK_BOOL:
+          {
+            state_p->operand = tmp_operand ();
+            dump_boolean_assignment (state_p->operand, (bool) token_data ());
+            break;
+          }
+          case TOK_SMALL_INT:
+          {
+            state_p->operand = tmp_operand ();
+            dump_smallint_assignment (state_p->operand, (vm_idx_t) token_data ());
+            break;
+          }
+          case TOK_NUMBER:
+          {
+            state_p->operand = tmp_operand ();
+            dump_number_assignment (state_p->operand, token_data_as_lit_cp ());
+            break;
+          }
+          case TOK_STRING:
+          {
+            state_p->operand = tmp_operand ();
+            dump_string_assignment (state_p->operand, token_data_as_lit_cp ());
             break;
           }
           default:
