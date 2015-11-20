@@ -23,7 +23,7 @@
 #include "lit-strings.h"
 #include "jsp-early-error.h"
 
-static token saved_token, prev_token, sent_token, empty_token, prev_non_lf_token;
+static token saved_token, prev_token, sent_token, empty_token;
 
 static bool allow_dump_lines = false, strict_mode;
 static size_t buffer_size = 0;
@@ -47,7 +47,7 @@ static lit_utf8_iterator_t src_iter;
 static bool
 is_empty (token tok)
 {
-  return tok.type == TOK_EMPTY;
+  return lexer_get_token_type (tok) == TOK_EMPTY;
 }
 
 static locus
@@ -1262,6 +1262,57 @@ lexer_parse_comment (void)
   return false;
 } /* lexer_parse_comment */
 
+static bool
+lexer_skip_whitespace_and_comments (void)
+{
+  bool new_lines_occurred = false;
+
+  while (true)
+  {
+  ecma_char_t c = LA (0);
+
+    if (lit_char_is_white_space (c))
+    {
+      do
+      {
+        consume_char ();
+
+        c = LA (0);
+      } while (lit_char_is_white_space (c));
+    }
+    else if (lit_char_is_line_terminator (c))
+    {
+      dump_current_line ();
+
+      new_lines_occurred = true;
+
+      do
+      {
+        consume_char ();
+
+        c = LA (0);
+      } while (lit_char_is_line_terminator (c));
+    }
+    else if (c == LIT_CHAR_SLASH
+             && (LA (1) == LIT_CHAR_SLASH
+                 || LA (1) == LIT_CHAR_ASTERISK))
+    {
+      /* ECMA-262 v5, 7.4, SingleLineComment or MultiLineComment */
+
+      if (lexer_parse_comment ())
+      {
+        new_lines_occurred = true;
+      }
+    }
+    else
+    {
+      break;
+    }
+  }
+
+  return new_lines_occurred;
+} /* lexer_skip_whitespace_and_comments */
+
 /**
  * Parse and construct lexer token
  *
@@ -1277,33 +1328,14 @@ lexer_parse_comment (void)
  * @return constructed token
  */
 static token
-lexer_parse_token (bool maybe_regexp) /**< read '/' as regexp? */
+lexer_parse_token (bool maybe_regexp, /**< read '/' as regexp? */
+                   bool *out_is_preceed_by_new_lines_p) /**< out: is constructed token preceded by newlines? */
 {
-  ecma_char_t c = LA (0);
-
-  if (lit_char_is_white_space (c))
-  {
-    while (lit_char_is_white_space (c))
-    {
-      consume_char ();
-
-      c = LA (0);
-    }
-  }
-
-  if (lit_char_is_line_terminator (c))
-  {
-    while (lit_char_is_line_terminator (c))
-    {
-      consume_char ();
-
-      c = LA (0);
-    }
-
-    return create_token (TOK_NEWLINE, 0);
-  }
-
   JERRY_ASSERT (is_token_parse_in_progress == false);
+
+  *out_is_preceed_by_new_lines_p = lexer_skip_whitespace_and_comments ();
+
+  ecma_char_t c = LA (0);
 
   /* ECMA-262 v5, 7.6, Identifier */
   if (lexer_is_char_can_be_identifier_start (c))
@@ -1319,12 +1351,6 @@ lexer_parse_token (bool maybe_regexp) /**< read '/' as regexp? */
     return lexer_parse_number ();
   }
 
-  if (c == LIT_CHAR_LF)
-  {
-    consume_char ();
-    return create_token (TOK_NEWLINE, 0);
-  }
-
   if (c == LIT_CHAR_NULL)
   {
     return create_token (TOK_EOF, 0);
@@ -1334,21 +1360,6 @@ lexer_parse_token (bool maybe_regexp) /**< read '/' as regexp? */
       || c == LIT_CHAR_DOUBLE_QUOTE)
   {
     return lexer_parse_string ();
-  }
-
-  /* ECMA-262 v5, 7.4, SingleLineComment or MultiLineComment */
-  if (c == LIT_CHAR_SLASH
-      && (LA (1) == LIT_CHAR_SLASH
-          || LA (1) == LIT_CHAR_ASTERISK))
-  {
-    if (lexer_parse_comment ())
-    {
-      return create_token (TOK_NEWLINE, 0);
-    }
-    else
-    {
-      return lexer_parse_token (maybe_regexp);
-    }
   }
 
   if (c == LIT_CHAR_SLASH && maybe_regexp)
@@ -1531,35 +1542,37 @@ lexer_next_token (bool maybe_regexp) /**< read '/' as regexp? */
   {
     sent_token = saved_token;
     saved_token = empty_token;
-    goto end;
-  }
-
-  /**
-   * FIXME:
-   *       The way to raise syntax errors for unexpected EOF
-   *       should be reworked so that EOF would be checked by
-   *       caller of the routine, and the following condition
-   *       would be checked as assertion in the routine.
-   */
-  if (prev_token.type == TOK_EOF
-      && sent_token.type == TOK_EOF)
-  {
-    PARSE_ERROR (JSP_EARLY_ERROR_SYNTAX, "Unexpected EOF", lit_utf8_iterator_get_pos (&src_iter));
-  }
-
-  prev_token = sent_token;
-  sent_token = lexer_parse_token (maybe_regexp);
-
-  if (sent_token.type == TOK_NEWLINE)
-  {
-    dump_current_line ();
   }
   else
   {
-    prev_non_lf_token = sent_token;
+    /**
+     * FIXME:
+     *       The way to raise syntax errors for unexpected EOF
+     *       should be reworked so that EOF would be checked by
+     *       caller of the routine, and the following condition
+     *       would be checked as assertion in the routine.
+     */
+    if (lexer_get_token_type (prev_token) == TOK_EOF
+        && lexer_get_token_type (sent_token) == TOK_EOF)
+    {
+      PARSE_ERROR (JSP_EARLY_ERROR_SYNTAX, "Unexpected EOF", lit_utf8_iterator_get_pos (&src_iter));
+    }
+
+    prev_token = sent_token;
+
+    jsp_token_flag_t flags = JSP_TOKEN_FLAG__NO_FLAGS;
+
+    bool is_preceded_by_new_lines;
+    sent_token = lexer_parse_token (maybe_regexp, &is_preceded_by_new_lines);
+
+    if (is_preceded_by_new_lines)
+    {
+      flags = (jsp_token_flag_t) (flags | JSP_TOKEN_FLAG_PRECEDED_BY_NEWLINES);
+    }
+
+    sent_token.flags = flags;
   }
 
-end:
   return sent_token;
 }
 
@@ -1568,7 +1581,6 @@ lexer_save_token (token tok)
 {
   JERRY_ASSERT (is_empty (saved_token));
   saved_token = tok;
-  prev_non_lf_token = tok;
 }
 
 token
@@ -1584,7 +1596,6 @@ lexer_seek (lit_utf8_iterator_pos_t locus)
 
   lit_utf8_iterator_seek (&src_iter, locus);
   saved_token = empty_token;
-  prev_non_lf_token = empty_token;
 }
 
 /**
@@ -1749,7 +1760,6 @@ lexer_token_type_to_string (token_type tt)
 
     case TOK_NULL: return "null";
     case TOK_BOOL: return "bool";
-    case TOK_NEWLINE: return "newline";
     case TOK_STRING: return "string";
     case TOK_OPEN_BRACE: return "{";
 
@@ -1821,6 +1831,12 @@ lexer_get_token_type (token t)
   return (token_type) t.type;
 } /* lexer_get_token_type */
 
+bool __attr_always_inline___
+lexer_is_preceded_by_newlines (token t)
+{
+  return ((t.flags & JSP_TOKEN_FLAG_PRECEDED_BY_NEWLINES) != 0);
+} /* lexer_is_preceded_by_newlines */
+
 void
 lexer_set_strict_mode (bool is_strict)
 {
@@ -1841,8 +1857,8 @@ bool
 lexer_are_tokens_with_same_identifier (token id1, /**< identifier token (TOK_NAME) */
                                        token id2) /**< identifier token (TOK_NAME) */
 {
-  JERRY_ASSERT (id1.type == TOK_NAME);
-  JERRY_ASSERT (id2.type == TOK_NAME);
+  JERRY_ASSERT (lexer_get_token_type (id1) == TOK_NAME);
+  JERRY_ASSERT (lexer_get_token_type (id2) == TOK_NAME);
 
   return (id1.uid == id2.uid);
 } /* lexer_are_tokens_with_same_identifier */
@@ -1856,7 +1872,7 @@ lexer_are_tokens_with_same_identifier (token id1, /**< identifier token (TOK_NAM
 bool
 lexer_is_no_escape_sequences_in_token_string (token tok) /**< token of type TOK_STRING */
 {
-  JERRY_ASSERT (tok.type == TOK_STRING);
+  JERRY_ASSERT (lexer_get_token_type (tok) == TOK_STRING);
 
   lit_utf8_iterator_t iter = src_iter;
   lit_utf8_iterator_seek (&iter, tok.loc);
@@ -1896,7 +1912,7 @@ lexer_init (const jerry_api_char_t *source, /**< script source */
   empty_token.uid = 0;
   empty_token.loc = LIT_ITERATOR_POS_ZERO;
 
-  saved_token = prev_token = sent_token = prev_non_lf_token = empty_token;
+  saved_token = prev_token = sent_token = empty_token;
 
   if (!lit_is_utf8_string_valid (source, (lit_utf8_size_t) source_size))
   {
