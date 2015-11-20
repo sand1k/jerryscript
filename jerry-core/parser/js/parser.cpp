@@ -143,20 +143,20 @@ rescan_regexp_token (void)
   tok = lexer_next_token (true);
 } /* rescan_regexp_token */
 
-static void
-assert_keyword (keyword kw)
+static bool
+is_keyword (token_type tt)
 {
-  if (!token_is (TOK_KEYWORD) || token_data () != kw)
-  {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected keyword '%s'", lexer_keyword_to_string (kw));
-    JERRY_UNREACHABLE ();
-  }
+  return (tt >= TOKEN_TYPE__KEYWORD_BEGIN && tt <= TOKEN_TYPE__KEYWORD_END);
 }
 
-static bool
-is_keyword (keyword kw)
+static void
+assert_keyword (token_type kw)
 {
-  return token_is (TOK_KEYWORD) && token_data () == kw;
+  if (!token_is (kw))
+  {
+    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected keyword '%s'", lexer_token_type_to_string (kw));
+    JERRY_UNREACHABLE ();
+  }
 }
 
 static void
@@ -368,58 +368,63 @@ dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
 static jsp_operand_t
 parse_property_name (void)
 {
-  switch (lexer_get_token_type (tok))
+  token_type tt = lexer_get_token_type (tok);
+
+  if (is_keyword (tt))
   {
-    case TOK_NAME:
-    case TOK_STRING:
+    const char *s = lexer_token_type_to_string (lexer_get_token_type (tok));
+    literal_t lit = lit_find_or_create_literal_from_utf8_string ((const lit_utf8_byte_t *) s,
+                                                                 (lit_utf8_size_t)strlen (s));
+    return literal_operand (lit_cpointer_t::compress (lit));
+  }
+  else
+  {
+    switch (tt)
     {
-      return literal_operand (token_data_as_lit_cp ());
-    }
-    case TOK_NUMBER:
-    case TOK_SMALL_INT:
-    {
-      ecma_number_t num;
-
-      if (lexer_get_token_type (tok) == TOK_NUMBER)
+      case TOK_NAME:
+      case TOK_STRING:
       {
-        literal_t num_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
-        JERRY_ASSERT (num_lit->get_type () == LIT_NUMBER_T);
-        num = lit_charset_literal_get_number (num_lit);
+        return literal_operand (token_data_as_lit_cp ());
       }
-      else
+      case TOK_NUMBER:
+      case TOK_SMALL_INT:
       {
-        num = ((ecma_number_t) token_data ());
+        ecma_number_t num;
+
+        if (lexer_get_token_type (tok) == TOK_NUMBER)
+        {
+          literal_t num_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
+          JERRY_ASSERT (num_lit->get_type () == LIT_NUMBER_T);
+          num = lit_charset_literal_get_number (num_lit);
+        }
+        else
+        {
+          num = ((ecma_number_t) token_data ());
+        }
+
+        lit_utf8_byte_t buff[ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER];
+        lit_utf8_size_t sz = ecma_number_to_utf8_string (num, buff, sizeof (buff));
+        JERRY_ASSERT (sz <= ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER);
+
+        literal_t str_lit = lit_find_or_create_literal_from_utf8_string (buff, sz);
+        return literal_operand (lit_cpointer_t::compress (str_lit));
       }
-
-      lit_utf8_byte_t buff[ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER];
-      lit_utf8_size_t sz = ecma_number_to_utf8_string (num, buff, sizeof (buff));
-      JERRY_ASSERT (sz <= ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER);
-
-      literal_t str_lit = lit_find_or_create_literal_from_utf8_string (buff, sz);
-      return literal_operand (lit_cpointer_t::compress (str_lit));
-    }
-    case TOK_KEYWORD:
-    {
-      const char *s = lexer_keyword_to_string ((keyword) token_data ());
-      literal_t lit = lit_find_or_create_literal_from_utf8_string ((const lit_utf8_byte_t *) s,
-                                                                   (lit_utf8_size_t)strlen (s));
-      return literal_operand (lit_cpointer_t::compress (lit));
-    }
-    case TOK_NULL:
-    case TOK_BOOL:
-    {
-      lit_magic_string_id_t id = (token_is (TOK_NULL)
-                                  ? LIT_MAGIC_STRING_NULL
-                                  : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
-      literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
-                                                                   lit_get_magic_string_size (id));
-      return literal_operand (lit_cpointer_t::compress (lit));
-    }
-    default:
-    {
-      EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
-                       "Wrong property name type: %s",
-                       lexer_token_type_to_string (lexer_get_token_type (tok)));
+      case TOK_NULL:
+      case TOK_BOOL:
+      {
+        lit_magic_string_id_t id = (token_is (TOK_NULL)
+                                    ? LIT_MAGIC_STRING_NULL
+                                    : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
+        literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
+                                                                     lit_get_magic_string_size (id));
+        return literal_operand (lit_cpointer_t::compress (lit));
+      }
+      default:
+      {
+        EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                         "Wrong property name type: %s",
+                         lexer_token_type_to_string (lexer_get_token_type (tok)));
+      }
     }
   }
 }
@@ -568,7 +573,7 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 static void
 parse_function_declaration (void)
 {
-  assert_keyword (KW_FUNCTION);
+  assert_keyword (TOK_KW_FUNCTION);
   skip_token ();
 
   current_token_must_be (TOK_NAME);
@@ -595,9 +600,9 @@ typedef enum
   JSP_OPERATOR_LOGICAL_OR, /* TOK_DOUBLE_OR */
   JSP_OPERATOR_LOGICAL_AND, /* TOK_DOUBLE_AND */
 
-  JSP_OPERATOR_DELETE, /* TOK_KEYWORD, KW_DELETE */
-  JSP_OPERATOR_VOID, /* TOK_KEYWORD, KW_VOID */
-  JSP_OPERATOR_TYPEOF, /* TOK_KEYWORD, KW_TYPEOF */
+  JSP_OPERATOR_DELETE, /* TOK_KW_DELETE */
+  JSP_OPERATOR_VOID, /* TOK_KW_VOID */
+  JSP_OPERATOR_TYPEOF, /* TOK_KW_TYPEOF */
   JSP_OPERATOR_PREINCR, /* TOK_DOUBLE_PLUS */
   JSP_OPERATOR_PREDECR, /* TOK_DOUBLE_MINUS */
   JSP_OPERATOR_PLUS, /* TOK_PLUS */
@@ -646,14 +651,14 @@ typedef enum
   JSP_OPERATOR_GREATER, /* TOK_GREATER */
   JSP_OPERATOR_LESS_OR_EQUAL, /* TOK_LESS_EQ */
   JSP_OPERATOR_GREATER_OR_EQUAL, /* TOK_GREATER_EQ */
-  JSP_OPERATOR_INSTANCEOF, /* TOK_KEYWORD, KW_INSTANCEOF */
-  JSP_OPERATOR_IN, /* TOK_KEYWORD, KW_IN */
+  JSP_OPERATOR_INSTANCEOF, /* TOK_KW_INSTANCEOF */
+  JSP_OPERATOR_IN, /* TOK_KW_IN */
 
   JSP_OPERATOR_PROP_ACCESSOR, /* TOK_OPEN_SQUARE */
 
   JSP_OPERATOR_GROUP, /* TOK_OPEN_PAREN */
 
-  JSP_OPERATOR_NEW, /* TOK_KEYWORD, KW_NEW */
+  JSP_OPERATOR_NEW, /* TOK_KW_NEW */
 } jsp_operator_t;
 
 typedef enum
@@ -849,9 +854,9 @@ jsp_get_prop_name_after_dot (void)
   {
     return token_data_as_lit_cp ();
   }
-  else if (token_is (TOK_KEYWORD))
+  else if (is_keyword (lexer_get_token_type (tok)))
   {
-    const char *s = lexer_keyword_to_string ((keyword) token_data ());
+    const char *s = lexer_token_type_to_string (lexer_get_token_type (tok));
     literal_t lit = lit_find_or_create_literal_from_utf8_string ((lit_utf8_byte_t *) s,
                                                                  (lit_utf8_size_t) strlen (s));
     if (lit == NULL)
@@ -957,10 +962,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
           || tt == TOK_MINUS
           || tt == TOK_COMPL
           || tt == TOK_NOT
-          || (tt == TOK_KEYWORD
-              && (is_keyword (KW_DELETE)
-                  || is_keyword (KW_VOID)
-                  || is_keyword (KW_TYPEOF))))
+          || tt == TOK_KW_DELETE
+          || tt == TOK_KW_VOID
+          || tt == TOK_KW_TYPEOF)
       {
         /* ECMA-262 v5, 11.4 */
         state_p->state = JSP_STATE_EXPR_UNARY;
@@ -989,35 +993,30 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           state_p->op = JSP_OPERATOR_NOT;
         }
+        else if (tt == TOK_KW_DELETE)
+        {
+          state_p->op = JSP_OPERATOR_DELETE;
+
+          scopes_tree_set_contains_delete (serializer_get_scope ());
+        }
+        else if (tt == TOK_KW_VOID)
+        {
+          state_p->op = JSP_OPERATOR_VOID;
+        }
         else
         {
-          JERRY_ASSERT (tt == TOK_KEYWORD);
+          JERRY_ASSERT (tt == TOK_KW_TYPEOF);
 
-          if (is_keyword (KW_DELETE))
-          {
-            state_p->op = JSP_OPERATOR_DELETE;
-
-            scopes_tree_set_contains_delete (serializer_get_scope ());
-          }
-          else if (is_keyword (KW_VOID))
-          {
-            state_p->op = JSP_OPERATOR_VOID;
-          }
-          else
-          {
-            JERRY_ASSERT (is_keyword (KW_TYPEOF));
-
-            state_p->op = JSP_OPERATOR_TYPEOF;
-          }
+          state_p->op = JSP_OPERATOR_TYPEOF;
         }
 
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
       }
-      else if (token_is (TOK_KEYWORD) && is_keyword (KW_FUNCTION))
+      else if (token_is (TOK_KW_FUNCTION))
       {
         state_p->state = JSP_STATE_EXPR_FUNCTION;
       }
-      else if (token_is (TOK_KEYWORD) && is_keyword (KW_NEW))
+      else if (token_is (TOK_KW_NEW))
       {
         state_p->state = JSP_STATE_EXPR_MEMBER;
         state_p->op = JSP_OPERATOR_NEW;
@@ -1054,7 +1053,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           state_p->state = JSP_STATE_EXPR_MEMBER;
 
-          if (token_is (TOK_KEYWORD) && is_keyword (KW_THIS))
+          if (token_is (TOK_KW_THIS))
           {
             state_p->operand = dump_this_res ();
           }
@@ -2170,7 +2169,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
-        else if (token_is (TOK_KEYWORD) && is_keyword (KW_INSTANCEOF))
+        else if (token_is (TOK_KW_INSTANCEOF))
         {
           skip_token ();
 
@@ -2179,7 +2178,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
         }
-        else if (in_allowed && token_is (TOK_KEYWORD) && is_keyword (KW_IN))
+        else if (in_allowed && token_is (TOK_KW_IN))
         {
           skip_token ();
 
@@ -2745,7 +2744,7 @@ parse_variable_declaration (void)
 static void
 parse_variable_declaration_list (void)
 {
-  JERRY_ASSERT (is_keyword (KW_VAR));
+  JERRY_ASSERT (token_is (TOK_KW_VAR));
 
   while (true)
   {
@@ -2796,7 +2795,7 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
   skip_token ();
 
   // Initializer
-  if (is_keyword (KW_VAR))
+  if (token_is (TOK_KW_VAR))
   {
     parse_variable_declaration_list ();
     skip_token ();
@@ -2895,7 +2894,7 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
 static jsp_operand_t
 jsp_parse_for_in_statement_iterator (void)
 {
-  if (is_keyword (KW_VAR))
+  if (token_is (TOK_KW_VAR))
   {
     skip_token ();
 
@@ -2951,18 +2950,11 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
 
   while (lit_utf8_iterator_pos_cmp (tok.loc, for_body_statement_loc) < 0)
   {
-    if (jsp_find_next_token_before_the_locus (TOK_KEYWORD,
+    if (jsp_find_next_token_before_the_locus (TOK_KW_IN,
                                               for_body_statement_loc,
                                               true))
     {
-      if (is_keyword (KW_IN))
-      {
-        break;
-      }
-      else
-      {
-        skip_token ();
-      }
+      break;
     }
     else
     {
@@ -2970,7 +2962,7 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
     }
   }
 
-  JERRY_ASSERT (is_keyword (KW_IN));
+  JERRY_ASSERT (token_is (TOK_KW_IN));
   skip_token ();
 
   // Collection
@@ -3044,7 +3036,7 @@ jsp_parse_for_or_for_in_statement (jsp_label_t *outermost_stmt_label_p) /**< out
                                                                          *   (or NULL, if there are no name
                                                                          *   labels associated with the statement) */
 {
-  assert_keyword (KW_FOR);
+  assert_keyword (TOK_KW_FOR);
 
   skip_token ();
   current_token_must_be (TOK_OPEN_PAREN);
@@ -3165,7 +3157,7 @@ parse_statement_ (void)
 
     if (state.state == JSP_STATE_EXPR_EMPTY)
     {
-      if (is_keyword (KW_IF)) /* IfStatement */
+      if (token_is (TOK_KW_IF)) /* IfStatement */
       {
         jsp_operand_t cond = parse_expression_inside_parens ();
         cond = dump_assignment_of_lhs_if_value_based_reference (cond);
@@ -3193,7 +3185,7 @@ parse_statement_ (void)
           jsp_state_push (state);
         }
       }
-      else if (is_keyword (KW_VAR))
+      else if (token_is (TOK_KW_VAR))
       {
         state.state = JSP_STATE_STAT_VAR_DECL;
         jsp_state_push (state);
@@ -3210,7 +3202,7 @@ parse_statement_ (void)
     else if (state.state == JSP_STATE_STAT_IF_BRANCH_START)
     {
       skip_token ();
-      if (is_keyword (KW_ELSE))
+      if (token_is (TOK_KW_ELSE))
       {
         dump_jump_to_end_for_rewrite ();
         rewrite_conditional_check ();
@@ -3247,7 +3239,7 @@ parse_statement_ (void)
       }
 
       if (token_is (TOK_CLOSE_BRACE)
-          || (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT)))
+          || (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT)))
       {
         //lexer_save_token (tok);
 
@@ -3338,7 +3330,7 @@ parse_statement_list (void)
       lexer_save_token (tok);
       break;
     }
-    if (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
+    if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
     {
       lexer_save_token (tok);
       break;
@@ -3352,7 +3344,7 @@ parse_statement_list (void)
 static void
 parse_if_statement (void)
 {
-  assert_keyword (KW_IF);
+  assert_keyword (TOK_KW_IF);
 
   jsp_operand_t cond = parse_expression_inside_parens ();
   cond = dump_assignment_of_lhs_if_value_based_reference (cond);
@@ -3362,7 +3354,7 @@ parse_if_statement (void)
   parse_statement (NULL);
 
   skip_token ();
-  if (is_keyword (KW_ELSE))
+  if (token_is (TOK_KW_ELSE))
   {
     dump_jump_to_end_for_rewrite ();
     rewrite_conditional_check ();
@@ -3387,7 +3379,7 @@ parse_do_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (f
                                                                 *   the statement (or NULL, if there are no named
                                                                 *   labels associated with the statement) */
 {
-  assert_keyword (KW_DO);
+  assert_keyword (TOK_KW_DO);
 
   dumper_set_next_interation_target ();
 
@@ -3398,7 +3390,7 @@ parse_do_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (f
                                    serializer_get_current_instr_counter ());
 
   skip_token ();
-  assert_keyword (KW_WHILE);
+  assert_keyword (TOK_KW_WHILE);
 
   const jsp_operand_t cond = parse_expression_inside_parens ();
   dump_continue_iterations_check (cond);
@@ -3412,7 +3404,7 @@ parse_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (firs
                                                              *   the statement (or NULL, if there are no named
                                                              *   labels associated with the statement) */
 {
-  assert_keyword (KW_WHILE);
+  assert_keyword (TOK_KW_WHILE);
 
   skip_token ();
   current_token_must_be (TOK_OPEN_PAREN);
@@ -3447,7 +3439,7 @@ parse_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (firs
 static void
 parse_with_statement (void)
 {
-  assert_keyword (KW_WITH);
+  assert_keyword (TOK_KW_WITH);
   if (is_strict_mode ())
   {
     EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
@@ -3473,8 +3465,8 @@ parse_with_statement (void)
 static void
 skip_case_clause_body (void)
 {
-  while (!is_keyword (KW_CASE)
-         && !is_keyword (KW_DEFAULT)
+  while (!token_is (TOK_KW_CASE)
+         && !token_is (TOK_KW_DEFAULT)
          && !token_is (TOK_CLOSE_BRACE))
   {
     if (token_is (TOK_OPEN_BRACE))
@@ -3498,7 +3490,7 @@ skip_case_clause_body (void)
 static void
 parse_switch_statement (void)
 {
-  assert_keyword (KW_SWITCH);
+  assert_keyword (TOK_KW_SWITCH);
 
   const jsp_operand_t switch_expr = parse_expression_inside_parens ();
   skip_token ();
@@ -3512,9 +3504,9 @@ parse_switch_statement (void)
 
   // First, generate table of jumps
   skip_token ();
-  while (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
+  while (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
   {
-    if (is_keyword (KW_CASE))
+    if (token_is (TOK_KW_CASE))
     {
       skip_token ();
       jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
@@ -3528,7 +3520,7 @@ parse_switch_statement (void)
       body_locs = array_list_append (body_locs, (void*) &tok.loc);
       skip_case_clause_body ();
     }
-    else if (is_keyword (KW_DEFAULT))
+    else if (token_is (TOK_KW_DEFAULT))
     {
       if (was_default)
       {
@@ -3569,7 +3561,7 @@ parse_switch_statement (void)
     if (was_default && default_body_index == i)
     {
       rewrite_default_clause ();
-      if (is_keyword (KW_CASE))
+      if (token_is (TOK_KW_CASE))
       {
         continue;
       }
@@ -3577,7 +3569,7 @@ parse_switch_statement (void)
     else
     {
       rewrite_case_clause ();
-      if (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
+      if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
       {
         continue;
       }
@@ -3609,7 +3601,7 @@ parse_switch_statement (void)
 static void
 parse_catch_clause (void)
 {
-  assert_keyword (KW_CATCH);
+  assert_keyword (TOK_KW_CATCH);
 
   skip_token ();
   current_token_must_be (TOK_OPEN_PAREN);
@@ -3643,7 +3635,7 @@ parse_catch_clause (void)
 static void
 parse_finally_clause (void)
 {
-  assert_keyword (KW_FINALLY);
+  assert_keyword (TOK_KW_FINALLY);
 
   dump_finally_for_rewrite ();
 
@@ -3665,7 +3657,7 @@ parse_finally_clause (void)
 static void
 parse_try_statement (void)
 {
-  assert_keyword (KW_TRY);
+  assert_keyword (TOK_KW_TRY);
 
   scopes_tree_set_contains_try (serializer_get_scope ());
 
@@ -3685,14 +3677,13 @@ parse_try_statement (void)
   rewrite_try ();
 
   skip_token ();
-  current_token_must_be (TOK_KEYWORD);
 
-  if (is_keyword (KW_CATCH))
+  if (token_is (TOK_KW_CATCH))
   {
     parse_catch_clause ();
 
     skip_token ();
-    if (is_keyword (KW_FINALLY))
+    if (token_is (TOK_KW_FINALLY))
     {
       parse_finally_clause ();
     }
@@ -3701,7 +3692,7 @@ parse_try_statement (void)
       lexer_save_token (tok);
     }
   }
-  else if (is_keyword (KW_FINALLY))
+  else if (token_is (TOK_KW_FINALLY))
   {
     parse_finally_clause ();
   }
@@ -3739,17 +3730,17 @@ parse_iterational_statement (jsp_label_t *outermost_named_stmt_label_p) /**< out
 
   jsp_label_t *outermost_stmt_label_p = (outermost_named_stmt_label_p != NULL ? outermost_named_stmt_label_p : &label);
 
-  if (is_keyword (KW_DO))
+  if (token_is (TOK_KW_DO))
   {
     parse_do_while_statement (outermost_stmt_label_p);
   }
-  else if (is_keyword (KW_WHILE))
+  else if (token_is (TOK_KW_WHILE))
   {
     parse_while_statement (outermost_stmt_label_p);
   }
   else
   {
-    JERRY_ASSERT (is_keyword (KW_FOR));
+    JERRY_ASSERT (token_is (TOK_KW_FOR));
     jsp_parse_for_or_for_in_statement (outermost_stmt_label_p);
   }
 
@@ -3844,7 +3835,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     }
     return;
   }
-  if (is_keyword (KW_VAR))
+  if (token_is (TOK_KW_VAR))
   {
     parse_variable_declaration_list ();
     if (token_is (TOK_SEMICOLON))
@@ -3857,7 +3848,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     }
     return;
   }
-  if (is_keyword (KW_FUNCTION))
+  if (token_is (TOK_KW_FUNCTION))
   {
     parse_function_declaration ();
     return;
@@ -3866,26 +3857,26 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
   {
     return;
   }
-  if (is_keyword (KW_CASE) || is_keyword (KW_DEFAULT))
+  if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
   {
     return;
   }
-  if (is_keyword (KW_IF))
+  if (token_is (TOK_KW_IF))
   {
     parse_if_statement ();
     return;
   }
-  if (is_keyword (KW_DO)
-      || is_keyword (KW_WHILE)
-      || is_keyword (KW_FOR))
+  if (token_is (TOK_KW_DO)
+      || token_is (TOK_KW_WHILE)
+      || token_is (TOK_KW_FOR))
   {
     parse_iterational_statement (outermost_stmt_label_p);
     return;
   }
-  if (is_keyword (KW_CONTINUE)
-      || is_keyword (KW_BREAK))
+  if (token_is (TOK_KW_CONTINUE)
+      || token_is (TOK_KW_BREAK))
   {
-    bool is_break = is_keyword (KW_BREAK);
+    bool is_break = token_is (TOK_KW_BREAK);
 
     skip_token ();
 
@@ -3938,7 +3929,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
 
     return;
   }
-  if (is_keyword (KW_RETURN))
+  if (token_is (TOK_KW_RETURN))
   {
     if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
     {
@@ -3964,17 +3955,17 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
       return;
     }
   }
-  if (is_keyword (KW_WITH))
+  if (token_is (TOK_KW_WITH))
   {
     parse_with_statement ();
     return;
   }
-  if (is_keyword (KW_SWITCH))
+  if (token_is (TOK_KW_SWITCH))
   {
     parse_switch_statement ();
     return;
   }
-  if (is_keyword (KW_THROW))
+  if (token_is (TOK_KW_THROW))
   {
     skip_token ();
     const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
@@ -3982,7 +3973,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
     return;
   }
-  if (is_keyword (KW_TRY))
+  if (token_is (TOK_KW_TRY))
   {
     parse_try_statement ();
     return;
@@ -4032,7 +4023,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
 static void
 parse_source_element (void)
 {
-  if (is_keyword (KW_FUNCTION))
+  if (token_is (TOK_KW_FUNCTION))
   {
     parse_function_declaration ();
   }

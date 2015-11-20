@@ -25,7 +25,6 @@
 typedef enum __attr_packed___
 {
   /* Not a keyword.  */
-  KW_NONE = 0,
   KW_BREAK,
   KW_CASE,
   KW_CATCH,
@@ -86,7 +85,6 @@ typedef enum __attr_packed___
 
   TOK_EOF = TOKEN_TYPE__BEGIN, // End of file
   TOK_NAME, // Identifier
-  TOK_KEYWORD, // Keyword
   TOK_SMALL_INT,
   TOK_NUMBER,
 
@@ -154,7 +152,62 @@ typedef enum __attr_packed___
   TOK_EMPTY,
   TOK_REGEXP, // RegularExpressionLiteral (/.../gim)
 
-  TOKEN_TYPE__END = TOK_REGEXP
+  TOKEN_TYPE__KEYWORD_BEGIN,
+
+  TOK_KW_BREAK,
+  TOK_KW_CASE,
+  TOK_KW_CATCH,
+  TOK_KW_CLASS,
+
+  TOK_KW_CONST,
+  TOK_KW_CONTINUE,
+  TOK_KW_DEBUGGER,
+  TOK_KW_DEFAULT,
+  TOK_KW_DELETE,
+
+  TOK_KW_DO,
+  TOK_KW_ELSE,
+  TOK_KW_ENUM,
+  TOK_KW_EXPORT,
+  TOK_KW_EXTENDS,
+
+  TOK_KW_FINALLY,
+  TOK_KW_FOR,
+  TOK_KW_FUNCTION,
+  TOK_KW_IF,
+  TOK_KW_IN,
+
+  TOK_KW_INSTANCEOF,
+  TOK_KW_INTERFACE,
+  TOK_KW_IMPORT,
+  TOK_KW_IMPLEMENTS,
+  TOK_KW_LET,
+
+  TOK_KW_NEW,
+  TOK_KW_PACKAGE,
+  TOK_KW_PRIVATE,
+  TOK_KW_PROTECTED,
+  TOK_KW_PUBLIC,
+
+  TOK_KW_RETURN,
+  TOK_KW_STATIC,
+  TOK_KW_SUPER,
+  TOK_KW_SWITCH,
+  TOK_KW_THIS,
+
+  TOK_KW_THROW,
+  TOK_KW_TRY,
+  TOK_KW_TYPEOF,
+  TOK_KW_VAR,
+  TOK_KW_VOID,
+
+  TOK_KW_WHILE,
+  TOK_KW_WITH,
+  TOK_KW_YIELD,
+
+  TOKEN_TYPE__KEYWORD_END = TOK_KW_YIELD,
+
+  TOKEN_TYPE__END = TOKEN_TYPE__KEYWORD_END
 } token_type;
 
 typedef enum
@@ -188,7 +241,6 @@ token lexer_prev_token (void);
 void lexer_seek (locus);
 void lexer_locus_to_line_and_column (locus, size_t *, size_t *);
 void lexer_dump_line (size_t);
-const char *lexer_keyword_to_string (keyword);
 const char *lexer_token_type_to_string (token_type);
 
 token_type lexer_get_token_type (token);
