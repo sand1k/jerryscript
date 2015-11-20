@@ -61,7 +61,6 @@ typedef enum
 
   /* ECMA-262 v5 expression types */
   JSP_STATE_EXPR_EMPTY              = 0x01, /**< no expression yet (at start) */
-  JSP_STATE_EXPR_PRIMARY            = 0x02, /**< PrimaryExpression (11.1) */
   JSP_STATE_EXPR_FUNCTION           = 0x03, /**< FunctionExpression (11.2.5) */
   JSP_STATE_EXPR_MEMBER             = 0x04, /**< MemberExpression (11.2) */
   JSP_STATE_EXPR_CALL               = 0x06, /**< CallExpression (11.2) */
@@ -1058,12 +1057,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        state.state = JSP_STATE_EXPR_PRIMARY;
-
         if (token_is (TOK_OPEN_PAREN))
         {
           skip_token ();
 
+          state.state = JSP_STATE_EXPR_MEMBER;
           state.op = JSP_OPERATOR_GROUP;
 
           jsp_state_push (state);
@@ -1071,7 +1069,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         }
         else
         {
-          state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
+          state.state = JSP_STATE_EXPR_MEMBER;
 
           if (token_is (TOK_KEYWORD) && is_keyword (KW_THIS))
           {
@@ -1312,8 +1310,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         JERRY_ASSERT (!is_subexpr_end);
 
-        /* propagate to PrimaryExpression */
-        state.state = JSP_STATE_EXPR_PRIMARY;
+        state.state = JSP_STATE_EXPR_MEMBER;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
         jsp_state_push (state);
       }
@@ -1384,8 +1382,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         JERRY_ASSERT (!is_subexpr_end);
 
-        /* propagate to PrimaryExpression */
-        state.state = JSP_STATE_EXPR_PRIMARY;
+        state.state = JSP_STATE_EXPR_MEMBER;
+        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
 
         jsp_state_push (state);
       }
@@ -1455,44 +1453,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
         }
       }
     }
-    else if (state.state == JSP_STATE_EXPR_PRIMARY)
-    {
-      if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
-      {
-        JERRY_ASSERT (!is_subexpr_end);
-
-        /* propagate to MemberExpression */
-        state.state = JSP_STATE_EXPR_MEMBER;
-        state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
-
-        jsp_state_push (state);
-      }
-      else
-      {
-        JERRY_ASSERT (is_subexpr_end);
-        JERRY_ASSERT (state.op == JSP_OPERATOR_GROUP);
-
-        state.operand = subexpr_state.operand;
-        state.op = JSP_OPERATOR_NO_OP;
-        state.flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
-
-        current_token_must_be (TOK_CLOSE_PAREN);
-        skip_token ();
-
-        jsp_state_push (state);
-      }
-    }
-    else if (state.state == JSP_STATE_EXPR_FUNCTION)
-    {
-      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-      JERRY_ASSERT (!is_subexpr_end);
-
-      /* propagate to MemberExpression */
-      state.state = JSP_STATE_EXPR_MEMBER;
-      state.flags &= ~JSP_STATE_EXPR_FLAG_COMPLETED;
-
-      jsp_state_push (state);
-    }
     else if (state.state == JSP_STATE_EXPR_MEMBER)
     {
       if ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0)
@@ -1548,6 +1508,18 @@ parse_expression_ (jsp_state_expr_t req_expr,
             }
 
             skip_token ();
+          }
+          else if (state.op == JSP_OPERATOR_GROUP)
+          {
+            JERRY_ASSERT (state.operand.is_empty_operand ());
+
+            state.operand = subexpr_state.operand;
+            state.op = JSP_OPERATOR_NO_OP;
+
+            current_token_must_be (TOK_CLOSE_PAREN);
+            skip_token ();
+
+            jsp_state_push (state);
           }
           else if (state.op == JSP_OPERATOR_NEW)
           {
