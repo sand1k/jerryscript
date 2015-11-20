@@ -1813,6 +1813,14 @@ lexer_token_type_to_string (token_type tt)
   }
 }
 
+token_type __attr_always_inline___
+lexer_get_token_type (token t)
+{
+  JERRY_ASSERT (t.type >= TOKEN_TYPE__BEGIN && t.type <= TOKEN_TYPE__END);
+
+  return (token_type) t.type;
+} /* lexer_get_token_type */
+
 void
 lexer_set_strict_mode (bool is_strict)
 {

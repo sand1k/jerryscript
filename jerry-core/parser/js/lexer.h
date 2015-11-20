@@ -82,7 +82,9 @@ typedef enum __attr_packed___
 /* Type of tokens.  */
 typedef enum __attr_packed___
 {
-  TOK_EOF = 0, // End of file
+  TOKEN_TYPE__BEGIN = 1,
+
+  TOK_EOF = TOKEN_TYPE__BEGIN, // End of file
   TOK_NAME, // Identifier
   TOK_KEYWORD, // Keyword
   TOK_SMALL_INT,
@@ -152,6 +154,8 @@ typedef enum __attr_packed___
   TOK_DIV_EQ, // /=
   TOK_EMPTY,
   TOK_REGEXP, // RegularExpressionLiteral (/.../gim)
+
+  TOKEN_TYPE__END = TOK_REGEXP
 } token_type;
 
 typedef lit_utf8_iterator_pos_t locus;
@@ -160,14 +164,14 @@ typedef lit_utf8_iterator_pos_t locus;
 typedef struct
 {
   locus loc;
-  token_type type;
   uint16_t uid;
+  uint8_t type;
 } token;
 
 /**
  * Initializer for empty token
  */
-#define TOKEN_EMPTY_INITIALIZER {LIT_ITERATOR_POS_ZERO, TOK_EMPTY, 0}
+#define TOKEN_EMPTY_INITIALIZER {LIT_ITERATOR_POS_ZERO, 0, TOK_EMPTY}
 
 void lexer_init (const jerry_api_char_t *, size_t, bool);
 
@@ -180,6 +184,8 @@ void lexer_locus_to_line_and_column (locus, size_t *, size_t *);
 void lexer_dump_line (size_t);
 const char *lexer_keyword_to_string (keyword);
 const char *lexer_token_type_to_string (token_type);
+
+token_type lexer_get_token_type (token);
 
 void lexer_set_strict_mode (bool);
 

@@ -106,7 +106,7 @@ static void parse_source_element_list (void);
 static bool
 token_is (token_type tt)
 {
-  return tok.type == tt;
+  return (lexer_get_token_type (tok) == tt);
 }
 
 static uint16_t
@@ -226,7 +226,7 @@ jsp_skip_braces (token_type brace_type) /**< type of the opening brace */
         || token_is (TOK_OPEN_BRACE)
         || token_is (TOK_OPEN_SQUARE))
     {
-      jsp_skip_braces (tok.type);
+      jsp_skip_braces (lexer_get_token_type (tok));
     }
 
     skip_newlines ();
@@ -382,7 +382,7 @@ dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
 static jsp_operand_t
 parse_property_name (void)
 {
-  switch (tok.type)
+  switch (lexer_get_token_type (tok))
   {
     case TOK_NAME:
     case TOK_STRING:
@@ -394,7 +394,7 @@ parse_property_name (void)
     {
       ecma_number_t num;
 
-      if (tok.type == TOK_NUMBER)
+      if (lexer_get_token_type (tok) == TOK_NUMBER)
       {
         literal_t num_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
         JERRY_ASSERT (num_lit->get_type () == LIT_NUMBER_T);
@@ -431,7 +431,9 @@ parse_property_name (void)
     }
     default:
     {
-      EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Wrong property name type: %s", lexer_token_type_to_string (tok.type));
+      EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                       "Wrong property name type: %s",
+                       lexer_token_type_to_string (lexer_get_token_type (tok)));
     }
   }
 }
@@ -960,7 +962,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       JERRY_ASSERT (!is_subexpr_end);
       JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      token_type tt = tok.type;
+      token_type tt = lexer_get_token_type (tok);
       if (tt == TOK_DOUBLE_PLUS
           || tt == TOK_DOUBLE_MINUS
           || tt == TOK_PLUS
@@ -1089,7 +1091,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
           else
           {
-            if (tok.type == TOK_DIV || tok.type == TOK_DIV_EQ)
+            if (lexer_get_token_type (tok) == TOK_DIV || lexer_get_token_type (tok) == TOK_DIV_EQ)
             {
               rescan_regexp_token ();
 
@@ -1099,7 +1101,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             }
             else
             {
-              switch (tok.type)
+              switch (lexer_get_token_type (tok))
               {
                 case TOK_NULL:
                 {
@@ -1143,7 +1145,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
                 }
                 default:
                 {
-                  EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Unknown token %s", lexer_token_type_to_string (tok.type));
+                  EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                                   "Unknown token %s",
+                                   lexer_token_type_to_string (lexer_get_token_type (tok)));
                 }
               }
             }
@@ -1910,7 +1914,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         if (!is_finished)
         {
-          token_type tt = tok.type;
+          token_type tt = lexer_get_token_type (tok);
 
           if (tt == TOK_EQ
               || tt == TOK_MULT_EQ
@@ -3160,7 +3164,7 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
 
   lexer_seek (loop_end_loc);
   skip_newlines ();
-  if (tok.type != TOK_CLOSE_BRACE)
+  if (lexer_get_token_type (tok) != TOK_CLOSE_BRACE)
   {
     lexer_save_token (tok);
   }
@@ -3303,7 +3307,7 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
 
   lexer_seek (loop_end_loc);
   tok = lexer_next_token (false);
-  if (tok.type != TOK_CLOSE_BRACE)
+  if (lexer_get_token_type (tok) != TOK_CLOSE_BRACE)
   {
     lexer_save_token (tok);
   }
