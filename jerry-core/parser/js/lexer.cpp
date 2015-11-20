@@ -884,10 +884,11 @@ lexer_parse_number (void)
 
   if (is_hex)
   {
+    new_token ();
+
     // Eat up '0x'
     consume_char ();
     consume_char ();
-    new_token ();
 
     c = LA (0);
     if (!lit_char_is_hex_digit (c))
@@ -911,9 +912,11 @@ lexer_parse_number (void)
 
     tok_length = (size_t) (TOK_SIZE ());
 
-    const lit_utf8_byte_t *fp_buf_p = TOK_START ();
+    const size_t length_of_zero_and_x_str = 2u;
+    const lit_utf8_byte_t *fp_buf_p = TOK_START () + length_of_zero_and_x_str;
+
     /* token is constructed at end of function */
-    for (i = 0; i < tok_length; i++)
+    for (i = 0; i < tok_length - length_of_zero_and_x_str; i++)
     {
       fp_res = fp_res * 16 + (ecma_number_t) lit_char_hex_to_int (fp_buf_p[i]);
     }
