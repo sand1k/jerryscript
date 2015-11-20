@@ -531,7 +531,7 @@ lexer_create_token_for_charset_transform_escape_sequences (token_type tt, /**< t
 /**
  * Try to decode specified string as ReservedWord (ECMA-262 v5, 7.6.1)
  *
- * @return TOK_KEYWORD - for Keyword or FutureReservedWord,
+ * @return TOK_KW_* - for Keyword or FutureReservedWord,
  *         TOK_NULL - for NullLiteral,
  *         TOK_BOOL - for BooleanLiteral,
  *         TOK_EMPTY - for other tokens.
@@ -543,58 +543,58 @@ lexer_parse_reserved_word (const lit_utf8_byte_t *str_p, /**< characters buffer 
   typedef struct
   {
     const char *keyword_p;
-    keyword keyword_id;
+    token_type keyword_id;
   } kw_descr_t;
 
   const kw_descr_t keywords[] =
   {
 #define KW_DESCR(literal, keyword_id) { literal, keyword_id }
-    KW_DESCR ("break", KW_BREAK),
-    KW_DESCR ("case", KW_CASE),
-    KW_DESCR ("catch", KW_CATCH),
-    KW_DESCR ("class", KW_CLASS),
-    KW_DESCR ("const", KW_CONST),
-    KW_DESCR ("continue", KW_CONTINUE),
-    KW_DESCR ("debugger", KW_DEBUGGER),
-    KW_DESCR ("default", KW_DEFAULT),
-    KW_DESCR ("delete", KW_DELETE),
-    KW_DESCR ("do", KW_DO),
-    KW_DESCR ("else", KW_ELSE),
-    KW_DESCR ("enum", KW_ENUM),
-    KW_DESCR ("export", KW_EXPORT),
-    KW_DESCR ("extends", KW_EXTENDS),
-    KW_DESCR ("finally", KW_FINALLY),
-    KW_DESCR ("for", KW_FOR),
-    KW_DESCR ("function", KW_FUNCTION),
-    KW_DESCR ("if", KW_IF),
-    KW_DESCR ("in", KW_IN),
-    KW_DESCR ("instanceof", KW_INSTANCEOF),
-    KW_DESCR ("interface", KW_INTERFACE),
-    KW_DESCR ("import", KW_IMPORT),
-    KW_DESCR ("implements", KW_IMPLEMENTS),
-    KW_DESCR ("let", KW_LET),
-    KW_DESCR ("new", KW_NEW),
-    KW_DESCR ("package", KW_PACKAGE),
-    KW_DESCR ("private", KW_PRIVATE),
-    KW_DESCR ("protected", KW_PROTECTED),
-    KW_DESCR ("public", KW_PUBLIC),
-    KW_DESCR ("return", KW_RETURN),
-    KW_DESCR ("static", KW_STATIC),
-    KW_DESCR ("super", KW_SUPER),
-    KW_DESCR ("switch", KW_SWITCH),
-    KW_DESCR ("this", KW_THIS),
-    KW_DESCR ("throw", KW_THROW),
-    KW_DESCR ("try", KW_TRY),
-    KW_DESCR ("typeof", KW_TYPEOF),
-    KW_DESCR ("var", KW_VAR),
-    KW_DESCR ("void", KW_VOID),
-    KW_DESCR ("while", KW_WHILE),
-    KW_DESCR ("with", KW_WITH),
-    KW_DESCR ("yield", KW_YIELD)
+    KW_DESCR ("break", TOK_KW_BREAK),
+    KW_DESCR ("case", TOK_KW_CASE),
+    KW_DESCR ("catch", TOK_KW_CATCH),
+    KW_DESCR ("class", TOK_KW_CLASS),
+    KW_DESCR ("const", TOK_KW_CONST),
+    KW_DESCR ("continue", TOK_KW_CONTINUE),
+    KW_DESCR ("debugger", TOK_KW_DEBUGGER),
+    KW_DESCR ("default", TOK_KW_DEFAULT),
+    KW_DESCR ("delete", TOK_KW_DELETE),
+    KW_DESCR ("do", TOK_KW_DO),
+    KW_DESCR ("else", TOK_KW_ELSE),
+    KW_DESCR ("enum", TOK_KW_ENUM),
+    KW_DESCR ("export", TOK_KW_EXPORT),
+    KW_DESCR ("extends", TOK_KW_EXTENDS),
+    KW_DESCR ("finally", TOK_KW_FINALLY),
+    KW_DESCR ("for", TOK_KW_FOR),
+    KW_DESCR ("function", TOK_KW_FUNCTION),
+    KW_DESCR ("if", TOK_KW_IF),
+    KW_DESCR ("in", TOK_KW_IN),
+    KW_DESCR ("instanceof", TOK_KW_INSTANCEOF),
+    KW_DESCR ("interface", TOK_KW_INTERFACE),
+    KW_DESCR ("import", TOK_KW_IMPORT),
+    KW_DESCR ("implements", TOK_KW_IMPLEMENTS),
+    KW_DESCR ("let", TOK_KW_LET),
+    KW_DESCR ("new", TOK_KW_NEW),
+    KW_DESCR ("package", TOK_KW_PACKAGE),
+    KW_DESCR ("private", TOK_KW_PRIVATE),
+    KW_DESCR ("protected", TOK_KW_PROTECTED),
+    KW_DESCR ("public", TOK_KW_PUBLIC),
+    KW_DESCR ("return", TOK_KW_RETURN),
+    KW_DESCR ("static", TOK_KW_STATIC),
+    KW_DESCR ("super", TOK_KW_SUPER),
+    KW_DESCR ("switch", TOK_KW_SWITCH),
+    KW_DESCR ("this", TOK_KW_THIS),
+    KW_DESCR ("throw", TOK_KW_THROW),
+    KW_DESCR ("try", TOK_KW_TRY),
+    KW_DESCR ("typeof", TOK_KW_TYPEOF),
+    KW_DESCR ("var", TOK_KW_VAR),
+    KW_DESCR ("void", TOK_KW_VOID),
+    KW_DESCR ("while", TOK_KW_WHILE),
+    KW_DESCR ("with", TOK_KW_WITH),
+    KW_DESCR ("yield", TOK_KW_YIELD)
 #undef KW_DESCR
   };
 
-  keyword kw = KW_NONE;
+  token_type kw = TOK_EMPTY;
 
   for (uint32_t i = 0; i < sizeof (keywords) / sizeof (kw_descr_t); i++)
   {
@@ -612,15 +612,15 @@ lexer_parse_reserved_word (const lit_utf8_byte_t *str_p, /**< characters buffer 
   {
     switch (kw)
     {
-      case KW_INTERFACE:
-      case KW_IMPLEMENTS:
-      case KW_LET:
-      case KW_PACKAGE:
-      case KW_PRIVATE:
-      case KW_PROTECTED:
-      case KW_PUBLIC:
-      case KW_STATIC:
-      case KW_YIELD:
+      case TOK_KW_INTERFACE:
+      case TOK_KW_IMPLEMENTS:
+      case TOK_KW_LET:
+      case TOK_KW_PACKAGE:
+      case TOK_KW_PRIVATE:
+      case TOK_KW_PROTECTED:
+      case TOK_KW_PUBLIC:
+      case TOK_KW_STATIC:
+      case TOK_KW_YIELD:
       {
         return empty_token;
       }
@@ -632,9 +632,9 @@ lexer_parse_reserved_word (const lit_utf8_byte_t *str_p, /**< characters buffer 
     }
   }
 
-  if (kw != KW_NONE)
+  if (kw != TOK_EMPTY)
   {
-    return create_token (TOK_KEYWORD, kw);
+    return create_token (kw, 0);
   }
   else
   {
@@ -736,7 +736,7 @@ consume_char (void)
  * Parse Identifier (ECMA-262 v5, 7.6) or ReservedWord (7.6.1; 7.8.1; 7.8.2).
  *
  * @return TOK_NAME - for Identifier,
- *         TOK_KEYWORD - for Keyword or FutureReservedWord,
+ *         TOK_KW_* - for Keyword or FutureReservedWord,
  *         TOK_NULL - for NullLiteral,
  *         TOK_BOOL - for BooleanLiteral
  */
@@ -823,7 +823,7 @@ lexer_parse_identifier_or_keyword (void)
   if (!is_escape_sequence_occured
       && is_all_chars_were_lowercase_ascii)
   {
-    /* Keyword or FutureReservedWord (TOK_KEYWORD), or boolean literal (TOK_BOOL), or null literal (TOK_NULL) */
+    /* Keyword or FutureReservedWord (TOK_KW_*), or boolean literal (TOK_BOOL), or null literal (TOK_NULL) */
     ret = lexer_parse_reserved_word (TOK_START (), charset_size);
   }
 
@@ -1688,72 +1688,12 @@ lexer_dump_line (size_t line) /**< line number */
 } /* lexer_dump_line */
 
 const char *
-lexer_keyword_to_string (keyword kw)
-{
-  switch (kw)
-  {
-    case KW_BREAK: return "break";
-    case KW_CASE: return "case";
-    case KW_CATCH: return "catch";
-    case KW_CLASS: return "class";
-
-    case KW_CONST: return "const";
-    case KW_CONTINUE: return "continue";
-    case KW_DEBUGGER: return "debugger";
-    case KW_DEFAULT: return "default";
-    case KW_DELETE: return "delete";
-
-    case KW_DO: return "do";
-    case KW_ELSE: return "else";
-    case KW_ENUM: return "enum";
-    case KW_EXPORT: return "export";
-    case KW_EXTENDS: return "extends";
-
-    case KW_FINALLY: return "finally";
-    case KW_FOR: return "for";
-    case KW_FUNCTION: return "function";
-    case KW_IF: return "if";
-    case KW_IN: return "in";
-
-    case KW_INSTANCEOF: return "instanceof";
-    case KW_INTERFACE: return "interface";
-    case KW_IMPORT: return "import";
-    case KW_IMPLEMENTS: return "implements";
-    case KW_LET: return "let";
-
-    case KW_NEW: return "new";
-    case KW_PACKAGE: return "package";
-    case KW_PRIVATE: return "private";
-    case KW_PROTECTED: return "protected";
-    case KW_PUBLIC: return "public";
-
-    case KW_RETURN: return "return";
-    case KW_STATIC: return "static";
-    case KW_SUPER: return "super";
-    case KW_SWITCH: return "switch";
-    case KW_THIS: return "this";
-
-    case KW_THROW: return "throw";
-    case KW_TRY: return "try";
-    case KW_TYPEOF: return "typeof";
-    case KW_VAR: return "var";
-    case KW_VOID: return "void";
-
-    case KW_WHILE: return "while";
-    case KW_WITH: return "with";
-    case KW_YIELD: return "yield";
-    default: JERRY_UNREACHABLE ();
-  }
-}
-
-const char *
 lexer_token_type_to_string (token_type tt)
 {
   switch (tt)
   {
     case TOK_EOF: return "End of file";
     case TOK_NAME: return "Identifier";
-    case TOK_KEYWORD: return "Keyword";
     case TOK_SMALL_INT: /* FALLTHRU */
     case TOK_NUMBER: return "Number";
     case TOK_REGEXP: return "RegExp";
@@ -1819,6 +1759,56 @@ lexer_token_type_to_string (token_type tt)
 
     case TOK_DIV: return "/";
     case TOK_DIV_EQ: return "/=";
+    case TOK_KW_BREAK: return "break";
+    case TOK_KW_CASE: return "case";
+    case TOK_KW_CATCH: return "catch";
+    case TOK_KW_CLASS: return "class";
+
+    case TOK_KW_CONST: return "const";
+    case TOK_KW_CONTINUE: return "continue";
+    case TOK_KW_DEBUGGER: return "debugger";
+    case TOK_KW_DEFAULT: return "default";
+    case TOK_KW_DELETE: return "delete";
+
+    case TOK_KW_DO: return "do";
+    case TOK_KW_ELSE: return "else";
+    case TOK_KW_ENUM: return "enum";
+    case TOK_KW_EXPORT: return "export";
+    case TOK_KW_EXTENDS: return "extends";
+
+    case TOK_KW_FINALLY: return "finally";
+    case TOK_KW_FOR: return "for";
+    case TOK_KW_FUNCTION: return "function";
+    case TOK_KW_IF: return "if";
+    case TOK_KW_IN: return "in";
+
+    case TOK_KW_INSTANCEOF: return "instanceof";
+    case TOK_KW_INTERFACE: return "interface";
+    case TOK_KW_IMPORT: return "import";
+    case TOK_KW_IMPLEMENTS: return "implements";
+    case TOK_KW_LET: return "let";
+
+    case TOK_KW_NEW: return "new";
+    case TOK_KW_PACKAGE: return "package";
+    case TOK_KW_PRIVATE: return "private";
+    case TOK_KW_PROTECTED: return "protected";
+    case TOK_KW_PUBLIC: return "public";
+
+    case TOK_KW_RETURN: return "return";
+    case TOK_KW_STATIC: return "static";
+    case TOK_KW_SUPER: return "super";
+    case TOK_KW_SWITCH: return "switch";
+    case TOK_KW_THIS: return "this";
+
+    case TOK_KW_THROW: return "throw";
+    case TOK_KW_TRY: return "try";
+    case TOK_KW_TYPEOF: return "typeof";
+    case TOK_KW_VAR: return "var";
+    case TOK_KW_VOID: return "void";
+
+    case TOK_KW_WHILE: return "while";
+    case TOK_KW_WITH: return "with";
+    case TOK_KW_YIELD: return "yield";
     default: JERRY_UNREACHABLE ();
   }
 }
