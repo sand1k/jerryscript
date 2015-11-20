@@ -896,12 +896,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
   while (true)
   {
-    jsp_state_t state, subexpr_state;
-
-    state = jsp_state_top ();
-    jsp_state_pop ();
-
     bool is_subexpr_end = false;
+    jsp_operand_t subexpr_operand;
+#ifndef JERRY_NDEBUG
+    jsp_state_expr_t subexpr_type;
+#endif /* !JERRY_NDEBUG */
+
+    jsp_state_t state = jsp_state_top ();
+    jsp_state_pop ();
 
     if (state.state == state.req_expr_type
         && ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0))
@@ -919,12 +921,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         is_subexpr_end = true;
 
-        subexpr_state = state;
+        subexpr_operand = state.operand;
+#ifndef JERRY_NDEBUG
+        subexpr_type = state.state;
+#endif /* !JERRY_NDEBUG */
+        JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
         state = jsp_state_top ();
         jsp_state_pop ();
-
-        JERRY_ASSERT ((subexpr_state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
       }
     }
     else
@@ -1203,10 +1207,10 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       if (is_subexpr_end)
       {
-        JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+        JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
 
         jsp_operand_t prop_name = state.operand;
-        jsp_operand_t value = subexpr_state.operand;
+        jsp_operand_t value = subexpr_operand;
 
         JERRY_ASSERT (prop_name.is_literal_operand ());
 
@@ -1320,8 +1324,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         if (is_subexpr_end)
         {
-          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_DATA_PROP_DECL
-                        || subexpr_state.state == JSP_STATE_EXPR_ACCESSOR_PROP_DECL);
+          JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_DATA_PROP_DECL
+                        || subexpr_type == JSP_STATE_EXPR_ACCESSOR_PROP_DECL);
 
           state.u.arg_list_length++;
 
@@ -1392,9 +1396,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         if (is_subexpr_end)
         {
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          dump_varg (subexpr_state.operand);
+          dump_varg (subexpr_operand);
 
           state.u.arg_list_length++;
 
@@ -1479,10 +1483,10 @@ parse_expression_ (jsp_state_expr_t req_expr,
           if ((state.flags & JSP_STATE_EXPR_FLAG_ARG_LIST) != 0)
           {
             JERRY_ASSERT (state.op == JSP_OPERATOR_NEW);
-            JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+            JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
 
-            subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-            dump_varg (subexpr_state.operand);
+            subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+            dump_varg (subexpr_operand);
 
             dumper_finish_varg_code_sequence ();
 
@@ -1512,7 +1516,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           {
             JERRY_ASSERT (state.operand.is_empty_operand ());
 
-            state.operand = subexpr_state.operand;
+            state.operand = subexpr_operand;
             state.op = JSP_OPERATOR_NO_OP;
 
             current_token_must_be (TOK_CLOSE_PAREN);
@@ -1522,11 +1526,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
           else if (state.op == JSP_OPERATOR_NEW)
           {
-            JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_MEMBER);
+            JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_MEMBER);
             JERRY_ASSERT (state.operand.is_empty_operand ());
-            JERRY_ASSERT (!subexpr_state.operand.is_empty_operand ());
+            JERRY_ASSERT (!subexpr_operand.is_empty_operand ());
 
-            state.operand = subexpr_state.operand;
+            state.operand = subexpr_operand;
 
             jsp_start_construct_dump (state.operand);
 
@@ -1581,16 +1585,16 @@ parse_expression_ (jsp_state_expr_t req_expr,
             current_token_must_be (TOK_CLOSE_SQUARE);
             skip_token ();
 
-            subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
+            subexpr_operand = dump_assignment_of_lhs_if_reference (subexpr_operand);
 
             if (state.operand.is_identifier_operand ())
             {
               state.operand = jsp_operand_t::make_value_based_ref_operand_lv (state.operand.get_identifier_name (),
-                                                                              subexpr_state.operand);
+                                                                              subexpr_operand);
             }
             else
             {
-              state.operand = jsp_operand_t::make_value_based_ref_operand_vv (state.operand, subexpr_state.operand);
+              state.operand = jsp_operand_t::make_value_based_ref_operand_vv (state.operand, subexpr_operand);
             }
 
             jsp_state_push (state);
@@ -1650,10 +1654,10 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           if ((state.flags & JSP_STATE_EXPR_FLAG_ARG_LIST) != 0)
           {
-            JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+            JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
 
-            subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-            dump_varg (subexpr_state.operand);
+            subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+            dump_varg (subexpr_operand);
 
             dumper_finish_varg_code_sequence ();
 
@@ -1687,9 +1691,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
             current_token_must_be (TOK_CLOSE_SQUARE);
             skip_token ();
 
-            subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
+            subexpr_operand = dump_assignment_of_lhs_if_reference (subexpr_operand);
             state.operand = jsp_operand_t::make_value_based_ref_operand_vv (state.operand,
-                                                                            subexpr_state.operand);
+                                                                            subexpr_operand);
 
             jsp_state_push (state);
           }
@@ -1775,57 +1779,57 @@ parse_expression_ (jsp_state_expr_t req_expr,
                       || op == JSP_OPERATOR_ASSIGN_B_XOR
                       || op == JSP_OPERATOR_ASSIGN_B_OR);
 
-        subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+        subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
         if (op == JSP_OPERATOR_ASSIGN)
         {
-          state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_variable_assignment_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_MUL)
         {
-          state.operand = dump_prop_setter_or_multiplication_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_multiplication_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_DIV)
         {
-          state.operand = dump_prop_setter_or_division_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_division_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_MOD)
         {
-          state.operand = dump_prop_setter_or_remainder_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_remainder_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_ADD)
         {
-          state.operand = dump_prop_setter_or_addition_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_addition_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_SUB)
         {
-          state.operand = dump_prop_setter_or_substraction_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_substraction_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_LSHIFT)
         {
-          state.operand = dump_prop_setter_or_left_shift_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_left_shift_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_RSHIFT)
         {
-          state.operand = dump_prop_setter_or_right_shift_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_right_shift_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_RSHIFT_U)
         {
-          state.operand = dump_prop_setter_or_right_shift_ex_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_right_shift_ex_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_B_AND)
         {
-          state.operand = dump_prop_setter_or_bitwise_and_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_bitwise_and_res (state.operand, subexpr_operand);
         }
         else if (op == JSP_OPERATOR_ASSIGN_B_XOR)
         {
-          state.operand = dump_prop_setter_or_bitwise_xor_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_bitwise_xor_res (state.operand, subexpr_operand);
         }
         else
         {
           JERRY_ASSERT (op == JSP_OPERATOR_ASSIGN_B_OR);
 
-          state.operand = dump_prop_setter_or_bitwise_or_res (state.operand, subexpr_state.operand);
+          state.operand = dump_prop_setter_or_bitwise_or_res (state.operand, subexpr_operand);
         }
 
         jsp_state_push (state);
@@ -1969,56 +1973,56 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         if (state.op == JSP_OPERATOR_PREINCR)
         {
-          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_state.operand, is_strict_mode (), tok.loc);
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
 
-          state.operand = dump_pre_increment_res (subexpr_state.operand);
+          state.operand = dump_pre_increment_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_PREDECR)
         {
-          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_state.operand, is_strict_mode (), tok.loc);
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
 
-          state.operand = dump_pre_decrement_res (subexpr_state.operand);
+          state.operand = dump_pre_decrement_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_PLUS)
         {
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-          state.operand = dump_unary_plus_res (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+          state.operand = dump_unary_plus_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_MINUS)
         {
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-          state.operand = dump_unary_minus_res (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+          state.operand = dump_unary_minus_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_INVERT)
         {
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-          state.operand = dump_bitwise_not_res (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+          state.operand = dump_bitwise_not_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_NOT)
         {
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-          state.operand = dump_logical_not_res (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+          state.operand = dump_logical_not_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_DELETE)
         {
-          if (subexpr_state.operand.is_identifier_operand ())
+          if (subexpr_operand.is_identifier_operand ())
           {
             jsp_early_error_check_delete (is_strict_mode (), tok.loc);
           }
 
-          state.operand = dump_delete_res (subexpr_state.operand);
+          state.operand = dump_delete_res (subexpr_operand);
         }
         else if (state.op == JSP_OPERATOR_VOID)
         {
-          dump_evaluate_if_reference (subexpr_state.operand);
+          dump_evaluate_if_reference (subexpr_operand);
           state.operand = dump_undefined_assignment_res ();
         }
         else
         {
           JERRY_ASSERT (state.op == JSP_OPERATOR_TYPEOF);
 
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
-          state.operand = dump_typeof_res (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
+          state.operand = dump_typeof_res (subexpr_operand);
         }
 
         state.op = JSP_OPERATOR_NO_OP;
@@ -2042,21 +2046,21 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           if (state.op == JSP_OPERATOR_MUL)
           {
-            dump_multiplication (state.operand, state.operand, subexpr_state.operand);
+            dump_multiplication (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_DIV)
           {
-            dump_division (state.operand, state.operand, subexpr_state.operand);
+            dump_division (state.operand, state.operand, subexpr_operand);
           }
           else
           {
             JERRY_ASSERT (state.op == JSP_OPERATOR_MOD);
 
-            dump_remainder (state.operand, state.operand, subexpr_state.operand);
+            dump_remainder (state.operand, state.operand, subexpr_operand);
           }
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2116,17 +2120,17 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           if (state.op == JSP_OPERATOR_ADD)
           {
-            dump_addition (state.operand, state.operand, subexpr_state.operand);
+            dump_addition (state.operand, state.operand, subexpr_operand);
           }
           else
           {
             JERRY_ASSERT (state.op == JSP_OPERATOR_SUB);
 
-            dump_substraction (state.operand, state.operand, subexpr_state.operand);
+            dump_substraction (state.operand, state.operand, subexpr_operand);
           }
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2176,21 +2180,21 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           if (state.op == JSP_OPERATOR_LSHIFT)
           {
-            dump_left_shift (state.operand, state.operand, subexpr_state.operand);
+            dump_left_shift (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_RSHIFT)
           {
-            dump_right_shift (state.operand, state.operand, subexpr_state.operand);
+            dump_right_shift (state.operand, state.operand, subexpr_operand);
           }
           else
           {
             JERRY_ASSERT (state.op == JSP_OPERATOR_RSHIFT_U);
 
-            dump_right_shift_ex (state.operand, state.operand, subexpr_state.operand);
+            dump_right_shift_ex (state.operand, state.operand, subexpr_operand);
           }
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2250,34 +2254,34 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           if (state.op == JSP_OPERATOR_LESS)
           {
-            dump_less_than (state.operand, state.operand, subexpr_state.operand);
+            dump_less_than (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_GREATER)
           {
-            dump_greater_than (state.operand, state.operand, subexpr_state.operand);
+            dump_greater_than (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_LESS_OR_EQUAL)
           {
-            dump_less_or_equal_than (state.operand, state.operand, subexpr_state.operand);
+            dump_less_or_equal_than (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_GREATER_OR_EQUAL)
           {
-            dump_greater_or_equal_than (state.operand, state.operand, subexpr_state.operand);
+            dump_greater_or_equal_than (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_INSTANCEOF)
           {
-            dump_instanceof (state.operand, state.operand, subexpr_state.operand);
+            dump_instanceof (state.operand, state.operand, subexpr_operand);
           }
           else
           {
             JERRY_ASSERT (state.op == JSP_OPERATOR_IN);
             JERRY_ASSERT (in_allowed);
 
-            dump_in (state.operand, state.operand, subexpr_state.operand);
+            dump_in (state.operand, state.operand, subexpr_operand);
           }
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2367,25 +2371,25 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           if (state.op == JSP_OPERATOR_EQUAL)
           {
-            dump_equal_value (state.operand, state.operand, subexpr_state.operand);
+            dump_equal_value (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_NOT_EQUAL)
           {
-            dump_not_equal_value (state.operand, state.operand, subexpr_state.operand);
+            dump_not_equal_value (state.operand, state.operand, subexpr_operand);
           }
           else if (state.op == JSP_OPERATOR_STRICT_EQUAL)
           {
-            dump_equal_value_type (state.operand, state.operand, subexpr_state.operand);
+            dump_equal_value_type (state.operand, state.operand, subexpr_operand);
           }
           else
           {
             JERRY_ASSERT (state.op == JSP_OPERATOR_STRICT_NOT_EQUAL);
 
-            dump_not_equal_value_type (state.operand, state.operand, subexpr_state.operand);
+            dump_not_equal_value_type (state.operand, state.operand, subexpr_operand);
           }
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2458,12 +2462,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           JERRY_ASSERT (state.op == JSP_OPERATOR_B_AND);
 
           state.op = JSP_OPERATOR_NO_OP;
-          dump_bitwise_and (state.operand, state.operand, subexpr_state.operand);
+          dump_bitwise_and (state.operand, state.operand, subexpr_operand);
 
           jsp_state_push (state);
         }
@@ -2500,12 +2504,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           JERRY_ASSERT (state.op == JSP_OPERATOR_B_XOR);
 
           state.op = JSP_OPERATOR_NO_OP;
-          dump_bitwise_xor (state.operand, state.operand, subexpr_state.operand);
+          dump_bitwise_xor (state.operand, state.operand, subexpr_operand);
 
           jsp_state_push (state);
         }
@@ -2542,12 +2546,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           JERRY_ASSERT (state.op == JSP_OPERATOR_B_OR);
 
           state.op = JSP_OPERATOR_NO_OP;
-          dump_bitwise_or (state.operand, state.operand, subexpr_state.operand);
+          dump_bitwise_or (state.operand, state.operand, subexpr_operand);
 
           jsp_state_push (state);
         }
@@ -2584,15 +2588,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
         if (is_subexpr_end)
         {
           state.operand = dump_assignment_of_lhs_if_value_based_reference (state.operand);
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_AND);
 
           JERRY_ASSERT (state.operand.is_register_operand ());
 
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          dump_variable_assignment (state.operand, subexpr_state.operand);
+          dump_variable_assignment (state.operand, subexpr_operand);
 
           state.op = JSP_OPERATOR_NO_OP;
 
@@ -2694,12 +2698,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
       {
         if (is_subexpr_end)
         {
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           JERRY_ASSERT (state.op == JSP_OPERATOR_LOGICAL_OR);
 
           JERRY_ASSERT (state.operand.is_register_operand ());
-          dump_variable_assignment (state.operand, subexpr_state.operand);
+          dump_variable_assignment (state.operand, subexpr_operand);
 
           state.op = JSP_OPERATOR_NO_OP;
 
@@ -2791,11 +2795,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
           JERRY_ASSERT (state.operand.is_register_operand ());
-          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+          JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
 
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          dump_variable_assignment (state.operand, subexpr_state.operand);
+          dump_variable_assignment (state.operand, subexpr_operand);
 
           dump_jump_to_end_for_rewrite ();
           rewrite_conditional_check ();
@@ -2812,11 +2816,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND) != 0);
           JERRY_ASSERT (state.operand.is_register_operand ());
-          JERRY_ASSERT (subexpr_state.state == JSP_STATE_EXPR_ASSIGNMENT);
+          JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
 
-          subexpr_state.operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          dump_variable_assignment (state.operand, subexpr_state.operand);
+          dump_variable_assignment (state.operand, subexpr_operand);
           rewrite_jump_to_end ();
 
           state.op = JSP_OPERATOR_NO_OP;
@@ -2853,13 +2857,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
          */
         JERRY_ASSERT (state.operand.is_register_operand ());
 
-        if (!subexpr_state.operand.is_register_operand ())
+        if (!subexpr_operand.is_register_operand ())
         {
           /* evaluating, if reference */
-          subexpr_state.operand = dump_assignment_of_lhs_if_reference (subexpr_state.operand);
+          subexpr_operand = dump_assignment_of_lhs_if_reference (subexpr_operand);
         }
 
-        state.operand = subexpr_state.operand;
+        state.operand = subexpr_operand;
 
         jsp_state_push (state);
       }
