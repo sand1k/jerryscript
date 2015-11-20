@@ -180,36 +180,6 @@ skip_newlines (void)
   while (token_is (TOK_NEWLINE));
 }
 
-static void
-next_token_must_be (token_type tt)
-{
-  skip_token ();
-  if (!token_is (tt))
-  {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected '%s' token", lexer_token_type_to_string (tt));
-  }
-}
-
-static void
-token_after_newlines_must_be (token_type tt)
-{
-  skip_newlines ();
-  if (!token_is (tt))
-  {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected '%s' token", lexer_token_type_to_string (tt));
-  }
-}
-
-static void
-token_after_newlines_must_be_keyword (keyword kw)
-{
-  skip_newlines ();
-  if (!is_keyword (kw))
-  {
-    EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected keyword '%s'", lexer_keyword_to_string (kw));
-  }
-}
-
 static bool
 is_strict_mode (void)
 {
@@ -558,7 +528,8 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   dump_function_end_for_rewrite ();
 
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
+  skip_newlines ();
+  current_token_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
 
   jsp_parse_directive_prologue ();
@@ -582,7 +553,8 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 
   scopes_tree parent_scope = (scopes_tree) func_scope->t.parent;
 
-  token_after_newlines_must_be (TOK_CLOSE_BRACE);
+  skip_newlines ();
+  current_token_must_be (TOK_CLOSE_BRACE);
 
   dump_ret ();
   rewrite_function_end ();
@@ -609,7 +581,9 @@ static void
 parse_function_declaration (void)
 {
   assert_keyword (KW_FUNCTION);
-  token_after_newlines_must_be (TOK_NAME);
+  skip_newlines ();
+
+  current_token_must_be (TOK_NAME);
 
   const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
   skip_newlines ();
@@ -3353,7 +3327,9 @@ jsp_parse_for_or_for_in_statement (jsp_label_t *outermost_stmt_label_p) /**< out
                                                                          *   labels associated with the statement) */
 {
   assert_keyword (KW_FOR);
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
+
+  skip_newlines ();
+  current_token_must_be (TOK_OPEN_PAREN);
 
   locus for_open_paren_loc, for_body_statement_loc;
 
@@ -3386,10 +3362,15 @@ jsp_parse_for_or_for_in_statement (jsp_label_t *outermost_stmt_label_p) /**< out
 static jsp_operand_t
 parse_expression_inside_parens (void)
 {
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
   skip_newlines ();
+  current_token_must_be (TOK_OPEN_PAREN);
+  skip_newlines ();
+
   const jsp_operand_t res = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-  token_after_newlines_must_be (TOK_CLOSE_PAREN);
+
+  skip_newlines ();
+  current_token_must_be (TOK_CLOSE_PAREN);
+
   return res;
 }
 
@@ -3698,7 +3679,9 @@ parse_do_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (f
   jsp_label_setup_continue_target (outermost_stmt_label_p,
                                    serializer_get_current_instr_counter ());
 
-  token_after_newlines_must_be_keyword (KW_WHILE);
+  skip_newlines ();
+  assert_keyword (KW_WHILE);
+
   const jsp_operand_t cond = parse_expression_inside_parens ();
   dump_continue_iterations_check (cond);
 }
@@ -3713,7 +3696,9 @@ parse_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (firs
 {
   assert_keyword (KW_WHILE);
 
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
+  skip_newlines ();
+  current_token_must_be (TOK_OPEN_PAREN);
+
   const locus cond_loc = tok.loc;
   jsp_skip_braces (TOK_OPEN_PAREN);
 
@@ -3798,7 +3783,8 @@ parse_switch_statement (void)
   assert_keyword (KW_SWITCH);
 
   const jsp_operand_t switch_expr = parse_expression_inside_parens ();
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
+  skip_newlines ();
+  current_token_must_be (TOK_OPEN_BRACE);
 
   start_dumping_case_clauses ();
   const locus start_loc = tok.loc;
@@ -3815,7 +3801,10 @@ parse_switch_statement (void)
       skip_newlines ();
       jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
       case_expr = dump_assignment_of_lhs_if_value_based_reference (case_expr);
-      next_token_must_be (TOK_COLON);
+
+      skip_token ();
+      current_token_must_be (TOK_COLON);
+
       dump_case_clause_check_for_rewrite (switch_expr, case_expr);
       skip_newlines ();
       body_locs = array_list_append (body_locs, (void*) &tok.loc);
@@ -3828,8 +3817,11 @@ parse_switch_statement (void)
         EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Duplication of 'default' clause");
       }
       was_default = true;
-      token_after_newlines_must_be (TOK_COLON);
+
       skip_newlines ();
+      current_token_must_be (TOK_COLON);
+      skip_newlines ();
+
       default_body_index = array_list_len (body_locs);
       body_locs = array_list_append (body_locs, (void*) &tok.loc);
       skip_case_clause_body ();
@@ -3840,7 +3832,9 @@ parse_switch_statement (void)
   dump_default_clause_check_for_rewrite ();
 
   lexer_seek (start_loc);
-  next_token_must_be (TOK_OPEN_BRACE);
+
+  skip_token ();
+  current_token_must_be (TOK_OPEN_BRACE);
 
   jsp_label_t label;
   jsp_label_push (&label,
@@ -3897,18 +3891,28 @@ parse_catch_clause (void)
 {
   assert_keyword (KW_CATCH);
 
-  token_after_newlines_must_be (TOK_OPEN_PAREN);
-  token_after_newlines_must_be (TOK_NAME);
+  skip_newlines ();
+  current_token_must_be (TOK_OPEN_PAREN);
+
+  skip_newlines ();
+  current_token_must_be (TOK_NAME);
+
   const jsp_operand_t exception = literal_operand (token_data_as_lit_cp ());
   jsp_early_error_check_for_eval_and_arguments_in_strict_mode (exception, is_strict_mode (), tok.loc);
-  token_after_newlines_must_be (TOK_CLOSE_PAREN);
+
+  skip_newlines ();
+  current_token_must_be (TOK_CLOSE_PAREN);
 
   dump_catch_for_rewrite (exception);
 
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
+  current_token_must_be (TOK_OPEN_BRACE);
+  skip_newlines ();
+
   parse_statement_list ();
-  next_token_must_be (TOK_CLOSE_BRACE);
+
+  skip_token ();
+  current_token_must_be (TOK_CLOSE_BRACE);
 
   rewrite_catch ();
 }
@@ -3923,10 +3927,14 @@ parse_finally_clause (void)
 
   dump_finally_for_rewrite ();
 
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
+  current_token_must_be (TOK_OPEN_BRACE);
+  skip_newlines ();
+
   parse_statement_list ();
-  next_token_must_be (TOK_CLOSE_BRACE);
+
+  skip_token ();
+  current_token_must_be (TOK_CLOSE_BRACE);
 
   rewrite_finally ();
 }
@@ -3945,14 +3953,20 @@ parse_try_statement (void)
 
   dump_try_for_rewrite ();
 
-  token_after_newlines_must_be (TOK_OPEN_BRACE);
   skip_newlines ();
+  current_token_must_be (TOK_OPEN_BRACE);
+  skip_newlines ();
+
   parse_statement_list ();
-  next_token_must_be (TOK_CLOSE_BRACE);
+
+  skip_token ();
+  current_token_must_be (TOK_CLOSE_BRACE);
 
   rewrite_try ();
 
-  token_after_newlines_must_be (TOK_KEYWORD);
+  skip_newlines ();
+  current_token_must_be (TOK_KEYWORD);
+
   if (is_keyword (KW_CATCH))
   {
     parse_catch_clause ();
@@ -4104,7 +4118,9 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     if (!token_is (TOK_CLOSE_BRACE))
     {
       parse_statement_list ();
-      next_token_must_be (TOK_CLOSE_BRACE);
+
+      skip_token ();
+      current_token_must_be (TOK_CLOSE_BRACE);
     }
     return;
   }
