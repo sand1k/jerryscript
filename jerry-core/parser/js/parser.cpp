@@ -878,6 +878,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
     if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
+      rescan_regexp_token ();
+
       /* no subexpressions can occur, as expression parse is just started */
       JERRY_ASSERT (!is_subexpr_end);
       JERRY_ASSERT ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
@@ -947,12 +949,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
           else
           {
-            if (lexer_get_token_type (tok) == TOK_DIV || lexer_get_token_type (tok) == TOK_DIV_EQ)
+            if (lexer_get_token_type (tok) == TOK_REGEXP)
             {
-              rescan_regexp_token ();
-
-              current_token_must_be (TOK_REGEXP);
-
               state_p->operand = dump_regexp_assignment_res (token_data_as_lit_cp ());
             }
             else
