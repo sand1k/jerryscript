@@ -771,14 +771,6 @@ dump_boolean_assignment (jsp_operand_t op, bool is_true)
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
 
-jsp_operand_t
-dump_boolean_assignment_res (bool is_true)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_boolean_assignment (op, is_true);
-  return op;
-}
-
 void
 dump_string_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
 {
@@ -788,14 +780,6 @@ dump_string_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
   value_operand = jsp_operand_t::make_lit_operand (lit_id);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-jsp_operand_t
-dump_string_assignment_res (lit_cpointer_t lit_id)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_string_assignment (op, lit_id);
-  return op;
 }
 
 void
@@ -809,14 +793,6 @@ dump_number_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
 
-jsp_operand_t
-dump_number_assignment_res (lit_cpointer_t lit_id)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_number_assignment (op, lit_id);
-  return op;
-}
-
 void
 dump_regexp_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
 {
@@ -828,14 +804,6 @@ dump_regexp_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
 
-jsp_operand_t
-dump_regexp_assignment_res (lit_cpointer_t lit_id)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_regexp_assignment (op, lit_id);
-  return op;
-}
-
 void
 dump_smallint_assignment (jsp_operand_t op, vm_idx_t uid)
 {
@@ -845,14 +813,6 @@ dump_smallint_assignment (jsp_operand_t op, vm_idx_t uid)
   value_operand = jsp_operand_t::make_idx_const_operand (uid);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-jsp_operand_t
-dump_smallint_assignment_res (vm_idx_t uid)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_smallint_assignment (op, uid);
-  return op;
 }
 
 void
@@ -883,14 +843,6 @@ dump_null_assignment (jsp_operand_t op)
   value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_NULL);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-jsp_operand_t
-dump_null_assignment_res (void)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_null_assignment (op);
-  return op;
 }
 
 void
@@ -1141,7 +1093,11 @@ dump_prop_getter (jsp_operand_t res, jsp_operand_t obj)
      *      literal-represented property name directly,
      *      without moving it to a register first
      */
-    prop_name = dump_string_assignment_res (prop_name.get_literal ());
+
+    jsp_operand_t tmp = tmp_operand ();
+    dump_string_assignment (tmp, prop_name.get_literal ());
+
+    prop_name = tmp;
   }
 
   dump_triple_address (VM_OP_PROP_GETTER, res, base, prop_name);
@@ -1181,7 +1137,11 @@ dump_prop_setter (jsp_operand_t res, jsp_operand_t obj)
      *      literal-represented property name directly,
      *      without moving it to a register first
      */
-    prop_name = dump_string_assignment_res (prop_name.get_literal ());
+
+    jsp_operand_t tmp = tmp_operand ();
+    dump_string_assignment (tmp, prop_name.get_literal ());
+
+    prop_name = tmp;
   }
 
   dump_triple_address (VM_OP_PROP_SETTER, base, prop_name, obj);
@@ -1431,7 +1391,11 @@ dump_delete (jsp_operand_t res, jsp_operand_t op)
        * TODO:
        *      Introduce delete_prop instruction that accepts property name as a literal-represented string
        */
-      prop_name = dump_string_assignment_res (prop_name.get_literal ());
+
+      jsp_operand_t tmp = tmp_operand ();
+      dump_string_assignment (tmp, prop_name.get_literal ());
+
+      prop_name = tmp;
     }
 
     dump_triple_address (VM_OP_DELETE_PROP, res, op.get_value_based_ref_base (), prop_name);

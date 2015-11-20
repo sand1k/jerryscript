@@ -631,19 +631,13 @@ extern bool dumper_is_eval_literal (jsp_operand_t);
 
 jsp_operand_t dump_array_hole_assignment_res (void);
 void dump_boolean_assignment (jsp_operand_t, bool);
-jsp_operand_t dump_boolean_assignment_res (bool);
 void dump_string_assignment (jsp_operand_t, lit_cpointer_t);
-jsp_operand_t dump_string_assignment_res (lit_cpointer_t);
 void dump_number_assignment (jsp_operand_t, lit_cpointer_t);
-jsp_operand_t dump_number_assignment_res (lit_cpointer_t);
 void dump_regexp_assignment (jsp_operand_t, lit_cpointer_t);
-jsp_operand_t dump_regexp_assignment_res (lit_cpointer_t);
 void dump_smallint_assignment (jsp_operand_t, vm_idx_t);
-jsp_operand_t dump_smallint_assignment_res (vm_idx_t);
 void dump_undefined_assignment (jsp_operand_t);
 jsp_operand_t dump_undefined_assignment_res (void);
 void dump_null_assignment (jsp_operand_t);
-jsp_operand_t dump_null_assignment_res (void);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_variable_assignment_res (jsp_operand_t);
 
