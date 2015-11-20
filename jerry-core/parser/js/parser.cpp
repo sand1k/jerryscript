@@ -102,7 +102,7 @@ static void parse_statement (jsp_label_t *outermost_stmt_label_p);
 static void parse_source_element_list (void);
 
 static bool
-token_is (jsp_token_type tt)
+token_is (jsp_token_type_t tt)
 {
   return (lexer_get_token_type (tok) == tt);
 }
@@ -144,13 +144,13 @@ rescan_regexp_token (void)
 } /* rescan_regexp_token */
 
 static bool
-is_keyword (jsp_token_type tt)
+is_keyword (jsp_token_type_t tt)
 {
   return (tt >= TOKEN_TYPE__KEYWORD_BEGIN && tt <= TOKEN_TYPE__KEYWORD_END);
 }
 
 static void
-assert_keyword (jsp_token_type kw)
+assert_keyword (jsp_token_type_t kw)
 {
   if (!token_is (kw))
   {
@@ -160,7 +160,7 @@ assert_keyword (jsp_token_type kw)
 }
 
 static void
-current_token_must_be (jsp_token_type tt)
+current_token_must_be (jsp_token_type_t tt)
 {
   if (!token_is (tt))
   {
@@ -185,11 +185,11 @@ is_strict_mode (void)
  *      token when the routine is called
  */
 static void
-jsp_skip_braces (jsp_token_type brace_type) /**< type of the opening brace */
+jsp_skip_braces (jsp_token_type_t brace_type) /**< type of the opening brace */
 {
   current_token_must_be (brace_type);
 
-  jsp_token_type closing_bracket_type;
+  jsp_token_type_t closing_bracket_type;
 
   if (brace_type == TOK_OPEN_PAREN)
   {
@@ -235,7 +235,7 @@ jsp_skip_braces (jsp_token_type brace_type) /**< type of the opening brace */
  *         false - otherwise (in the case, lexer locus points to end_loc).
  */
 static bool
-jsp_find_next_token_before_the_locus (jsp_token_type token_to_find, /**< token to search for (except TOK_EOF) */
+jsp_find_next_token_before_the_locus (jsp_token_type_t token_to_find, /**< token to search for (except TOK_EOF) */
                                       locus end_loc, /**< location to search before */
                                       bool skip_brace_blocks) /**< skip blocks, surrounded with { and } braces */
 {
@@ -368,7 +368,7 @@ dump_assignment_of_lhs_if_reference (jsp_operand_t lhs)
 static jsp_operand_t
 parse_property_name (void)
 {
-  jsp_token_type tt = lexer_get_token_type (tok);
+  jsp_token_type_t tt = lexer_get_token_type (tok);
 
   if (is_keyword (tt))
   {
@@ -610,7 +610,7 @@ typedef struct
   jsp_state_expr_t state; /**< current state */
   jsp_state_expr_t req_expr_type; /**< requested type of expression */
   int flags; /**< flags */
-  jsp_token_type token_type; /**< token, related to current and, if binary, to previous expression */
+  jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
   struct /* FIXME: switch to union */
   {
     uint32_t arg_list_length; /**< length of arguments list associated with the expression
@@ -882,7 +882,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       JERRY_ASSERT (!is_subexpr_end);
       JERRY_ASSERT ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLETED) == 0);
 
-      jsp_token_type tt = lexer_get_token_type (tok);
+      jsp_token_type_t tt = lexer_get_token_type (tok);
       if ((tt >= TOKEN_TYPE__UNARY_BEGIN
            && tt <= TOKEN_TYPE__UNARY_END)
           || tt == TOK_KW_DELETE
@@ -1539,7 +1539,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       if (is_subexpr_end)
       {
-        jsp_token_type tt = state_p->token_type;
+        jsp_token_type_t tt = state_p->token_type;
 
         state_p->state = JSP_STATE_EXPR_ASSIGNMENT;
         state_p->token_type = TOK_EMPTY;
@@ -1627,7 +1627,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         }
         else
         {
-          jsp_token_type tt = lexer_get_token_type (tok);
+          jsp_token_type_t tt = lexer_get_token_type (tok);
 
           if (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END)
           {
@@ -3763,7 +3763,7 @@ parse_source_element_list (void)
    */
   bool is_try_replace_local_vars_with_regs = is_function;
 
-  const jsp_token_type end_tt = is_function? TOK_CLOSE_BRACE : TOK_EOF;
+  const jsp_token_type_t end_tt = is_function? TOK_CLOSE_BRACE : TOK_EOF;
 
   dumper_new_scope ();
 
