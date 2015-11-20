@@ -65,7 +65,6 @@ typedef enum
   JSP_STATE_EXPR_MEMBER             = 0x04, /**< MemberExpression (11.2) */
   JSP_STATE_EXPR_CALL               = 0x06, /**< CallExpression (11.2) */
   JSP_STATE_EXPR_LEFTHANDSIDE       = 0x07, /**< LeftHandSideExpression (11.2) */
-  JSP_STATE_EXPR_POSTFIX            = 0x08, /**< PostfixExpression (11.3) */
   JSP_STATE_EXPR_UNARY              = 0x09, /**< UnaryExpression (11.4) */
   JSP_STATE_EXPR_MULTIPLICATIVE     = 0x0A, /**< MultiplicativeExpression (11.5) */
   JSP_STATE_EXPR_ADDITIVE           = 0x0B, /**< AdditiveExpression (11.6) */
@@ -1842,7 +1841,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
           state.operand = dump_post_increment_res (state.operand);
 
-          state.state = JSP_STATE_EXPR_POSTFIX;
+          state.state = JSP_STATE_EXPR_UNARY;
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
           jsp_state_push (state);
@@ -1855,7 +1854,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state.operand, is_strict_mode (), tok.loc);
           state.operand = dump_post_decrement_res (state.operand);
 
-          state.state = JSP_STATE_EXPR_POSTFIX;
+          state.state = JSP_STATE_EXPR_UNARY;
           JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
           jsp_state_push (state);
@@ -1946,22 +1945,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
           }
           else
           {
-            state.state = JSP_STATE_EXPR_POSTFIX;
+            state.state = JSP_STATE_EXPR_UNARY;
             JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
 
             jsp_state_push (state);
           }
         }
       }
-    }
-    else if (state.state == JSP_STATE_EXPR_POSTFIX)
-    {
-      JERRY_ASSERT ((state.flags & JSP_STATE_EXPR_FLAG_COMPLETED) != 0);
-
-      /* propagate to UnaryExpression */
-      state.state = JSP_STATE_EXPR_UNARY;
-
-      jsp_state_push (state);
     }
     else if (state.state == JSP_STATE_EXPR_UNARY)
     {
