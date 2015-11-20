@@ -92,7 +92,6 @@ typedef enum __attr_packed___
 
   TOK_NULL,
   TOK_BOOL,
-  TOK_NEWLINE,
   TOK_STRING,
   TOK_OPEN_BRACE, // {
 
@@ -158,6 +157,12 @@ typedef enum __attr_packed___
   TOKEN_TYPE__END = TOK_REGEXP
 } token_type;
 
+typedef enum
+{
+  JSP_TOKEN_FLAG__NO_FLAGS            = 0x00,
+  JSP_TOKEN_FLAG_PRECEDED_BY_NEWLINES = 0x01
+} jsp_token_flag_t;
+
 typedef lit_utf8_iterator_pos_t locus;
 
 /* Represents the contents of a token.  */
@@ -166,12 +171,13 @@ typedef struct
   locus loc;
   uint16_t uid;
   uint8_t type;
+  uint8_t flags;
 } token;
 
 /**
  * Initializer for empty token
  */
-#define TOKEN_EMPTY_INITIALIZER {LIT_ITERATOR_POS_ZERO, 0, TOK_EMPTY}
+#define TOKEN_EMPTY_INITIALIZER {LIT_ITERATOR_POS_ZERO, 0, TOK_EMPTY, JSP_TOKEN_FLAG__NO_FLAGS}
 
 void lexer_init (const jerry_api_char_t *, size_t, bool);
 
@@ -186,6 +192,7 @@ const char *lexer_keyword_to_string (keyword);
 const char *lexer_token_type_to_string (token_type);
 
 token_type lexer_get_token_type (token);
+bool lexer_is_preceded_by_newlines (token);
 
 void lexer_set_strict_mode (bool);
 
