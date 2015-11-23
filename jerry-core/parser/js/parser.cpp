@@ -632,6 +632,11 @@ typedef struct
       jsp_label_t label; /**< label for iteration statements processing */
       jsp_label_t *outermost_stmt_label_p; /**< pointer to outermost label, used by labelled and iteration statements */
     } statement;
+
+    struct
+    {
+      vm_instr_counter_t header_pos;
+    } for_in;
   } u;
 } jsp_state_t;
 
@@ -3073,7 +3078,7 @@ parse_statement_ (void)
 
             // Dump for-in instruction
             collection = dump_assignment_of_lhs_if_value_based_reference (collection);
-            state_p->rewrite_chain = dump_for_in_for_rewrite (collection); /**< for in pos */
+            state_p->u.for_in.header_pos = dump_for_in_for_rewrite (collection); /**< for in pos */
 
             // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
             lexer_seek (iterator_loc);
@@ -3333,7 +3338,7 @@ parse_statement_ (void)
                                        serializer_get_current_instr_counter ());
 
       // Write position of for-in end to for_in instruction
-      rewrite_for_in (state_p->rewrite_chain);
+      rewrite_for_in (state_p->u.for_in.header_pos);
 
       // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
       dump_for_in_end ();
