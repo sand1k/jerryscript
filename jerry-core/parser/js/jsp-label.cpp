@@ -208,11 +208,15 @@ jsp_label_add_jump (jsp_label_t *label_p, /**< label to register jump for */
 
   if (is_break)
   {
-    label_p->breaks_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, label_p->breaks_list_oc);
+    label_p->breaks_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode,
+                                                                      empty_operand (),
+                                                                      label_p->breaks_list_oc);
   }
   else
   {
-    label_p->continues_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, label_p->continues_list_oc);
+    label_p->continues_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode,
+                                                                         empty_operand (),
+                                                                         label_p->continues_list_oc);
   }
 } /* jsp_label_add_jump */
 
