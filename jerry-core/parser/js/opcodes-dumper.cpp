@@ -669,11 +669,13 @@ dumper_finish_scope (void)
  *
  * See also:
  *          dumper_finish_varg_code_sequence
+ *
+ * @return current register allocator's counter (to be restored with dumper_finish_varg_code_sequence)
  */
-void
+vm_idx_t
 dumper_start_varg_code_sequence (void)
 {
-  STACK_PUSH (jsp_reg_id_stack, jsp_reg_next);
+  return jsp_reg_next;
 } /* dumper_start_varg_code_sequence */
 
 /**
@@ -683,10 +685,10 @@ dumper_start_varg_code_sequence (void)
  *          dumper_start_varg_code_sequence
  */
 void
-dumper_finish_varg_code_sequence (void)
+dumper_finish_varg_code_sequence (vm_idx_t reg_alloc_counter) /**< value, returned by corresponding
+                                                               *   dumper_start_varg_code_sequence */
 {
-  jsp_reg_next = STACK_TOP (jsp_reg_id_stack);
-  STACK_DROP (jsp_reg_id_stack, 1);
+  jsp_reg_next = reg_alloc_counter;
 } /* dumper_finish_varg_code_sequence */
 
 /**
