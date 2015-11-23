@@ -80,12 +80,6 @@ STATIC_STACK (function_ends, vm_instr_counter_t)
 
 enum
 {
-  logical_or_checks_global_size
-};
-STATIC_STACK (logical_or_checks, vm_instr_counter_t)
-
-enum
-{
   conditional_checks_global_size
 };
 STATIC_STACK (conditional_checks, vm_instr_counter_t)
@@ -1713,43 +1707,6 @@ dump_bitwise_or_res (jsp_operand_t lhs, jsp_operand_t rhs)
 }
 
 void
-start_dumping_logical_or_checks (void)
-{
-  STACK_PUSH (U8, (uint8_t) STACK_SIZE (logical_or_checks));
-}
-
-void
-dump_logical_or_check_for_rewrite (jsp_operand_t op)
-{
-  STACK_PUSH (logical_or_checks, serializer_get_current_instr_counter ());
-
-  dump_triple_address (VM_OP_IS_TRUE_JMP_DOWN,
-                       op,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-}
-
-void
-rewrite_logical_or_checks (void)
-{
-  for (uint8_t i = STACK_TOP (U8); i < STACK_SIZE (logical_or_checks); i++)
-  {
-    vm_idx_t id1, id2;
-    split_instr_counter (get_diff_from (STACK_ELEMENT (logical_or_checks, i)), &id1, &id2);
-
-    op_meta jmp_op_meta = serializer_get_op_meta (STACK_ELEMENT (logical_or_checks, i));
-    JERRY_ASSERT (jmp_op_meta.op.op_idx == VM_OP_IS_TRUE_JMP_DOWN);
-
-    jmp_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
-    jmp_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
-
-    serializer_rewrite_op_meta (STACK_ELEMENT (logical_or_checks, i), jmp_op_meta);
-  }
-  STACK_DROP (logical_or_checks, STACK_SIZE (logical_or_checks) - STACK_TOP (U8));
-  STACK_DROP (U8, 1);
-}
-
-void
 dump_conditional_check_for_rewrite (jsp_operand_t op)
 {
   STACK_PUSH (conditional_checks, serializer_get_current_instr_counter ());
@@ -2466,7 +2423,6 @@ dumper_init (void)
   STACK_INIT (U8);
   STACK_INIT (varg_headers);
   STACK_INIT (function_ends);
-  STACK_INIT (logical_or_checks);
   STACK_INIT (conditional_checks);
   STACK_INIT (jumps_to_end);
   STACK_INIT (next_iterations);
@@ -2483,7 +2439,6 @@ dumper_free (void)
   STACK_FREE (U8);
   STACK_FREE (varg_headers);
   STACK_FREE (function_ends);
-  STACK_FREE (logical_or_checks);
   STACK_FREE (conditional_checks);
   STACK_FREE (jumps_to_end);
   STACK_FREE (next_iterations);

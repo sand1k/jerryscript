@@ -719,9 +719,6 @@ jsp_operand_t dump_bitwise_xor_res (jsp_operand_t, jsp_operand_t);
 void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_bitwise_or_res (jsp_operand_t, jsp_operand_t);
 
-void start_dumping_logical_or_checks (void);
-void dump_logical_or_check_for_rewrite (jsp_operand_t);
-void rewrite_logical_or_checks (void);
 void dump_conditional_check_for_rewrite (jsp_operand_t);
 void rewrite_conditional_check (void);
 void dump_jump_to_end_for_rewrite (void);
