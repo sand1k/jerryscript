@@ -624,8 +624,8 @@ void dumper_alloc_reg_for_unused_arg (void);
 void dumper_new_statement (void);
 void dumper_new_scope (void);
 void dumper_finish_scope (void);
-void dumper_start_varg_code_sequence (void);
-void dumper_finish_varg_code_sequence (void);
+vm_idx_t dumper_start_varg_code_sequence (void);
+void dumper_finish_varg_code_sequence (vm_idx_t);
 
 extern bool dumper_is_eval_literal (jsp_operand_t);
 
@@ -641,8 +641,8 @@ void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_variable_assignment_res (jsp_operand_t);
 
-void dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
-jsp_operand_t rewrite_varg_header_set_args_count (size_t);
+vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
+jsp_operand_t rewrite_varg_header_set_args_count (size_t, vm_instr_counter_t);
 void dump_call_additional_info (opcode_call_flags_t, jsp_operand_t);
 void dump_varg (jsp_operand_t);
 
@@ -719,12 +719,6 @@ jsp_operand_t dump_bitwise_xor_res (jsp_operand_t, jsp_operand_t);
 void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_bitwise_or_res (jsp_operand_t, jsp_operand_t);
 
-void start_dumping_logical_and_checks (void);
-void dump_logical_and_check_for_rewrite (jsp_operand_t);
-void rewrite_logical_and_checks (void);
-void start_dumping_logical_or_checks (void);
-void dump_logical_or_check_for_rewrite (jsp_operand_t);
-void rewrite_logical_or_checks (void);
 void dump_conditional_check_for_rewrite (jsp_operand_t);
 void rewrite_conditional_check (void);
 void dump_jump_to_end_for_rewrite (void);
@@ -747,7 +741,7 @@ void dumper_set_break_target (void);
 void dumper_set_continue_target (void);
 void dumper_set_next_iteration_target (void);
 vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (bool, vm_instr_counter_t);
+dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
 vm_instr_counter_t
 rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (jsp_operand_t);

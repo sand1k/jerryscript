@@ -67,30 +67,29 @@ jsp_label_push (jsp_label_t *out_label_p, /**< out: place where label structure
                                            *        should be initialized and
                                            *        linked into label set stack */
                 jsp_label_type_flag_t type_mask, /**< label's type mask */
-                token id) /**< identifier of the label (TOK_NAME)
-                           *   if mask includes JSP_LABEL_TYPE_NAMED,
-                           *   or empty token - otherwise */
+                lit_cpointer_t name_cp) /**< identifier of the label (string literal)
+                                         *   if mask equals to JSP_LABEL_TYPE_NAMED,
+                                         *   or NOT_A_LITERAL - otherwise
+                                         *   (if so, mask should not include JSP_LABEL_TYPE_NAMED) */
 {
   JERRY_ASSERT (out_label_p != NULL);
 
   if (type_mask & JSP_LABEL_TYPE_NAMED)
   {
-    JERRY_ASSERT (id.type == TOK_NAME);
-
-    JERRY_ASSERT (jsp_label_find (JSP_LABEL_TYPE_NAMED, id, NULL) == NULL);
+    JERRY_ASSERT (name_cp.packed_value != NOT_A_LITERAL.packed_value);
+    JERRY_ASSERT (jsp_label_find (JSP_LABEL_TYPE_NAMED, name_cp, NULL) == NULL);
   }
   else
   {
-    JERRY_ASSERT (id.type == TOK_EMPTY);
+    JERRY_ASSERT (!(type_mask & JSP_LABEL_TYPE_NAMED));
+    JERRY_ASSERT (name_cp.packed_value == NOT_A_LITERAL.packed_value);
   }
 
   out_label_p->type_mask = type_mask;
-  out_label_p->id = id;
+  out_label_p->name_cp = name_cp;
   out_label_p->continue_tgt_oc = MAX_OPCODES;
   out_label_p->breaks_list_oc = MAX_OPCODES;
-  out_label_p->breaks_number = 0;
   out_label_p->continues_list_oc = MAX_OPCODES;
-  out_label_p->continues_number = 0;
   out_label_p->next_label_p = label_set_p;
   out_label_p->is_nested_jumpable_border = false;
 
@@ -113,17 +112,15 @@ jsp_label_rewrite_jumps_and_pop (jsp_label_t *label_p, /**< label to remove (sho
   JERRY_ASSERT (label_set_p == label_p);
 
   /* Iterating jumps list, rewriting them */
-  while (label_p->breaks_number--)
+  while (label_p->breaks_list_oc != MAX_OPCODES)
   {
-    JERRY_ASSERT (label_p->breaks_list_oc != MAX_OPCODES);
-
     label_p->breaks_list_oc = rewrite_simple_or_nested_jump_and_get_next (label_p->breaks_list_oc,
                                                                           break_tgt_oc);
   }
-  while (label_p->continues_number--)
+
+  while (label_p->continues_list_oc != MAX_OPCODES)
   {
     JERRY_ASSERT (label_p->continue_tgt_oc != MAX_OPCODES);
-    JERRY_ASSERT (label_p->continues_list_oc != MAX_OPCODES);
 
     label_p->continues_list_oc = rewrite_simple_or_nested_jump_and_get_next (label_p->continues_list_oc,
                                                                              label_p->continue_tgt_oc);
@@ -140,10 +137,10 @@ jsp_label_rewrite_jumps_and_pop (jsp_label_t *label_p, /**< label to remove (sho
  */
 jsp_label_t*
 jsp_label_find (jsp_label_type_flag_t type_mask, /**< types to search for */
-                token id, /**< identifier of the label (TOK_NAME)
-                           *   if mask equals to JSP_LABEL_TYPE_NAMED,
-                           *   or empty token - otherwise
-                           *   (if so, mask should not include JSP_LABEL_TYPE_NAMED) */
+                lit_cpointer_t name_cp, /**< identifier of the label (string literal)
+                                         *   if mask equals to JSP_LABEL_TYPE_NAMED,
+                                         *   or NOT_A_LITERAL - otherwise
+                                         *   (if so, mask should not include JSP_LABEL_TYPE_NAMED) */
                 bool *out_is_simply_jumpable_p) /**< out: is the label currently
                                                  *        accessible with a simple jump */
 {
@@ -151,12 +148,12 @@ jsp_label_find (jsp_label_type_flag_t type_mask, /**< types to search for */
 
   if (is_search_named)
   {
-    JERRY_ASSERT (id.type == TOK_NAME);
+    JERRY_ASSERT (name_cp.packed_value != NOT_A_LITERAL.packed_value);
   }
   else
   {
     JERRY_ASSERT (!(type_mask & JSP_LABEL_TYPE_NAMED));
-    JERRY_ASSERT (id.type == TOK_EMPTY);
+    JERRY_ASSERT (name_cp.packed_value == NOT_A_LITERAL.packed_value);
   }
 
   bool is_simply_jumpable = true;
@@ -174,7 +171,7 @@ jsp_label_find (jsp_label_type_flag_t type_mask, /**< types to search for */
     bool is_named_label = (label_iter_p->type_mask & JSP_LABEL_TYPE_NAMED);
     if ((is_search_named
          && is_named_label
-         && lexer_are_tokens_with_same_identifier (label_iter_p->id, id))
+         && label_iter_p->name_cp.packed_value == name_cp.packed_value)
         || (!is_search_named
             && (type_mask & label_iter_p->type_mask)))
     {
@@ -207,17 +204,19 @@ jsp_label_add_jump (jsp_label_t *label_p, /**< label to register jump for */
 {
   JERRY_ASSERT (label_p != NULL);
 
+  vm_op_t jmp_opcode = is_simply_jumpable ? VM_OP_JMP_DOWN : VM_OP_JMP_BREAK_CONTINUE;
+
   if (is_break)
   {
-    label_p->breaks_list_oc = dump_simple_or_nested_jump_for_rewrite (is_simply_jumpable,
+    label_p->breaks_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode,
+                                                                      empty_operand (),
                                                                       label_p->breaks_list_oc);
-    label_p->breaks_number++;
   }
   else
   {
-    label_p->continues_list_oc = dump_simple_or_nested_jump_for_rewrite (is_simply_jumpable,
+    label_p->continues_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode,
+                                                                         empty_operand (),
                                                                          label_p->continues_list_oc);
-    label_p->continues_number++;
   }
 } /* jsp_label_add_jump */
 
