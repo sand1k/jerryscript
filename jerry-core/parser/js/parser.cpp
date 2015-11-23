@@ -849,7 +849,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
   {
     bool is_subexpr_end = false;
     jsp_operand_t subexpr_operand;
-    jsp_state_expr_t subexpr_type;
+    jsp_state_expr_t subexpr_type = JSP_STATE_EXPR_EMPTY;
 
     jsp_state_t* state_p = jsp_state_top ();
 
