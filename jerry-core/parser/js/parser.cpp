@@ -52,13 +52,8 @@ static bool parser_show_instrs = false;
 #define EMIT_ERROR(type, MESSAGE) PARSE_ERROR(type, MESSAGE, tok.loc)
 #define EMIT_ERROR_VARG(type, MESSAGE, ...) PARSE_ERROR_VARG(type, MESSAGE, tok.loc, __VA_ARGS__)
 
-typedef enum
+typedef enum __attr_packed___
 {
-  JSP_STATE_EXPR_UNINITIALIZED  = 0x0000,
-
-  /** Mask of expression type field */
-  JSP_STATE_EXPR_TYPE_MASK      = 0x00ff,
-
   /* ECMA-262 v5 expression types */
   JSP_STATE_EXPR_EMPTY              = 0x01, /**< no expression yet (at start) */
   JSP_STATE_EXPR_FUNCTION           = 0x03, /**< FunctionExpression (11.2.5) */
@@ -610,9 +605,10 @@ typedef struct
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
 
-  jsp_operand_t operand; /**< operand, associated with expression */
   jsp_state_expr_t state; /**< current state */
   jsp_state_expr_t req_expr_type; /**< requested type of expression */
+
+  jsp_operand_t operand; /**< operand, associated with expression */
   jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
 
   struct /* FIXME: switch to union */
