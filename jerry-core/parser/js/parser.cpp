@@ -3576,7 +3576,7 @@ parse_switch_statement (void)
   jsp_label_t label;
   jsp_label_push (&label,
                   JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                  TOKEN_EMPTY_INITIALIZER);
+                  NOT_A_LITERAL);
 
   // Second, parse case clauses' bodies and rewrite jumps
   skip_token ();
@@ -3753,7 +3753,7 @@ parse_iterational_statement (jsp_label_t *outermost_named_stmt_label_p) /**< out
   jsp_label_t label;
   jsp_label_push (&label,
                   (jsp_label_type_flag_t) (JSP_LABEL_TYPE_UNNAMED_BREAKS | JSP_LABEL_TYPE_UNNAMED_CONTINUES),
-                  TOKEN_EMPTY_INITIALIZER);
+                  NOT_A_LITERAL);
 
   jsp_label_t *outermost_stmt_label_p = (outermost_named_stmt_label_p != NULL ? outermost_named_stmt_label_p : &label);
 
@@ -3913,7 +3913,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
         && token_is (TOK_NAME))
     {
       /* break or continue on a label */
-      label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, tok, &is_simply_jumpable);
+      label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, token_data_as_lit_cp (), &is_simply_jumpable);
 
       if (label_p == NULL)
       {
@@ -3925,7 +3925,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     else if (is_break)
     {
       label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                                TOKEN_EMPTY_INITIALIZER,
+                                NOT_A_LITERAL,
                                 &is_simply_jumpable);
 
       if (label_p == NULL)
@@ -3938,7 +3938,7 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
       JERRY_ASSERT (!is_break);
 
       label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_CONTINUES,
-                                TOKEN_EMPTY_INITIALIZER,
+                                NOT_A_LITERAL,
                                 &is_simply_jumpable);
 
       if (label_p == NULL)
@@ -4013,14 +4013,17 @@ parse_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (first) lab
     {
       skip_token ();
 
-      jsp_label_t *label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, temp, NULL);
+      lit_cpointer_t name_cp;
+      name_cp.packed_value = temp.uid;
+
+      jsp_label_t *label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, name_cp, NULL);
       if (label_p != NULL)
       {
         EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
       }
 
       jsp_label_t label;
-      jsp_label_push (&label, JSP_LABEL_TYPE_NAMED, temp);
+      jsp_label_push (&label, JSP_LABEL_TYPE_NAMED, name_cp);
 
       parse_statement (outermost_stmt_label_p != NULL ? outermost_stmt_label_p : &label);
 
