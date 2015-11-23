@@ -100,6 +100,7 @@ static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
 static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 
 static void parse_statement (jsp_label_t *outermost_stmt_label_p);
+static void parse_statement_ ();
 static void parse_source_element_list (void);
 
 static bool
@@ -2607,7 +2608,7 @@ jsp_parse_for_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost (fi
   lexer_seek (for_body_statement_loc);
   skip_token ();
 
-  parse_statement (NULL);
+  parse_statement_ ();
 
   // Save LoopEnd locus
   const locus loop_end_loc = tok.loc;
@@ -2765,7 +2766,7 @@ jsp_parse_for_in_statement (jsp_label_t *outermost_stmt_label_p, /**< outermost 
   lexer_seek (for_body_statement_loc);
   tok = lexer_next_token (false);
 
-  parse_statement (NULL);
+  parse_statement_ ();
 
   // Save LoopEnd locus
   const locus loop_end_loc = tok.loc;
@@ -2901,6 +2902,7 @@ do \
 { \
   state_p->state = JSP_STATE_STAT_STATEMENT; \
   state_p->is_completed = true; \
+  dumper_new_statement (); \
 } \
 while (0)
 
@@ -2909,6 +2911,7 @@ do \
 { \
   state_p->state = (s); \
   jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT); \
+  dumper_new_statement (); \
 } \
 while (0)
 
@@ -2918,6 +2921,8 @@ while (0)
 static void
 parse_statement_ (void)
 {
+  dumper_new_statement ();
+
   jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
   uint32_t start_pos = jsp_state_stack_pos;
 
@@ -3135,6 +3140,45 @@ parse_statement_ (void)
 
             JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
           }
+        }
+      }
+      else if (token_is (TOK_NAME))  // LabelledStatement or ExpressionStatement
+      {
+        const token temp = tok;
+        skip_token ();
+        if (token_is (TOK_COLON))
+        {
+          skip_token ();
+
+          lit_cpointer_t name_cp;
+          name_cp.packed_value = temp.uid;
+
+          jsp_label_t *label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, name_cp, NULL);
+          if (label_p != NULL)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
+          }
+
+          jsp_label_push (&state_p->u.statement.label, JSP_LABEL_TYPE_NAMED, name_cp);
+
+          state_p->u.statement.outermost_stmt_label_p = (state_p->u.statement.outermost_stmt_label_p != NULL
+                                                         ? state_p->u.statement.outermost_stmt_label_p
+                                                         : &state_p->u.statement.label);
+
+          state_p->state = JSP_STATE_STAT_ITER_FINISH;
+          jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+          jsp_state_t *tmp_state_p = jsp_state_top ();
+          tmp_state_p->u.statement.outermost_stmt_label_p = state_p->u.statement.outermost_stmt_label_p;
+        }
+        else
+        {
+          lexer_save_token (tok);
+          tok = temp;
+          jsp_operand_t expr = parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
+          dump_assignment_of_lhs_if_reference (expr);
+          insert_semicolon ();
+
+          JSP_COMPLETE_STATEMENT_PARSE ();
         }
       }
       else
@@ -3393,7 +3437,7 @@ parse_statement_list (void)
 {
   while (true)
   {
-    parse_statement (NULL);
+    parse_statement_ ();
 
     skip_token ();
     while (token_is (TOK_SEMICOLON))
@@ -3426,7 +3470,7 @@ parse_if_statement (void)
   dump_conditional_check_for_rewrite (cond);
 
   skip_token ();
-  parse_statement (NULL);
+  parse_statement_ ();
 
   skip_token ();
   if (token_is (TOK_KW_ELSE))
@@ -3435,7 +3479,7 @@ parse_if_statement (void)
     rewrite_conditional_check ();
 
     skip_token ();
-    parse_statement (NULL);
+    parse_statement_ ();
 
     rewrite_jump_to_end ();
   }
@@ -3459,7 +3503,7 @@ parse_do_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (f
   dumper_set_next_iteration_target ();
 
   skip_token ();
-  parse_statement (NULL);
+  parse_statement_ ();
 
   jsp_label_setup_continue_target (outermost_stmt_label_p,
                                    serializer_get_current_instr_counter ());
@@ -3492,7 +3536,7 @@ parse_while_statement (jsp_label_t *outermost_stmt_label_p) /**< outermost (firs
   dumper_set_next_iteration_target ();
 
   skip_token ();
-  parse_statement (NULL);
+  parse_statement_ ();
 
   jsp_label_setup_continue_target (outermost_stmt_label_p,
                                    serializer_get_current_instr_counter ());
@@ -3527,7 +3571,7 @@ parse_with_statement (void)
 
   vm_instr_counter_t with_begin_oc = dump_with_for_rewrite (expr);
   skip_token ();
-  parse_statement (NULL);
+  parse_statement_ ();
   rewrite_with (with_begin_oc);
   dump_with_end ();
 
