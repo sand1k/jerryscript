@@ -204,15 +204,15 @@ jsp_label_add_jump (jsp_label_t *label_p, /**< label to register jump for */
 {
   JERRY_ASSERT (label_p != NULL);
 
+  vm_op_t jmp_opcode = is_simply_jumpable ? VM_OP_JMP_DOWN : VM_OP_JMP_BREAK_CONTINUE;
+
   if (is_break)
   {
-    label_p->breaks_list_oc = dump_simple_or_nested_jump_for_rewrite (is_simply_jumpable,
-                                                                      label_p->breaks_list_oc);
+    label_p->breaks_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, label_p->breaks_list_oc);
   }
   else
   {
-    label_p->continues_list_oc = dump_simple_or_nested_jump_for_rewrite (is_simply_jumpable,
-                                                                         label_p->continues_list_oc);
+    label_p->continues_list_oc = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, label_p->continues_list_oc);
   }
 } /* jsp_label_add_jump */
 

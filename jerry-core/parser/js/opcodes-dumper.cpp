@@ -1962,7 +1962,7 @@ dump_continue_iterations_check (jsp_operand_t op)
 }
 
 /**
- * Dump template of 'jmp_break_continue' or 'jmp_down' instruction (depending on is_simple_jump argument).
+ * Dump template of a jump instruction.
  *
  * Note:
  *      the instruction's flags field is written later (see also: rewrite_simple_or_nested_jump_get_next).
@@ -1970,30 +1970,28 @@ dump_continue_iterations_check (jsp_operand_t op)
  * @return position of dumped instruction
  */
 vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (bool is_simple_jump, /**< flag indicating, whether simple jump
-                                                              *   or 'jmp_break_continue' template should be dumped */
+dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode */
                                         vm_instr_counter_t next_jump_for_tgt_oc) /**< instr counter of next
                                                                                   *   template targetted to
                                                                                   *   the same target - if any,
                                                                                   *   or MAX_OPCODES - otherwise */
 {
+  JERRY_ASSERT (jmp_opcode == VM_OP_JMP_DOWN
+                || jmp_opcode == VM_OP_JMP_UP
+                || jmp_opcode == VM_OP_IS_TRUE_JMP_DOWN
+                || jmp_opcode == VM_OP_IS_FALSE_JMP_DOWN
+                || jmp_opcode == VM_OP_IS_TRUE_JMP_UP
+                || jmp_opcode == VM_OP_IS_FALSE_JMP_UP
+                || jmp_opcode == VM_OP_JMP_BREAK_CONTINUE);
+
   vm_idx_t id1, id2;
   split_instr_counter (next_jump_for_tgt_oc, &id1, &id2);
 
   vm_instr_counter_t ret = serializer_get_current_instr_counter ();
 
-  if (is_simple_jump)
-  {
-    dump_double_address (VM_OP_JMP_DOWN,
-                         jsp_operand_t::make_idx_const_operand (id1),
-                         jsp_operand_t::make_idx_const_operand (id2));
-  }
-  else
-  {
-    dump_double_address (VM_OP_JMP_BREAK_CONTINUE,
-                         jsp_operand_t::make_idx_const_operand (id1),
-                         jsp_operand_t::make_idx_const_operand (id2));
-  }
+  dump_double_address (jmp_opcode,
+                       jsp_operand_t::make_idx_const_operand (id1),
+                       jsp_operand_t::make_idx_const_operand (id2));
 
   return ret;
 } /* dump_simple_or_nested_jump_for_rewrite */
@@ -2009,15 +2007,12 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
 {
   op_meta jump_op_meta = serializer_get_op_meta (jump_oc);
 
-  bool is_simple_jump = (jump_op_meta.op.op_idx == VM_OP_JMP_DOWN);
-
-  JERRY_ASSERT (is_simple_jump
-                || (jump_op_meta.op.op_idx == VM_OP_JMP_BREAK_CONTINUE));
+  vm_op_t jmp_opcode = (vm_op_t) jump_op_meta.op.op_idx;
 
   vm_idx_t id1, id2, id1_prev, id2_prev;
   split_instr_counter ((vm_instr_counter_t) (target_oc - jump_oc), &id1, &id2);
 
-  if (is_simple_jump)
+  if (jmp_opcode == VM_OP_JMP_DOWN)
   {
     id1_prev = jump_op_meta.op.data.jmp_down.oc_idx_1;
     id2_prev = jump_op_meta.op.data.jmp_down.oc_idx_2;
@@ -2025,9 +2020,49 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
     jump_op_meta.op.data.jmp_down.oc_idx_1 = id1;
     jump_op_meta.op.data.jmp_down.oc_idx_2 = id2;
   }
+  else if (jmp_opcode == VM_OP_JMP_UP)
+  {
+    id1_prev = jump_op_meta.op.data.jmp_up.oc_idx_1;
+    id2_prev = jump_op_meta.op.data.jmp_up.oc_idx_2;
+
+    jump_op_meta.op.data.jmp_up.oc_idx_1 = id1;
+    jump_op_meta.op.data.jmp_up.oc_idx_2 = id2;
+  }
+  else if (jmp_opcode == VM_OP_IS_TRUE_JMP_DOWN)
+  {
+    id1_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_1;
+    id2_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_2;
+
+    jump_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
+    jump_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
+  }
+  else if (jmp_opcode == VM_OP_IS_TRUE_JMP_UP)
+  {
+    id1_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_1;
+    id2_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_2;
+
+    jump_op_meta.op.data.is_true_jmp_up.oc_idx_1 = id1;
+    jump_op_meta.op.data.is_true_jmp_up.oc_idx_2 = id2;
+  }
+  else if (jmp_opcode == VM_OP_IS_FALSE_JMP_DOWN)
+  {
+    id1_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_1;
+    id2_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_2;
+
+    jump_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
+    jump_op_meta.op.data.is_false_jmp_down.oc_idx_2 = id2;
+  }
+  else if (jmp_opcode == VM_OP_IS_FALSE_JMP_UP)
+  {
+    id1_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_1;
+    id2_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_2;
+
+    jump_op_meta.op.data.is_false_jmp_up.oc_idx_1 = id1;
+    jump_op_meta.op.data.is_false_jmp_up.oc_idx_2 = id2;
+  }
   else
   {
-    JERRY_ASSERT (jump_op_meta.op.op_idx == VM_OP_JMP_BREAK_CONTINUE);
+    JERRY_ASSERT (jmp_opcode == VM_OP_JMP_BREAK_CONTINUE);
 
     id1_prev = jump_op_meta.op.data.jmp_break_continue.oc_idx_1;
     id2_prev = jump_op_meta.op.data.jmp_break_continue.oc_idx_2;

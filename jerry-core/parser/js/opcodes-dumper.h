@@ -747,7 +747,7 @@ void dumper_set_break_target (void);
 void dumper_set_continue_target (void);
 void dumper_set_next_iteration_target (void);
 vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (bool, vm_instr_counter_t);
+dump_simple_or_nested_jump_for_rewrite (vm_op_t, vm_instr_counter_t);
 vm_instr_counter_t
 rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (jsp_operand_t);
