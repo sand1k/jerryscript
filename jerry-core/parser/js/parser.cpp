@@ -491,12 +491,13 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
   skip_token ();
 
   JERRY_ASSERT (func_name.is_empty_operand () || func_name.is_literal_operand ());
-  dump_varg_header_for_rewrite (is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL, func_name);
+
+  varg_list_type vlt = is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL;
+
+  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (vlt, func_name);
 
   while (!token_is (TOK_CLOSE_PAREN))
   {
-    dumper_start_varg_code_sequence ();
-
     current_token_must_be (TOK_NAME);
     jsp_operand_t formal_parameter_name = literal_operand (token_data_as_lit_cp ());
     skip_token ();
@@ -505,8 +506,6 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
     dump_varg (formal_parameter_name);
 
     formal_parameters_num++;
-
-    dumper_finish_varg_code_sequence ();
 
     if (token_is (TOK_COMMA))
     {
@@ -518,7 +517,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
     }
   }
 
-  const jsp_operand_t func = rewrite_varg_header_set_args_count (formal_parameters_num);
+  const jsp_operand_t func = rewrite_varg_header_set_args_count (formal_parameters_num, varg_header_pos);
 
   dump_function_end_for_rewrite ();
 
@@ -616,9 +615,13 @@ typedef struct
   {
     u (void) { }
 
-    uint32_t list_length; /**< length of list associated with the expression
-                           *   (valid only if is_list_in_process flag is set) */
     vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
+
+    struct
+    {
+      vm_instr_counter_t header_pos; /**< position of a varg header instruction */
+      uint32_t list_length;
+    } varg_sequence;
 
     struct
     {
@@ -711,7 +714,7 @@ jsp_push_new_expr_state (jsp_state_expr_t expr_type,
  * FIXME:
  *       Move to dumper
  */
-static void
+static vm_instr_counter_t
 jsp_start_call_dump (jsp_operand_t obj)
 {
   opcode_call_flags_t call_flags = OPCODE_CALL_FLAGS__EMPTY;
@@ -751,7 +754,7 @@ jsp_start_call_dump (jsp_operand_t obj)
   }
 
   jsp_operand_t val = dump_assignment_of_lhs_if_value_based_reference (obj);
-  dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
+  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
 
   if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
   {
@@ -764,6 +767,8 @@ jsp_start_call_dump (jsp_operand_t obj)
       dump_call_additional_info (call_flags, empty_operand ());
     }
   }
+
+  return varg_header_pos;
 } /* jsp_start_call_dump */
 
 /*
@@ -771,19 +776,21 @@ jsp_start_call_dump (jsp_operand_t obj)
  *       Move to dumper
  */
 static jsp_operand_t
-jsp_finish_call_dump (uint32_t args_num)
+jsp_finish_call_dump (uint32_t args_num,
+                      vm_instr_counter_t header_pos)
 {
-  return rewrite_varg_header_set_args_count (args_num);
+  return rewrite_varg_header_set_args_count (args_num, header_pos);
 } /* jsp_finish_call_dump */
 
 /*
  * FIXME:
  *       Move to dumper
  */
-static void __attr_unused___
+static vm_instr_counter_t __attr_unused___
 jsp_start_construct_dump (jsp_operand_t obj)
 {
-  dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, dump_assignment_of_lhs_if_value_based_reference (obj));
+  return dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR,
+                                       dump_assignment_of_lhs_if_value_based_reference (obj));
 } /* jsp_start_construct_dump */
 
 /*
@@ -791,9 +798,10 @@ jsp_start_construct_dump (jsp_operand_t obj)
  *       Move to dumper
  */
 static jsp_operand_t __attr_unused___
-jsp_finish_construct_dump (uint32_t args_num)
+jsp_finish_construct_dump (uint32_t args_num,
+                      vm_instr_counter_t header_pos)
 {
-  return rewrite_varg_header_set_args_count (args_num);
+  return rewrite_varg_header_set_args_count (args_num, header_pos);
 } /* jsp_finish_construct_dump */
 
 static lit_cpointer_t
@@ -931,21 +939,23 @@ parse_expression_ (jsp_state_expr_t req_expr,
       else if (token_is (TOK_OPEN_SQUARE))
       {
         /* ArrayLiteral */
-        dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
+        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
 
         state_p->state = JSP_STATE_EXPR_ARRAY_LITERAL;
         state_p->is_list_in_process = true;
-        state_p->u.list_length = 0;
+        state_p->u.varg_sequence.list_length = 0;
+        state_p->u.varg_sequence.header_pos = varg_header_pos;
       }
       else if (token_is (TOK_OPEN_BRACE))
       {
         /* ObjectLiteral */
-        dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
+        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
         jsp_early_error_start_checking_of_prop_names ();
 
         state_p->state = JSP_STATE_EXPR_OBJECT_LITERAL;
         state_p->is_list_in_process = true;
-        state_p->u.list_length = 0;
+        state_p->u.varg_sequence.list_length = 0;
+        state_p->u.varg_sequence.header_pos = varg_header_pos;
       }
       else
       {
@@ -1187,7 +1197,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_DATA_PROP_DECL
                       || subexpr_type == JSP_STATE_EXPR_ACCESSOR_PROP_DECL);
 
-        state_p->u.list_length++;
+        state_p->u.varg_sequence.list_length++;
 
         dumper_finish_varg_code_sequence ();
 
@@ -1207,7 +1217,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         skip_token ();
 
-        state_p->operand = rewrite_varg_header_set_args_count (state_p->u.list_length);
+        state_p->operand = rewrite_varg_header_set_args_count (state_p->u.varg_sequence.list_length,
+                                                               state_p->u.varg_sequence.header_pos);
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
         state_p->is_list_in_process = false;
@@ -1246,7 +1257,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         dump_varg (subexpr_operand);
 
-        state_p->u.list_length++;
+        state_p->u.varg_sequence.list_length++;
 
         dumper_finish_varg_code_sequence ();
 
@@ -1265,7 +1276,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_token ();
 
-          state_p->operand = rewrite_varg_header_set_args_count (state_p->u.list_length);
+          state_p->operand = rewrite_varg_header_set_args_count (state_p->u.varg_sequence.list_length,
+                                                                 state_p->u.varg_sequence.header_pos);
 
           state_p->state = JSP_STATE_EXPR_MEMBER;
           state_p->is_list_in_process = false;
@@ -1280,7 +1292,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             dump_varg (dump_array_hole_assignment_res ());
 
-            state_p->u.list_length++;
+            state_p->u.varg_sequence.list_length++;
 
             dumper_finish_varg_code_sequence ();
           }
@@ -1326,13 +1338,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             dumper_finish_varg_code_sequence ();
 
-            state_p->u.list_length++;
+            state_p->u.varg_sequence.list_length++;
 
             if (token_is (TOK_CLOSE_PAREN))
             {
               state_p->token_type = TOK_EMPTY;
               state_p->is_list_in_process = false;
-              state_p->operand = jsp_finish_construct_dump (state_p->u.list_length);
+              state_p->operand = jsp_finish_construct_dump (state_p->u.varg_sequence.list_length,
+                                                            state_p->u.varg_sequence.header_pos);
             }
             else
             {
@@ -1363,7 +1376,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             state_p->operand = subexpr_operand;
 
-            jsp_start_construct_dump (state_p->operand);
+            vm_instr_counter_t header_pos = jsp_start_construct_dump (state_p->operand);
 
             bool is_arg_list_implicit = true;
             bool is_arg_list_empty = true;
@@ -1387,7 +1400,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
             if (!is_arg_list_implicit && !is_arg_list_empty)
             {
               state_p->is_list_in_process = true;
-              state_p->u.list_length = 0;
+              state_p->u.varg_sequence.list_length = 0;
+              state_p->u.varg_sequence.header_pos = header_pos;
 
               dumper_start_varg_code_sequence ();
               jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
@@ -1402,7 +1416,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
                 state_p->is_completed = true;
               }
 
-              state_p->operand = jsp_finish_construct_dump (0);
+              state_p->operand = jsp_finish_construct_dump (0, header_pos);
             }
           }
           else
@@ -1475,13 +1489,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
           dumper_finish_varg_code_sequence ();
 
-          state_p->u.list_length++;
+          state_p->u.varg_sequence.list_length++;
 
           if (token_is (TOK_CLOSE_PAREN))
           {
             state_p->is_list_in_process = false;
 
-            state_p->operand = jsp_finish_call_dump (state_p->u.list_length);
+            state_p->operand = jsp_finish_call_dump (state_p->u.varg_sequence.list_length,
+                                                     state_p->u.varg_sequence.header_pos);
           }
           else
           {
@@ -1512,18 +1527,19 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           skip_token ();
 
-          jsp_start_call_dump (state_p->operand);
+          vm_instr_counter_t header_pos = jsp_start_call_dump (state_p->operand);
 
           if (token_is (TOK_CLOSE_PAREN))
           {
             skip_token ();
 
-            state_p->operand = jsp_finish_call_dump (0);
+            state_p->operand = jsp_finish_call_dump (0, header_pos);
           }
           else
           {
             state_p->is_list_in_process = true;
-            state_p->u.list_length = 0;
+            state_p->u.varg_sequence.list_length = 0;
+            state_p->u.varg_sequence.header_pos = header_pos;
 
             dumper_start_varg_code_sequence ();
 

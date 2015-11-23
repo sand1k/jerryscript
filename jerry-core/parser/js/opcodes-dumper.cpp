@@ -68,12 +68,6 @@ STATIC_STACK (U8, uint8_t)
 
 enum
 {
-  varg_headers_global_size
-};
-STATIC_STACK (varg_headers, vm_instr_counter_t)
-
-enum
-{
   function_ends_global_size
 };
 STATIC_STACK (function_ends, vm_instr_counter_t)
@@ -851,10 +845,11 @@ dump_variable_assignment_res (jsp_operand_t var)
   return op;
 }
 
-void
+vm_instr_counter_t
 dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
 {
-  STACK_PUSH (varg_headers, serializer_get_current_instr_counter ());
+  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+
   switch (vlt)
   {
     case VARG_FUNC_EXPR:
@@ -903,10 +898,13 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
       break;
     }
   }
+
+  return pos;
 }
 
 jsp_operand_t
-rewrite_varg_header_set_args_count (size_t args_count)
+rewrite_varg_header_set_args_count (size_t args_count,
+                                    vm_instr_counter_t pos)
 {
   /*
    * FIXME:
@@ -916,7 +914,8 @@ rewrite_varg_header_set_args_count (size_t args_count)
    *       argument / formal parameter name to values collection.
    */
 
-  op_meta om = serializer_get_op_meta (STACK_TOP (varg_headers));
+  op_meta om = serializer_get_op_meta (pos);
+
   switch (om.op.op_idx)
   {
     case VM_OP_FUNC_EXPR_N:
@@ -932,8 +931,7 @@ rewrite_varg_header_set_args_count (size_t args_count)
       const jsp_operand_t res = tmp_operand ();
       om.op.data.func_expr_n.arg_list = (vm_idx_t) args_count;
       om.op.data.func_expr_n.lhs = res.get_idx ();
-      serializer_rewrite_op_meta (STACK_TOP (varg_headers), om);
-      STACK_DROP (varg_headers, 1);
+      serializer_rewrite_op_meta (pos, om);
       return res;
     }
     case VM_OP_FUNC_DECL_N:
@@ -945,8 +943,7 @@ rewrite_varg_header_set_args_count (size_t args_count)
                      LIT_ITERATOR_POS_ZERO);
       }
       om.op.data.func_decl_n.arg_list = (vm_idx_t) args_count;
-      serializer_rewrite_op_meta (STACK_TOP (varg_headers), om);
-      STACK_DROP (varg_headers, 1);
+      serializer_rewrite_op_meta (pos, om);
       return empty_operand ();
     }
     case VM_OP_ARRAY_DECL:
@@ -962,8 +959,7 @@ rewrite_varg_header_set_args_count (size_t args_count)
       om.op.data.obj_decl.list_1 = (vm_idx_t) (args_count >> 8);
       om.op.data.obj_decl.list_2 = (vm_idx_t) (args_count & 0xffu);
       om.op.data.obj_decl.lhs = res.get_idx ();
-      serializer_rewrite_op_meta (STACK_TOP (varg_headers), om);
-      STACK_DROP (varg_headers, 1);
+      serializer_rewrite_op_meta (pos, om);
       return res;
     }
     default:
@@ -2421,7 +2417,6 @@ dumper_init (void)
   jsp_reg_max_for_args = VM_IDX_EMPTY;
 
   STACK_INIT (U8);
-  STACK_INIT (varg_headers);
   STACK_INIT (function_ends);
   STACK_INIT (conditional_checks);
   STACK_INIT (jumps_to_end);
@@ -2437,7 +2432,6 @@ void
 dumper_free (void)
 {
   STACK_FREE (U8);
-  STACK_FREE (varg_headers);
   STACK_FREE (function_ends);
   STACK_FREE (conditional_checks);
   STACK_FREE (jumps_to_end);

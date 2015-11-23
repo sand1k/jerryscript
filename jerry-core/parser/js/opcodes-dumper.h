@@ -641,8 +641,8 @@ void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_variable_assignment_res (jsp_operand_t);
 
-void dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
-jsp_operand_t rewrite_varg_header_set_args_count (size_t);
+vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
+jsp_operand_t rewrite_varg_header_set_args_count (size_t, vm_instr_counter_t);
 void dump_call_additional_info (opcode_call_flags_t, jsp_operand_t);
 void dump_varg (jsp_operand_t);
 
