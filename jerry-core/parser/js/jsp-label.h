@@ -50,14 +50,12 @@ typedef enum
 typedef struct jsp_label_t
 {
   jsp_label_type_flag_t type_mask; /**< label type mask */
-  token id; /**< label name (TOK_NAME), if type is LABEL_NAMED */
+  lit_cpointer_t name_cp; /**< label name (string literal), if type is LABEL_NAMED; NOT_A_LITERAL - otherwise  */
   vm_instr_counter_t continue_tgt_oc; /**< target instruction counter for continues on the label */
   vm_instr_counter_t breaks_list_oc; /**< instruction counter of first 'break' instruction in the list
                                       *   of instructions with the target identified by the label */
-  vm_instr_counter_t breaks_number; /**< number of 'break' instructions in the list */
   vm_instr_counter_t continues_list_oc; /**< instruction counter of first 'continue' instruction in the list
                                          *   of instructions with the target identified by the label */
-  vm_instr_counter_t continues_number; /**< number of 'continue' instructions in the list */
   jsp_label_t *next_label_p; /**< next label in current label set stack */
   bool is_nested_jumpable_border : 1; /**< flag, indicating that this and outer labels
                                        *   are not currently accessible with simple jumps,
@@ -69,10 +67,10 @@ extern void jsp_label_finalize (void);
 
 extern void jsp_label_remove_all_labels (void);
 
-extern void jsp_label_push (jsp_label_t *, jsp_label_type_flag_t, token);
+extern void jsp_label_push (jsp_label_t *, jsp_label_type_flag_t, lit_cpointer_t);
 extern void jsp_label_rewrite_jumps_and_pop (jsp_label_t *, vm_instr_counter_t);
 
-extern jsp_label_t *jsp_label_find (jsp_label_type_flag_t, token, bool *);
+extern jsp_label_t *jsp_label_find (jsp_label_type_flag_t, lit_cpointer_t, bool *);
 
 extern void jsp_label_add_jump (jsp_label_t *, bool, bool);
 extern void jsp_label_setup_continue_target (jsp_label_t *, vm_instr_counter_t);
