@@ -745,7 +745,7 @@ jsp_operand_t dump_prop_setter_or_bitwise_or_res (jsp_operand_t, jsp_operand_t);
 
 void dumper_set_break_target (void);
 void dumper_set_continue_target (void);
-void dumper_set_next_interation_target (void);
+void dumper_set_next_iteration_target (void);
 vm_instr_counter_t
 dump_simple_or_nested_jump_for_rewrite (bool, vm_instr_counter_t);
 vm_instr_counter_t
