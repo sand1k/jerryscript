@@ -621,6 +621,7 @@ typedef struct
     {
       vm_instr_counter_t header_pos; /**< position of a varg header instruction */
       uint32_t list_length;
+      vm_idx_t reg_alloc_saved_state;
     } varg_sequence;
 
     struct
@@ -1199,7 +1200,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         state_p->u.varg_sequence.list_length++;
 
-        dumper_finish_varg_code_sequence ();
+        dumper_finish_varg_code_sequence (state_p->u.varg_sequence.reg_alloc_saved_state);
 
         if (token_is (TOK_COMMA))
         {
@@ -1225,7 +1226,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
       }
       else
       {
-        dumper_start_varg_code_sequence ();
+        state_p->u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
 
         locus start_pos = tok.loc;
         skip_token ();
@@ -1259,7 +1260,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         state_p->u.varg_sequence.list_length++;
 
-        dumper_finish_varg_code_sequence ();
+        dumper_finish_varg_code_sequence (state_p->u.varg_sequence.reg_alloc_saved_state);
 
         if (token_is (TOK_COMMA))
         {
@@ -1288,18 +1289,18 @@ parse_expression_ (jsp_state_expr_t req_expr,
           {
             skip_token ();
 
-            dumper_start_varg_code_sequence ();
+            vm_idx_t reg_alloc_saved_state = dumper_start_varg_code_sequence ();
 
             dump_varg (dump_array_hole_assignment_res ());
 
             state_p->u.varg_sequence.list_length++;
 
-            dumper_finish_varg_code_sequence ();
+            dumper_finish_varg_code_sequence (reg_alloc_saved_state);
           }
         }
         else
         {
-          dumper_start_varg_code_sequence ();
+          state_p->u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
         }
@@ -1336,7 +1337,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
             dump_varg (subexpr_operand);
 
-            dumper_finish_varg_code_sequence ();
+            dumper_finish_varg_code_sequence (state_p->u.varg_sequence.reg_alloc_saved_state);
 
             state_p->u.varg_sequence.list_length++;
 
@@ -1353,7 +1354,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
               jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
 
-              dumper_start_varg_code_sequence ();
+              state_p->u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
             }
 
             skip_token ();
@@ -1402,8 +1403,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
               state_p->is_list_in_process = true;
               state_p->u.varg_sequence.list_length = 0;
               state_p->u.varg_sequence.header_pos = header_pos;
+              state_p->u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
 
-              dumper_start_varg_code_sequence ();
               jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
             }
             else
@@ -1487,7 +1488,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
           dump_varg (subexpr_operand);
 
-          dumper_finish_varg_code_sequence ();
+          dumper_finish_varg_code_sequence (state_p->u.varg_sequence.reg_alloc_saved_state);
 
           state_p->u.varg_sequence.list_length++;
 
@@ -1504,7 +1505,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
 
-            dumper_start_varg_code_sequence ();
+            state_p->u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
           }
         }
         else
@@ -1540,8 +1541,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
             state_p->is_list_in_process = true;
             state_p->u.varg_sequence.list_length = 0;
             state_p->u.varg_sequence.header_pos = header_pos;
-
-            dumper_start_varg_code_sequence ();
+            state_p->u.varg_sequence.reg_alloc_saved_state = dumper_start_varg_code_sequence ();
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
           }

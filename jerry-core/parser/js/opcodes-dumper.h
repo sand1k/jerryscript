@@ -624,8 +624,8 @@ void dumper_alloc_reg_for_unused_arg (void);
 void dumper_new_statement (void);
 void dumper_new_scope (void);
 void dumper_finish_scope (void);
-void dumper_start_varg_code_sequence (void);
-void dumper_finish_varg_code_sequence (void);
+vm_idx_t dumper_start_varg_code_sequence (void);
+void dumper_finish_varg_code_sequence (vm_idx_t);
 
 extern bool dumper_is_eval_literal (jsp_operand_t);
 
