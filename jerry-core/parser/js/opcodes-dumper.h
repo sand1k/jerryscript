@@ -719,9 +719,6 @@ jsp_operand_t dump_bitwise_xor_res (jsp_operand_t, jsp_operand_t);
 void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 jsp_operand_t dump_bitwise_or_res (jsp_operand_t, jsp_operand_t);
 
-void start_dumping_logical_and_checks (void);
-void dump_logical_and_check_for_rewrite (jsp_operand_t);
-void rewrite_logical_and_checks (void);
 void start_dumping_logical_or_checks (void);
 void dump_logical_or_check_for_rewrite (jsp_operand_t);
 void rewrite_logical_or_checks (void);
@@ -747,7 +744,7 @@ void dumper_set_break_target (void);
 void dumper_set_continue_target (void);
 void dumper_set_next_iteration_target (void);
 vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (vm_op_t, vm_instr_counter_t);
+dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
 vm_instr_counter_t
 rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (jsp_operand_t);

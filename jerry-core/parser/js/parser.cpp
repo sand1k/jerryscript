@@ -2142,9 +2142,9 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
             /*
              * FIXME:
-             *       Consider eliminating COMPLEX_PRODUCTION flag through implementing rewrite chain
+             *       Consider eliminating COMPLEX_PRODUCTION flag through implementing establishing a general operand
+             *       management for expressions
              */
-
             if ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) == 0)
             {
               state_p->flags |= JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
@@ -2156,15 +2156,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
               state_p->operand = dump_assignment_of_lhs_if_value_based_reference (state_p->operand);
               dump_variable_assignment (ret, state_p->operand);
 
-              start_dumping_logical_and_checks ();
-
               state_p->flags |= JSP_STATE_EXPR_FLAG_FIXED_RET_OPERAND;
               state_p->operand = ret;
             }
 
             JERRY_ASSERT ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) != 0);
 
-            dump_logical_and_check_for_rewrite (state_p->operand);
+            state_p->rewrite_chain = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_FALSE_JMP_DOWN,
+                                                                             state_p->operand,
+                                                                             state_p->rewrite_chain);
 
             state_p->token_type = TOK_DOUBLE_AND;
 
@@ -2175,12 +2175,15 @@ parse_expression_ (jsp_state_expr_t req_expr,
             /* end of LogicalAndExpression */
             JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
 
-            if ((state_p->flags & JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION) != 0)
-            {
-              rewrite_logical_and_checks ();
+            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
 
-              state_p->flags &= ~JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
+            while (state_p->rewrite_chain != MAX_OPCODES)
+            {
+              state_p->rewrite_chain = rewrite_simple_or_nested_jump_and_get_next (state_p->rewrite_chain,
+                                                                                   target_oc);
             }
+
+            state_p->flags &= ~JSP_STATE_EXPR_FLAG_COMPLEX_PRODUCTION;
 
             state_p->flags |= JSP_STATE_EXPR_FLAG_COMPLETED;
           }
