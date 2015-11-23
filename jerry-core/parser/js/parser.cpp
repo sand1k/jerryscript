@@ -591,28 +591,31 @@ parse_function_declaration (void)
 
 typedef struct
 {
-  uint8_t is_completed            : 1; /**< the expression parse completed,
-                                        *   no more tokens can be added to the expression */
-  uint8_t is_list_in_process      : 1; /**< parsing a list, associated with the expression
-                                        *   (details depend on current expression type) */
-  uint8_t is_no_in_mode           : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
-  uint8_t is_fixed_ret_operand    : 1; /**< the expression's evaluation should produce value that should be
-                                        *   put to register, specified by operand, specified in state */
-  uint8_t is_complex_production   : 1; /**< the expression is being parsed in complex production mode */
+  jsp_operand_t operand; /**< operand, associated with expression */
+
+  jsp_state_expr_t state; /**< current state */
+  jsp_state_expr_t req_expr_type; /**< requested type of expression */
+
+  jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
+
+  uint8_t is_completed           : 1; /**< the expression parse completed,
+                                       *   no more tokens can be added to the expression */
+  uint8_t is_list_in_process     : 1; /**< parsing a list, associated with the expression
+                                       *   (details depend on current expression type) */
+  uint8_t is_no_in_mode          : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  uint8_t is_fixed_ret_operand   : 1; /**< the expression's evaluation should produce value that should be
+                                       *   put to register, specified by operand, specified in state */
+  uint8_t is_complex_production  : 1; /**< the expression is being parsed in complex production mode */
   uint8_t is_rewrite_chain_active : 1; /**< flag, indicating whether rewrite chain is associated with current state */
   uint8_t is_raised               : 1; /**< nested label flag*/
   uint8_t var_decl                : 1; /**< this flag tells that we are parsing VariableStatement, not
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
 
-  jsp_state_expr_t state; /**< current state */
-  jsp_state_expr_t req_expr_type; /**< requested type of expression */
-
-  jsp_operand_t operand; /**< operand, associated with expression */
-  jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
-
-  struct /* FIXME: switch to union */
+  union u
   {
+    u (void) { }
+
     uint32_t list_length; /**< length of list associated with the expression
                            *   (valid only if is_list_in_process flag is set) */
     vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
@@ -636,6 +639,8 @@ typedef struct
     } for_in;
   } u;
 } jsp_state_t;
+
+static_assert (sizeof (jsp_state_t) == 64, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 128
