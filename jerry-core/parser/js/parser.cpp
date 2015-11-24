@@ -3046,6 +3046,37 @@ parse_statement_ (void)
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
+      else if (token_is (TOK_KW_RETURN))
+      {
+        if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Return is illegal");
+        }
+
+        skip_token ();
+
+        if (!token_is (TOK_SEMICOLON)
+            && !lexer_is_preceded_by_newlines (tok)
+            && !token_is (TOK_CLOSE_BRACE))
+        {
+          const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
+
+          dump_retval (dump_assignment_of_lhs_if_value_based_reference (op));
+
+          insert_semicolon ();
+        }
+        else
+        {
+          if (token_is (TOK_CLOSE_BRACE))
+          {
+            lexer_save_token (tok);
+          }
+
+          dump_ret ();
+        }
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
       else if (token_is (TOK_KW_TRY))
       {
         scopes_tree_set_contains_try (serializer_get_scope ());
@@ -3709,7 +3740,9 @@ parse_statement (void)
                 && !token_is (TOK_NAME)
                 && !token_is (TOK_SEMICOLON)
                 && !token_is (TOK_KW_BREAK)
-                && !token_is (TOK_KW_CONTINUE));
+                && !token_is (TOK_KW_CONTINUE)
+                && !token_is (TOK_KW_RETURN)
+                && !token_is (TOK_KW_TRY));
 
   dumper_new_statement ();
 
@@ -3747,32 +3780,6 @@ parse_statement (void)
   {
     parse_function_declaration ();
     return;
-  }
-  if (token_is (TOK_KW_RETURN))
-  {
-    if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
-    {
-      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Return is illegal");
-    }
-
-    skip_token ();
-    if (!token_is (TOK_SEMICOLON) && !lexer_is_preceded_by_newlines (tok) && !token_is (TOK_CLOSE_BRACE))
-    {
-      const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-      dump_retval (dump_assignment_of_lhs_if_value_based_reference (op));
-      insert_semicolon ();
-      return;
-    }
-    else
-    {
-      dump_ret ();
-
-      if (token_is (TOK_CLOSE_BRACE))
-      {
-        lexer_save_token (tok);
-      }
-      return;
-    }
   }
   if (token_is (TOK_KW_WITH))
   {
