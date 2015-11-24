@@ -2855,12 +2855,12 @@ parse_expression_inside_parens (void)
 }
 
 static void
-jsp_start_statement_parse (jsp_state_expr_t req_stat)
+jsp_start_statement_parse (jsp_state_expr_t stat)
 {
   jsp_state_t new_state;
 
-  new_state.state = JSP_STATE_EXPR_EMPTY;
-  new_state.req_expr_type = req_stat;
+  new_state.state = stat;
+  new_state.req_expr_type = JSP_STATE_STAT_STATEMENT;
   new_state.operand = empty_operand ();
   new_state.token_type = TOK_EMPTY;
   new_state.u.statement.outermost_stmt_label_p = NULL;
@@ -2910,7 +2910,7 @@ while (0)
 do \
 { \
   state_p->state = (s); \
-  jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT); \
+  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY); \
   dumper_new_statement (); \
 } \
 while (0)
@@ -2923,7 +2923,7 @@ parse_statement_ (void)
 {
   dumper_new_statement ();
 
-  jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
   uint32_t start_pos = jsp_state_stack_pos;
 
   while (true)
@@ -3045,9 +3045,7 @@ parse_statement_ (void)
             if (token_is (TOK_KW_VAR))
             {
               state_p->state = JSP_STATE_STAT_FOR_INIT_END;
-              jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
-              state_p = jsp_state_top ();
-              state_p->state = JSP_STATE_STAT_VAR_DECL;
+              jsp_start_statement_parse (JSP_STATE_STAT_VAR_DECL);
             }
             else
             {
@@ -3166,9 +3164,8 @@ parse_statement_ (void)
                                                          : &state_p->u.statement.label);
 
           state_p->state = JSP_STATE_STAT_ITER_FINISH;
-          jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
-          jsp_state_t *tmp_state_p = jsp_state_top ();
-          tmp_state_p->u.statement.outermost_stmt_label_p = state_p->u.statement.outermost_stmt_label_p;
+          jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+          jsp_state_top ()->u.statement.outermost_stmt_label_p = state_p->u.statement.outermost_stmt_label_p;
         }
         else
         {
@@ -3228,7 +3225,7 @@ parse_statement_ (void)
       }
       else
       {
-        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT);
+        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
     }
     else if (state_p->state == JSP_STATE_STAT_VAR_DECL)
