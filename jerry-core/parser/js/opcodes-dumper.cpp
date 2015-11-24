@@ -562,27 +562,23 @@ dump_prop_setter_or_triple_address_res (vm_op_t opcode,
                                         jsp_operand_t res,
                                         jsp_operand_t op)
 {
-  if (!res.is_reference_operand ())
+  JERRY_ASSERT (res.is_reference_operand ());
+
+  if (res.is_value_based_reference_operand ())
   {
-    PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", LIT_ITERATOR_POS_ZERO);
+    JERRY_ASSERT (res.is_evaluated_value_based_reference_operand ());
+
+    const jsp_operand_t tmp = dump_prop_getter_res (res);
+
+    dump_triple_address (opcode, tmp, tmp, op);
+
+    dump_prop_setter (res, tmp);
   }
   else
   {
-    if (res.is_value_based_reference_operand ())
-    {
-      JERRY_ASSERT (res.is_evaluated_value_based_reference_operand ());
-
-      const jsp_operand_t tmp = dump_prop_getter_res (res);
-
-      dump_triple_address (opcode, tmp, tmp, op);
-
-      dump_prop_setter (res, tmp);
-    }
-    else
-    {
-      dump_triple_address (opcode, res, res, op);
-    }
+    dump_triple_address (opcode, res, res, op);
   }
+
   return res;
 }
 
@@ -719,20 +715,6 @@ dumper_is_eval_literal (jsp_operand_t obj) /**< byte-code operand */
 
   return is_eval_lit;
 } /* dumper_is_eval_literal */
-
-/**
- * Raise early ReferenceError if the operand is not a Reference
- */
-static void
-jsp_raise_reference_error_if_not_reference (jsp_operand_t obj) /**< operand, which type should be Reference */
-{
-  if (!obj.is_reference_operand ())
-  {
-    PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE,
-                 "Invalid left-hand-side expression in prefix operation",
-                 LIT_ITERATOR_POS_ZERO);
-  }
-} /* jsp_raise_reference_error_if_not_reference */
 
 /**
  * Dump assignment of an array-hole simple value to a register
@@ -1206,7 +1188,6 @@ dump_this_res (void)
 jsp_operand_t
 dump_post_increment_res (jsp_operand_t op)
 {
-  jsp_raise_reference_error_if_not_reference (op);
   JERRY_ASSERT (op.is_reference_operand ());
 
   const jsp_operand_t res = tmp_operand ();
@@ -1232,7 +1213,6 @@ dump_post_increment_res (jsp_operand_t op)
 jsp_operand_t
 dump_post_decrement_res (jsp_operand_t op)
 {
-  jsp_raise_reference_error_if_not_reference (op);
   JERRY_ASSERT (op.is_reference_operand ());
 
   const jsp_operand_t res = tmp_operand ();
@@ -1258,7 +1238,6 @@ dump_post_decrement_res (jsp_operand_t op)
 jsp_operand_t
 dump_pre_increment_res (jsp_operand_t op)
 {
-  jsp_raise_reference_error_if_not_reference (op);
   JERRY_ASSERT (op.is_reference_operand ());
 
   const jsp_operand_t res = tmp_operand ();
@@ -1282,7 +1261,6 @@ dump_pre_increment_res (jsp_operand_t op)
 jsp_operand_t
 dump_pre_decrement_res (jsp_operand_t op)
 {
-  jsp_raise_reference_error_if_not_reference (op);
   JERRY_ASSERT (op.is_reference_operand ());
 
   const jsp_operand_t res = tmp_operand ();
@@ -1772,7 +1750,6 @@ rewrite_jump_to_end (void)
 jsp_operand_t
 dump_prop_setter_or_variable_assignment_res (jsp_operand_t res, jsp_operand_t op)
 {
-  jsp_raise_reference_error_if_not_reference (res);
   JERRY_ASSERT (res.is_reference_operand ());
 
   if (res.is_value_based_reference_operand ())

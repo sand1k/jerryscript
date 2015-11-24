@@ -1656,8 +1656,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
             && !lexer_is_preceded_by_newlines (tok))
         {
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->operand, is_strict_mode (), tok.loc);
-          state_p->operand = dump_post_increment_res (state_p->operand);
+          if (!state_p->operand.is_reference_operand ())
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
 
+          state_p->operand = dump_post_increment_res (state_p->operand);
           state_p->state = JSP_STATE_EXPR_UNARY;
           JERRY_ASSERT (state_p->is_completed);
 
@@ -1667,9 +1671,14 @@ parse_expression_ (jsp_state_expr_t req_expr,
                  && !lexer_is_preceded_by_newlines (tok))
         {
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->operand, is_strict_mode (), tok.loc);
-          state_p->operand = dump_post_decrement_res (state_p->operand);
+          if (!state_p->operand.is_reference_operand ())
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
 
+          state_p->operand = dump_post_decrement_res (state_p->operand);
           state_p->state = JSP_STATE_EXPR_UNARY;
+          JERRY_ASSERT (state_p->is_completed);
 
           skip_token ();
         }
@@ -1680,6 +1689,11 @@ parse_expression_ (jsp_state_expr_t req_expr,
           if (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END)
           {
             jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->operand, is_strict_mode (), tok.loc);
+
+            if (!state_p->operand.is_reference_operand ())
+            {
+              PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+            }
 
             /* skip the assignment operator */
             skip_token ();
@@ -1716,11 +1730,21 @@ parse_expression_ (jsp_state_expr_t req_expr,
         {
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
 
+          if (!subexpr_operand.is_reference_operand ())
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
+
           state_p->operand = dump_pre_increment_res (subexpr_operand);
         }
         else if (state_p->token_type == TOK_DOUBLE_MINUS)
         {
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
+
+          if (!subexpr_operand.is_reference_operand ())
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
 
           state_p->operand = dump_pre_decrement_res (subexpr_operand);
         }
