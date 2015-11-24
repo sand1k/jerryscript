@@ -3748,10 +3748,6 @@ parse_statement (void)
     parse_function_declaration ();
     return;
   }
-  if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
-  {
-    return;
-  }
   if (token_is (TOK_KW_RETURN))
   {
     if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
