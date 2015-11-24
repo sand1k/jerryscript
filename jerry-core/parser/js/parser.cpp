@@ -2984,6 +2984,68 @@ parse_statement_ (void)
         state_p->state = JSP_STATE_STAT_SWITCH_FINISH;
         state_p->is_default_branch = was_default;
       }
+      else if (token_is (TOK_SEMICOLON))
+      {
+        // skip_token ();
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
+      else if (token_is (TOK_KW_CONTINUE)
+               || token_is (TOK_KW_BREAK))
+      {
+        bool is_break = token_is (TOK_KW_BREAK);
+
+        skip_token ();
+
+        jsp_label_t *label_p;
+        bool is_simply_jumpable = true;
+        if (!lexer_is_preceded_by_newlines (tok)
+            && token_is (TOK_NAME))
+        {
+          /* break or continue on a label */
+          label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, token_data_as_lit_cp (), &is_simply_jumpable);
+
+          if (label_p == NULL)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label not found");
+          }
+
+          skip_token ();
+        }
+        else if (is_break)
+        {
+          label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_BREAKS,
+                                    NOT_A_LITERAL,
+                                    &is_simply_jumpable);
+
+          if (label_p == NULL)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the break");
+          }
+        }
+        else
+        {
+          JERRY_ASSERT (!is_break);
+
+          label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_CONTINUES,
+                                    NOT_A_LITERAL,
+                                    &is_simply_jumpable);
+
+          if (label_p == NULL)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the continue");
+          }
+        }
+
+        lexer_save_token (tok);
+        insert_semicolon ();
+
+        JERRY_ASSERT (label_p != NULL);
+
+        jsp_label_add_jump (label_p, is_simply_jumpable, is_break);
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
       else if (token_is (TOK_KW_TRY))
       {
         scopes_tree_set_contains_try (serializer_get_scope ());
@@ -3644,7 +3706,10 @@ parse_statement (void)
                 && !token_is (TOK_KW_FOR)
                 && !token_is (TOK_KW_IF)
                 && !token_is (TOK_KW_SWITCH)
-                && !token_is (TOK_NAME));
+                && !token_is (TOK_NAME)
+                && !token_is (TOK_SEMICOLON)
+                && !token_is (TOK_KW_BREAK)
+                && !token_is (TOK_KW_CONTINUE));
 
   dumper_new_statement ();
 
@@ -3683,68 +3748,8 @@ parse_statement (void)
     parse_function_declaration ();
     return;
   }
-  if (token_is (TOK_SEMICOLON))
-  {
-    return;
-  }
   if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
   {
-    return;
-  }
-  if (token_is (TOK_KW_CONTINUE)
-      || token_is (TOK_KW_BREAK))
-  {
-    bool is_break = token_is (TOK_KW_BREAK);
-
-    skip_token ();
-
-    jsp_label_t *label_p;
-    bool is_simply_jumpable = true;
-    if (!lexer_is_preceded_by_newlines (tok)
-        && token_is (TOK_NAME))
-    {
-      /* break or continue on a label */
-      label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, token_data_as_lit_cp (), &is_simply_jumpable);
-
-      if (label_p == NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label not found");
-      }
-
-      skip_token ();
-    }
-    else if (is_break)
-    {
-      label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                                NOT_A_LITERAL,
-                                &is_simply_jumpable);
-
-      if (label_p == NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the break");
-      }
-    }
-    else
-    {
-      JERRY_ASSERT (!is_break);
-
-      label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_CONTINUES,
-                                NOT_A_LITERAL,
-                                &is_simply_jumpable);
-
-      if (label_p == NULL)
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the continue");
-      }
-    }
-
-    lexer_save_token (tok);
-    insert_semicolon ();
-
-    JERRY_ASSERT (label_p != NULL);
-
-    jsp_label_add_jump (label_p, is_simply_jumpable, is_break);
-
     return;
   }
   if (token_is (TOK_KW_RETURN))
