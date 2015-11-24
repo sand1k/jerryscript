@@ -95,6 +95,10 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_ITER_FINISH        = 0x41,
   JSP_STATE_STAT_SWITCH_BRANCH      = 0x42,
   JSP_STATE_STAT_SWITCH_FINISH      = 0x43,
+  JSP_STATE_STAT_TRY                = 0x44,
+  JSP_STATE_STAT_CATCH_FINISH       = 0x45,
+  JSP_STATE_STAT_FINALLY_FINISH     = 0x46,
+  JSP_STATE_STAT_TRY_FINISH         = 0x49,
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -3264,6 +3268,22 @@ parse_statement_ (void)
         state_p->state = JSP_STATE_STAT_SWITCH_FINISH;
         state_p->is_default_branch = was_default;
       }
+      else if (token_is (TOK_KW_TRY))
+      {
+        scopes_tree_set_contains_try (serializer_get_scope ());
+
+        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
+
+        dump_try_for_rewrite ();
+
+        skip_token ();
+        current_token_must_be (TOK_OPEN_BRACE);
+        skip_token ();
+
+        state_p->state = JSP_STATE_STAT_TRY;
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+      }
       else
       {
         parse_statement (NULL);
@@ -3550,6 +3570,101 @@ parse_statement_ (void)
       finish_dumping_case_clauses ();
 
       lexer_save_token (tok);
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_TRY)
+    {
+      current_token_must_be (TOK_CLOSE_BRACE);
+
+      rewrite_try ();
+
+      skip_token ();
+
+      if (token_is (TOK_KW_CATCH))
+      {
+        assert_keyword (TOK_KW_CATCH);
+
+        skip_token ();
+        current_token_must_be (TOK_OPEN_PAREN);
+
+        skip_token ();
+        current_token_must_be (TOK_NAME);
+
+        const jsp_operand_t exception = literal_operand (token_data_as_lit_cp ());
+        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (exception, is_strict_mode (), tok.loc);
+
+        skip_token ();
+        current_token_must_be (TOK_CLOSE_PAREN);
+
+        dump_catch_for_rewrite (exception);
+
+        skip_token ();
+        current_token_must_be (TOK_OPEN_BRACE);
+        skip_token ();
+
+        state_p->state = JSP_STATE_STAT_CATCH_FINISH;
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+      }
+      else if (token_is (TOK_KW_FINALLY))
+      {
+        dump_finally_for_rewrite ();
+
+        skip_token ();
+        current_token_must_be (TOK_OPEN_BRACE);
+        skip_token ();
+
+        state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+      }
+      else
+      {
+        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either 'catch' or 'finally' token");
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_CATCH_FINISH)
+    {
+      current_token_must_be (TOK_CLOSE_BRACE);
+
+      rewrite_catch ();
+
+      skip_token ();
+      if (token_is (TOK_KW_FINALLY))
+      {
+        dump_finally_for_rewrite ();
+
+        skip_token ();
+        current_token_must_be (TOK_OPEN_BRACE);
+        skip_token ();
+
+        state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+      }
+      else
+      {
+        lexer_save_token (tok);
+        state_p->state = JSP_STATE_STAT_TRY_FINISH;
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    {
+      current_token_must_be (TOK_CLOSE_BRACE);
+
+      rewrite_finally ();
+
+      state_p->state = JSP_STATE_STAT_TRY_FINISH;
+    }
+    else if (state_p->state == JSP_STATE_STAT_TRY_FINISH)
+    {
+      dump_end_try_catch_finally ();
+
+      if (state_p->is_raised)
+      {
+        jsp_label_remove_nested_jumpable_border ();
+      }
 
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
