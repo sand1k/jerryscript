@@ -2540,30 +2540,6 @@ parse_variable_declaration (void)
   return name;
 } /* parse_variable_declaration */
 
-/* variable_declaration_list
-  : variable_declaration
-    (LT!* ',' LT!* variable_declaration)*
-  ; */
-static void
-parse_variable_declaration_list (void)
-{
-  JERRY_ASSERT (token_is (TOK_KW_VAR));
-
-  while (true)
-  {
-    skip_token ();
-
-    parse_variable_declaration ();
-
-    skip_token ();
-    if (!token_is (TOK_COMMA))
-    {
-      lexer_save_token (tok);
-      break;
-    }
-  }
-}
-
 static jsp_operand_t
 parse_expression_inside_parens (void)
 {
@@ -3510,34 +3486,6 @@ parse_statement_ (void)
   }
 } /* parse_statement_ */
 
-/* statement_list
-  : statement (LT!* statement)*
-  ; */
-static void
-parse_statement_list (void)
-{
-  while (true)
-  {
-    parse_statement_ ();
-
-    skip_token ();
-    while (token_is (TOK_SEMICOLON))
-    {
-      skip_token ();
-    }
-    if (token_is (TOK_CLOSE_BRACE))
-    {
-      lexer_save_token (tok);
-      break;
-    }
-    if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
-    {
-      lexer_save_token (tok);
-      break;
-    }
-  }
-}
-
 static void
 skip_case_clause_body (void)
 {
@@ -3550,120 +3498,6 @@ skip_case_clause_body (void)
       jsp_skip_braces (TOK_OPEN_BRACE);
     }
     skip_token ();
-  }
-}
-
-/* catch_clause
-  : 'catch' LT!* '(' LT!* Identifier LT!* ')' LT!* '{' LT!* statement_list LT!* '}'
-  ; */
-static void
-parse_catch_clause (void)
-{
-  assert_keyword (TOK_KW_CATCH);
-
-  skip_token ();
-  current_token_must_be (TOK_OPEN_PAREN);
-
-  skip_token ();
-  current_token_must_be (TOK_NAME);
-
-  const jsp_operand_t exception = literal_operand (token_data_as_lit_cp ());
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (exception, is_strict_mode (), tok.loc);
-
-  skip_token ();
-  current_token_must_be (TOK_CLOSE_PAREN);
-
-  dump_catch_for_rewrite (exception);
-
-  skip_token ();
-  current_token_must_be (TOK_OPEN_BRACE);
-  skip_token ();
-
-  parse_statement_list ();
-
-  skip_token ();
-  current_token_must_be (TOK_CLOSE_BRACE);
-
-  rewrite_catch ();
-}
-
-/* finally_clause
-  : 'finally' LT!* '{' LT!* statement_list LT!* '}'
-  ; */
-static void
-parse_finally_clause (void)
-{
-  assert_keyword (TOK_KW_FINALLY);
-
-  dump_finally_for_rewrite ();
-
-  skip_token ();
-  current_token_must_be (TOK_OPEN_BRACE);
-  skip_token ();
-
-  parse_statement_list ();
-
-  skip_token ();
-  current_token_must_be (TOK_CLOSE_BRACE);
-
-  rewrite_finally ();
-}
-
-/* try_statement
-  : 'try' LT!* '{' LT!* statement_list LT!* '}' LT!* (finally_clause | catch_clause (LT!* finally_clause)?)
-  ; */
-static void
-parse_try_statement (void)
-{
-  assert_keyword (TOK_KW_TRY);
-
-  scopes_tree_set_contains_try (serializer_get_scope ());
-
-  bool is_raised = jsp_label_raise_nested_jumpable_border ();
-
-  dump_try_for_rewrite ();
-
-  skip_token ();
-  current_token_must_be (TOK_OPEN_BRACE);
-  skip_token ();
-
-  parse_statement_list ();
-
-  skip_token ();
-  current_token_must_be (TOK_CLOSE_BRACE);
-
-  rewrite_try ();
-
-  skip_token ();
-
-  if (token_is (TOK_KW_CATCH))
-  {
-    parse_catch_clause ();
-
-    skip_token ();
-    if (token_is (TOK_KW_FINALLY))
-    {
-      parse_finally_clause ();
-    }
-    else
-    {
-      lexer_save_token (tok);
-    }
-  }
-  else if (token_is (TOK_KW_FINALLY))
-  {
-    parse_finally_clause ();
-  }
-  else
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either 'catch' or 'finally' token");
-  }
-
-  dump_end_try_catch_finally ();
-
-  if (is_raised)
-  {
-    jsp_label_remove_nested_jumpable_border ();
   }
 }
 
@@ -3733,49 +3567,26 @@ parse_try_statement (void)
 static void
 parse_statement (void)
 {
-  JERRY_ASSERT (!token_is (TOK_KW_DO)
-                && !token_is (TOK_KW_WHILE)
-                && !token_is (TOK_KW_FOR)
-                && !token_is (TOK_KW_IF)
-                && !token_is (TOK_KW_SWITCH)
-                && !token_is (TOK_NAME)
-                && !token_is (TOK_SEMICOLON)
-                && !token_is (TOK_KW_BREAK)
-                && !token_is (TOK_KW_CONTINUE)
-                && !token_is (TOK_KW_RETURN)
-                && !token_is (TOK_KW_TRY)
-                && !token_is (TOK_KW_WITH));
+  JERRY_ASSERT (!token_is (TOK_KW_DO));
+  JERRY_ASSERT (!token_is (TOK_KW_WHILE));
+  JERRY_ASSERT (!token_is (TOK_KW_FOR));
+  JERRY_ASSERT (!token_is (TOK_KW_IF));
+  JERRY_ASSERT (!token_is (TOK_KW_SWITCH));
+  JERRY_ASSERT (!token_is (TOK_NAME));
+  JERRY_ASSERT (!token_is (TOK_SEMICOLON));
+  JERRY_ASSERT (!token_is (TOK_KW_BREAK));
+  JERRY_ASSERT (!token_is (TOK_KW_CONTINUE));
+  JERRY_ASSERT (!token_is (TOK_KW_RETURN));
+  JERRY_ASSERT (!token_is (TOK_KW_TRY));
+  JERRY_ASSERT (!token_is (TOK_KW_WITH));
+  JERRY_ASSERT (!token_is (TOK_OPEN_BRACE));
+  JERRY_ASSERT (!token_is (TOK_KW_VAR));
 
   dumper_new_statement ();
 
   if (token_is (TOK_CLOSE_BRACE))
   {
     lexer_save_token (tok);
-    return;
-  }
-  if (token_is (TOK_OPEN_BRACE))
-  {
-    skip_token ();
-    if (!token_is (TOK_CLOSE_BRACE))
-    {
-      parse_statement_list ();
-
-      skip_token ();
-      current_token_must_be (TOK_CLOSE_BRACE);
-    }
-    return;
-  }
-  if (token_is (TOK_KW_VAR))
-  {
-    parse_variable_declaration_list ();
-    if (token_is (TOK_SEMICOLON))
-    {
-      skip_token ();
-    }
-    else
-    {
-      insert_semicolon ();
-    }
     return;
   }
   if (token_is (TOK_KW_FUNCTION))
@@ -3789,11 +3600,6 @@ parse_statement (void)
     const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
     insert_semicolon ();
     dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
-    return;
-  }
-  if (token_is (TOK_KW_TRY))
-  {
-    parse_try_statement ();
     return;
   }
 
