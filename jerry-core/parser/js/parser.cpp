@@ -109,7 +109,6 @@ static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
 
 static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 
-static void parse_statement (void);
 static void parse_statement_ (void);
 static void parse_source_element_list (void);
 static void skip_case_clause_body (void);
@@ -2590,7 +2589,7 @@ while (0)
 do \
 { \
   state_p->state = (s); \
-  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY); \
+  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY); \
   dumper_new_statement (); \
 } \
 while (0)
@@ -2603,7 +2602,7 @@ parse_statement_ (void)
 {
   dumper_new_statement ();
 
-  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
   uint32_t start_pos = jsp_state_stack_pos;
 
   while (true)
@@ -2626,8 +2625,10 @@ parse_statement_ (void)
       }
     }
 
-    if (state_p->state == JSP_STATE_EXPR_EMPTY)
+    if (state_p->state == JSP_STATE_STAT_EMPTY)
     {
+      dumper_new_statement ();
+
       if (token_is (TOK_KW_IF)) /* IfStatement */
       {
         jsp_operand_t cond = parse_expression_inside_parens ();
@@ -2844,7 +2845,7 @@ parse_statement_ (void)
                                                          : &state_p->u.statement.label);
 
           state_p->state = JSP_STATE_STAT_ITER_FINISH;
-          jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
           jsp_state_top ()->u.statement.outermost_stmt_label_p = state_p->u.statement.outermost_stmt_label_p;
         }
         else
@@ -3044,9 +3045,12 @@ parse_statement_ (void)
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
 
+        if (!token_is (TOK_CLOSE_BRACE))
+        {
+          jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
+        }
         state_p->state = JSP_STATE_STAT_TRY;
-        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
       else if (token_is (TOK_KW_WITH))
       {
@@ -3090,7 +3094,8 @@ parse_statement_ (void)
       }
       else
       {
-        parse_statement ();
+        parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
+        insert_semicolon ();
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
@@ -3135,7 +3140,7 @@ parse_statement_ (void)
       }
       else
       {
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+        jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
       }
     }
     else if (state_p->state == JSP_STATE_STAT_VAR_DECL)
@@ -3407,9 +3412,12 @@ parse_statement_ (void)
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
 
+        if (!token_is (TOK_CLOSE_BRACE))
+        {
+          jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
+        }
         state_p->state = JSP_STATE_STAT_CATCH_FINISH;
-        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
       else if (token_is (TOK_KW_FINALLY))
       {
@@ -3421,7 +3429,7 @@ parse_statement_ (void)
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+        jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
       }
       else
       {
@@ -3442,10 +3450,12 @@ parse_statement_ (void)
         skip_token ();
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
-
+        if (!token_is (TOK_CLOSE_BRACE))
+        {
+          jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
+        }
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
-        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
       else
       {
@@ -3510,101 +3520,6 @@ skip_case_clause_body (void)
     }
     skip_token ();
   }
-}
-
-/* statement
-  : statement_block
-  | variable_statement
-  | empty_statement
-  | if_statement
-  | iteration_statement
-  | continue_statement
-  | break_statement
-  | return_statement
-  | with_statement
-  | labelled_statement
-  | switch_statement
-  | throw_statement
-  | try_statement
-  | expression_statement
-  ;
-
-   statement_block
-  : '{' LT!* statement_list? LT!* '}'
-  ;
-
-   variable_statement
-  : 'var' LT!* variable_declaration_list (LT | ';')!
-  ;
-
-   empty_statement
-  : ';'
-  ;
-
-   expression_statement
-  : expression (LT | ';')!
-  ;
-
-   iteration_statement
-  : do_while_statement
-  | while_statement
-  | for_statement
-  | for_in_statement
-  ;
-
-   continue_statement
-  : 'continue' Identifier? (LT | ';')!
-  ;
-
-   break_statement
-  : 'break' Identifier? (LT | ';')!
-  ;
-
-   return_statement
-  : 'return' expression? (LT | ';')!
-  ;
-
-   switchStatement
-  : 'switch' LT!* '(' LT!* expression LT!* ')' LT!* caseBlock
-  ;
-
-   throw_statement
-  : 'throw' expression (LT | ';')!
-  ;
-
-   try_statement
-  : 'try' LT!* '{' LT!* statement_list LT!* '}' LT!* (finally_clause | catch_clause (LT!* finally_clause)?)
-  ;*/
-static void
-parse_statement (void)
-{
-  JERRY_ASSERT (!token_is (TOK_KW_DO));
-  JERRY_ASSERT (!token_is (TOK_KW_WHILE));
-  JERRY_ASSERT (!token_is (TOK_KW_FOR));
-  JERRY_ASSERT (!token_is (TOK_KW_IF));
-  JERRY_ASSERT (!token_is (TOK_KW_SWITCH));
-  JERRY_ASSERT (!token_is (TOK_NAME));
-  JERRY_ASSERT (!token_is (TOK_SEMICOLON));
-  JERRY_ASSERT (!token_is (TOK_KW_BREAK));
-  JERRY_ASSERT (!token_is (TOK_KW_CONTINUE));
-  JERRY_ASSERT (!token_is (TOK_KW_RETURN));
-  JERRY_ASSERT (!token_is (TOK_KW_TRY));
-  JERRY_ASSERT (!token_is (TOK_KW_WITH));
-  JERRY_ASSERT (!token_is (TOK_OPEN_BRACE));
-  JERRY_ASSERT (!token_is (TOK_KW_VAR));
-  JERRY_ASSERT (!token_is (TOK_KW_THROW));
-  JERRY_ASSERT (!token_is (TOK_KW_FUNCTION));
-
-  dumper_new_statement ();
-
-  if (token_is (TOK_CLOSE_BRACE))
-  {
-    lexer_save_token (tok);
-    return;
-  }
-
-  parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-  insert_semicolon ();
 }
 
 /* source_element
