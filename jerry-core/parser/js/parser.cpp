@@ -90,25 +90,27 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_DO_WHILE           = 0x36, /**< IterationStatement */
   JSP_STATE_STAT_WHILE              = 0x37,
   JSP_STATE_STAT_FOR_INIT_END       = 0x38,
-  JSP_STATE_STAT_FOR_FINISH         = 0x39,
-  JSP_STATE_STAT_FOR_IN_FINISH      = 0x40,
-  JSP_STATE_STAT_ITER_FINISH        = 0x41,
-  JSP_STATE_STAT_SWITCH_BRANCH      = 0x42,
-  JSP_STATE_STAT_SWITCH_FINISH      = 0x43,
-  JSP_STATE_STAT_TRY                = 0x44,
-  JSP_STATE_STAT_CATCH_FINISH       = 0x45,
-  JSP_STATE_STAT_FINALLY_FINISH     = 0x46,
-  JSP_STATE_STAT_TRY_FINISH         = 0x47,
-  JSP_STATE_STAT_WITH_FINISH        = 0x48,
+  JSP_STATE_STAT_FOR_INCREMENT      = 0x39,
+  JSP_STATE_STAT_FOR_COND           = 0x40,
+  JSP_STATE_STAT_FOR_FINISH         = 0x41,
+  JSP_STATE_STAT_FOR_IN_FINISH      = 0x42,
+  JSP_STATE_STAT_ITER_FINISH        = 0x43,
+  JSP_STATE_STAT_SWITCH_BRANCH      = 0x44,
+  JSP_STATE_STAT_SWITCH_FINISH      = 0x45,
+  JSP_STATE_STAT_TRY                = 0x46,
+  JSP_STATE_STAT_CATCH_FINISH       = 0x47,
+  JSP_STATE_STAT_FINALLY_FINISH     = 0x48,
+  JSP_STATE_STAT_TRY_FINISH         = 0x49,
+  JSP_STATE_STAT_WITH_FINISH        = 0x50,
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
 
-  JSP_STATE_SOURCE_ELEMENTS_INIT    = 0x50,
-  JSP_STATE_SOURCE_ELEMENTS         = 0x51,
-  JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT = 0x52,
+  JSP_STATE_SOURCE_ELEMENTS_INIT    = 0x62,
+  JSP_STATE_SOURCE_ELEMENTS         = 0x63,
+  JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT = 0x64,
 
-  JSP_STATE_STAT_BLOCK              = 0x53,
+  JSP_STATE_STAT_BLOCK              = 0x65,
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -2756,6 +2758,7 @@ static void
 parse_expression_inside_parens_end (void)
 {
   current_token_must_be (TOK_CLOSE_PAREN);
+  skip_token ();
 }
 
 static void
@@ -3058,7 +3061,7 @@ parse_statement_ (void)
             {
               if (!token_is (TOK_SEMICOLON))
               {
-                parse_expression (false, JSP_EVAL_RET_STORE_NOT_DUMP); // TODO: add state for expression parsing
+                jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, false);
               }
               else
               {
@@ -3440,8 +3443,6 @@ parse_statement_ (void)
         cond = dump_assignment_of_lhs_if_value_based_reference (cond);
         dump_conditional_check_for_rewrite (cond);
 
-        skip_token ();
-
         JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_IF_BRANCH_START);
       }
       else
@@ -3524,39 +3525,58 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_STAT_DO_WHILE)
     {
-      assert_keyword (TOK_KW_WHILE);
-      skip_token ();
+      if (is_subexpr_end)
+      {
+        parse_expression_inside_parens_end ();
 
-      jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                       serializer_get_current_instr_counter ());
+        const jsp_operand_t cond = subexpr_operand;
+        dump_continue_iterations_check (cond);
 
-      const jsp_operand_t cond = parse_expression_inside_parens (); // TDOO: add state for expression parsing
-      skip_token ();
+        state_p->state = JSP_STATE_STAT_ITER_FINISH;
+      }
+      else
+      {
+        assert_keyword (TOK_KW_WHILE);
+        skip_token ();
 
-      insert_semicolon ();
+        jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
+                                         serializer_get_current_instr_counter ());
 
-      dump_continue_iterations_check (cond);
-
-      state_p->state = JSP_STATE_STAT_ITER_FINISH;
+        parse_expression_inside_parens_begin ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+      }
     }
     else if (state_p->state == JSP_STATE_STAT_WHILE)
     {
-      jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                       serializer_get_current_instr_counter ());
+      if (is_subexpr_end)
+      {
+        parse_expression_inside_parens_end ();
 
-      rewrite_jump_to_end ();
+        const jsp_operand_t cond = subexpr_operand;
+        dump_continue_iterations_check (cond);
 
-      const locus end_loc = tok.loc;
-      lexer_seek (state_p->u.statement.loc[0]);
-      skip_token ();
+        lexer_seek (state_p->u.statement.loc[0]);
+        skip_token ();
 
-      const jsp_operand_t cond = parse_expression_inside_parens (); // TDOO: add state for expression parsing
-      dump_continue_iterations_check (cond);
+        state_p->state = JSP_STATE_STAT_ITER_FINISH;
+      }
+      else
+      {
+        jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
+                                         serializer_get_current_instr_counter ());
 
-      lexer_seek (end_loc);
-      skip_token ();
+        rewrite_jump_to_end ();
 
-      state_p->state = JSP_STATE_STAT_ITER_FINISH;
+        const locus end_loc = tok.loc;
+
+        lexer_seek (state_p->u.statement.loc[0]);
+        skip_token ();
+
+        state_p->u.statement.loc[0] = end_loc;
+
+        parse_expression_inside_parens_begin ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+      }
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_INIT_END)
     {
@@ -3589,47 +3609,73 @@ parse_statement_ (void)
       lexer_seek (for_body_statement_loc);
       skip_token ();
 
-      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_FINISH);
+      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_INCREMENT);
     }
-    else if (state_p->state == JSP_STATE_STAT_FOR_FINISH)
+    else if (state_p->state == JSP_STATE_STAT_FOR_INCREMENT)
     {
-      // Save LoopEnd locus
-      const locus loop_end_loc = tok.loc;
-
-      // Setup ContinueTarget
-      jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                       serializer_get_current_instr_counter ());
-
-      // Increment
-      lexer_seek (state_p->u.statement.loc[1]);
-      skip_token ();
-
-      if (!token_is (TOK_CLOSE_PAREN))
+      if (is_subexpr_end)
       {
-        parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP); // TODO: add state for expression parsing
-      }
-
-      current_token_must_be (TOK_CLOSE_PAREN);
-
-      // Setup ConditionCheck
-      rewrite_jump_to_end ();
-
-      // Condition
-      lexer_seek (state_p->u.statement.loc[0]);
-      skip_token ();
-
-      if (token_is (TOK_SEMICOLON))
-      {
-        dump_continue_iterations_check (empty_operand ());
+        state_p->state = JSP_STATE_STAT_FOR_COND;
       }
       else
       {
-        jsp_operand_t cond = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-        // TODO: add state for expression parsing
-        dump_continue_iterations_check (cond);
-      }
+        // Save LoopEnd locus
+        const locus loop_end_loc = tok.loc;
 
-      lexer_seek (loop_end_loc);
+        // Setup ContinueTarget
+        jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
+                                         serializer_get_current_instr_counter ());
+
+        // Increment
+        lexer_seek (state_p->u.statement.loc[1]);
+        state_p->u.statement.loc[1] = loop_end_loc;
+        skip_token ();
+
+        if (!token_is (TOK_CLOSE_PAREN))
+        {
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+        else
+        {
+          state_p->state = JSP_STATE_STAT_FOR_COND;
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_COND)
+    {
+      if (is_subexpr_end)
+      {
+          jsp_operand_t cond = subexpr_operand;
+          // TODO: add state for expression parsing
+          dump_continue_iterations_check (cond);
+
+          state_p->state = JSP_STATE_STAT_FOR_FINISH;
+      }
+      else
+      {
+        current_token_must_be (TOK_CLOSE_PAREN);
+
+        // Setup ConditionCheck
+        rewrite_jump_to_end ();
+
+        // Condition
+        lexer_seek (state_p->u.statement.loc[0]);
+        skip_token ();
+
+        if (token_is (TOK_SEMICOLON))
+        {
+          dump_continue_iterations_check (empty_operand ());
+          state_p->state = JSP_STATE_STAT_FOR_FINISH;
+        }
+        else
+        {
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_FINISH)
+    {
+      lexer_seek (state_p->u.statement.loc[1]);
       skip_token ();
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
