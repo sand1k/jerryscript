@@ -3087,6 +3087,15 @@ parse_statement_ (void)
 
         JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WITH_FINISH);
       }
+      else if (token_is (TOK_KW_THROW))
+      {
+        skip_token ();
+        const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
+        insert_semicolon ();
+        dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
       else
       {
         parse_statement ();
@@ -3581,6 +3590,7 @@ parse_statement (void)
   JERRY_ASSERT (!token_is (TOK_KW_WITH));
   JERRY_ASSERT (!token_is (TOK_OPEN_BRACE));
   JERRY_ASSERT (!token_is (TOK_KW_VAR));
+  JERRY_ASSERT (!token_is (TOK_KW_THROW));
 
   dumper_new_statement ();
 
@@ -3592,14 +3602,6 @@ parse_statement (void)
   if (token_is (TOK_KW_FUNCTION))
   {
     parse_function_declaration ();
-    return;
-  }
-  if (token_is (TOK_KW_THROW))
-  {
-    skip_token ();
-    const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-    insert_semicolon ();
-    dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
     return;
   }
 
