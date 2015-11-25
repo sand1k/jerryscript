@@ -98,7 +98,8 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_TRY                = 0x44,
   JSP_STATE_STAT_CATCH_FINISH       = 0x45,
   JSP_STATE_STAT_FINALLY_FINISH     = 0x46,
-  JSP_STATE_STAT_TRY_FINISH         = 0x49,
+  JSP_STATE_STAT_TRY_FINISH         = 0x47,
+  JSP_STATE_STAT_WITH_FINISH        = 0x48
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -3093,6 +3094,23 @@ parse_statement_ (void)
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
         jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
+      else if (token_is (TOK_KW_WITH))
+      {
+        if (is_strict_mode ())
+        {
+          EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
+        }
+        const jsp_operand_t expr = parse_expression_inside_parens ();
+
+        scopes_tree_set_contains_with (serializer_get_scope ());
+
+        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
+
+        state_p->u.rewrite_chain = dump_with_for_rewrite (expr);
+        skip_token ();
+
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WITH_FINISH);
+      }
       else
       {
         parse_statement ();
@@ -3477,6 +3495,18 @@ parse_statement_ (void)
 
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
+    else if (state_p->state == JSP_STATE_STAT_WITH_FINISH)
+    {
+      rewrite_with (state_p->u.rewrite_chain);
+      dump_with_end ();
+
+      if (state_p->is_raised)
+      {
+        jsp_label_remove_nested_jumpable_border ();
+      }
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
   }
 } /* parse_statement_ */
 
@@ -3505,35 +3535,6 @@ parse_statement_list (void)
       lexer_save_token (tok);
       break;
     }
-  }
-}
-
-/* with_statement
-  : 'with' LT!* '(' LT!* expression LT!* ')' LT!* statement
-  ; */
-static void
-parse_with_statement (void)
-{
-  assert_keyword (TOK_KW_WITH);
-  if (is_strict_mode ())
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
-  }
-  const jsp_operand_t expr = parse_expression_inside_parens ();
-
-  scopes_tree_set_contains_with (serializer_get_scope ());
-
-  bool is_raised = jsp_label_raise_nested_jumpable_border ();
-
-  vm_instr_counter_t with_begin_oc = dump_with_for_rewrite (expr);
-  skip_token ();
-  parse_statement_ ();
-  rewrite_with (with_begin_oc);
-  dump_with_end ();
-
-  if (is_raised)
-  {
-    jsp_label_remove_nested_jumpable_border ();
   }
 }
 
@@ -3742,7 +3743,8 @@ parse_statement (void)
                 && !token_is (TOK_KW_BREAK)
                 && !token_is (TOK_KW_CONTINUE)
                 && !token_is (TOK_KW_RETURN)
-                && !token_is (TOK_KW_TRY));
+                && !token_is (TOK_KW_TRY)
+                && !token_is (TOK_KW_WITH));
 
   dumper_new_statement ();
 
@@ -3779,11 +3781,6 @@ parse_statement (void)
   if (token_is (TOK_KW_FUNCTION))
   {
     parse_function_declaration ();
-    return;
-  }
-  if (token_is (TOK_KW_WITH))
-  {
-    parse_with_statement ();
     return;
   }
   if (token_is (TOK_KW_THROW))
