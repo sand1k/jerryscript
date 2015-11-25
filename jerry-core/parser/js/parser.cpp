@@ -103,6 +103,12 @@ typedef enum __attr_packed___
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
+
+  JSP_STATE_SOURCE_ELEMENTS_INIT    = 0x50,
+  JSP_STATE_SOURCE_ELEMENTS         = 0x51,
+  JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT = 0x52,
+
+  JSP_STATE_STAT_BLOCK              = 0x53,
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -111,7 +117,6 @@ static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
 
 static void parse_statement (void);
 static void parse_statement_ (void);
-static void parse_source_element_list (void);
 static void skip_case_clause_body (void);
 
 static bool
@@ -186,6 +191,225 @@ is_strict_mode (void)
 {
   return scopes_tree_strict_mode (serializer_get_scope ());
 }
+
+#ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
+/**
+ * Try to perform move (allocation) of variables' values on registers
+ *
+ * Note:
+ *      The optimization is only applied to functions
+ *
+ * @return number of instructions removed from function's header
+ */
+static opcode_scope_code_flags_t
+jsp_try_move_vars_to_regs (opcode_scope_code_flags_t scope_flags,
+                           vm_instr_counter_t *out_number_of_instrs_removed_p)
+{
+  vm_instr_counter_t number_of_instrs_removed_from_function_header = 0;
+
+  scopes_tree fe_scope_tree = serializer_get_scope ();
+
+  /*
+   * We don't try to perform replacement of local variables with registers for global code, eval code.
+   *
+   * For global and eval code the replacement can be connected with side effects,
+   * that currently can only be figured out in runtime. For example, a variable
+   * can be redefined as accessor property of the Global object.
+   */
+  if (fe_scope_tree->type == SCOPE_TYPE_FUNCTION)
+  {
+    bool may_replace_vars_with_regs = (!fe_scope_tree->ref_eval /* 'eval' can reference variables in a way,
+                                                                    * that can't be figured out through static
+                                                                    * analysis */
+                                       && !fe_scope_tree->ref_arguments /* 'arguments' variable, if declared,
+                                                                         * should not be moved to a register,
+                                                                         * as it is currently declared in
+                                                                         * function's lexical environment
+                                                                         * (generally, the problem is the same,
+                                                                         *   as with function's arguments) */
+                                       && !fe_scope_tree->contains_with /* 'with' create new lexical environment
+                                                                         *  and so can change way identifier
+                                                                         *  is evaluated */
+                                       && !fe_scope_tree->contains_try /* same for 'catch' */
+                                       && !fe_scope_tree->contains_delete /* 'delete' handles variable's names,
+                                                                           * not values */
+                                       && !fe_scope_tree->contains_functions); /* nested functions can reference
+                                                                                * variables of current function */
+
+    if (may_replace_vars_with_regs)
+    {
+      /* no subscopes, as no function declarations / eval etc. in the scope */
+      JERRY_ASSERT (fe_scope_tree->t.children == null_list);
+
+      vm_instr_counter_t instr_pos = 0u;
+
+      const vm_instr_counter_t header_oc = instr_pos++;
+      op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, header_oc);
+      JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
+
+      vm_instr_counter_t function_end_pos = instr_pos;
+      while (true)
+      {
+        op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, function_end_pos);
+        JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+        opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
+
+        if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
+        {
+          /* marker of function argument list end reached */
+          break;
+        }
+        else
+        {
+          JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+
+          function_end_pos++;
+        }
+      }
+
+      uint32_t args_num = (uint32_t) (function_end_pos - instr_pos);
+
+      dumper_start_move_of_vars_to_regs ();
+
+      /* remove declarations of variables with names equal to an argument's name */
+      vm_instr_counter_t var_decl_pos = 0;
+      while (var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls))
+      {
+        op_meta *om_p = (op_meta *) linked_list_element (fe_scope_tree->var_decls, var_decl_pos);
+        bool is_removed = false;
+
+        for (vm_instr_counter_t arg_index = instr_pos;
+             arg_index < function_end_pos;
+             arg_index++)
+        {
+          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, arg_index);
+          JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+          JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
+          JERRY_ASSERT (om_p->op.data.var_decl.variable_name == VM_IDX_REWRITE_LITERAL_UID);
+
+          if (meta_opm.lit_id[1].packed_value == om_p->lit_id[0].packed_value)
+          {
+            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+
+            is_removed = true;
+            break;
+          }
+        }
+
+        if (!is_removed)
+        {
+          if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
+          {
+            var_decl_pos++;
+          }
+          else
+          {
+            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+          }
+        }
+      }
+
+      if (dumper_start_move_of_args_to_regs (args_num))
+      {
+        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
+
+        JERRY_ASSERT (linked_list_get_length (fe_scope_tree->var_decls) == 0);
+        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
+
+        /* at this point all arguments can be moved to registers */
+        if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
+        {
+          header_opm.op.data.func_expr_n.arg_list = 0;
+        }
+        else
+        {
+          JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
+
+          header_opm.op.data.func_decl_n.arg_list = 0;
+        }
+
+        scopes_tree_set_op_meta (fe_scope_tree, header_oc, header_opm);
+
+        /*
+         * Mark duplicated arguments names as empty,
+         * leaving only last declaration for each duplicated
+         * argument name
+         */
+        for (vm_instr_counter_t arg1_index = instr_pos;
+             arg1_index < function_end_pos;
+             arg1_index++)
+        {
+          op_meta meta_opm1 = scopes_tree_op_meta (fe_scope_tree, arg1_index);
+          JERRY_ASSERT (meta_opm1.op.op_idx == VM_OP_META);
+
+          for (vm_instr_counter_t arg2_index = (vm_instr_counter_t) (arg1_index + 1u);
+               arg2_index < function_end_pos;
+               arg2_index++)
+          {
+            op_meta meta_opm2 = scopes_tree_op_meta (fe_scope_tree, arg2_index);
+            JERRY_ASSERT (meta_opm2.op.op_idx == VM_OP_META);
+
+            if (meta_opm1.lit_id[1].packed_value == meta_opm2.lit_id[1].packed_value)
+            {
+              meta_opm1.op.data.meta.data_1 = VM_IDX_EMPTY;
+              meta_opm1.lit_id[1] = NOT_A_LITERAL;
+
+              scopes_tree_set_op_meta (fe_scope_tree, arg1_index, meta_opm1);
+
+              break;
+            }
+          }
+        }
+
+        while (true)
+        {
+          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos);
+          JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
+
+          opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
+
+          if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
+          {
+            /* marker of function argument list end reached */
+            break;
+          }
+          else
+          {
+            JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+
+            if (meta_opm.op.data.meta.data_1 == VM_IDX_EMPTY)
+            {
+              JERRY_ASSERT (meta_opm.lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
+
+              dumper_alloc_reg_for_unused_arg ();
+            }
+            else
+            {
+              /* the varg specifies argument name, and so should be a string literal */
+              JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
+              JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
+
+              bool is_replaced = dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm);
+              JERRY_ASSERT (is_replaced);
+            }
+
+            scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
+
+            number_of_instrs_removed_from_function_header++;
+            dumper_decrement_function_end_pos ();
+          }
+        }
+      }
+    }
+  }
+
+  *out_number_of_instrs_removed_p = number_of_instrs_removed_from_function_header;
+
+  return scope_flags;
+}
+#endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
 /**
  * Skip block, defined with braces of specified type
@@ -448,7 +672,7 @@ parse_property_name (void)
 static void
 jsp_parse_directive_prologue ()
 {
-  const locus start_loc = tok.loc;
+  locus start_loc = tok.loc;
 
   /*
    * Check Directive Prologue for Use Strict directive (see ECMA-262 5.1 section 14.1)
@@ -471,14 +695,8 @@ jsp_parse_directive_prologue ()
     }
   }
 
-  if (lit_utf8_iterator_pos_cmp (start_loc, tok.loc) != 0)
-  {
-    lexer_seek (start_loc);
-  }
-  else
-  {
-    lexer_save_token (tok);
-  }
+  lexer_seek (start_loc);
+  skip_token ();
 } /* jsp_parse_directive_prologue */
 
 static jsp_operand_t
@@ -558,8 +776,8 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 
   scopes_tree parent_scope = (scopes_tree) func_scope->t.parent;
 
-  skip_token ();
   current_token_must_be (TOK_CLOSE_BRACE);
+  skip_token ();
 
   dump_ret ();
   rewrite_function_end ();
@@ -627,6 +845,13 @@ typedef struct
 
     struct
     {
+      jsp_label_t *prev_label_set_p;
+      vm_instr_counter_t scope_code_flags_oc;
+      vm_instr_counter_t reg_var_decl_oc;
+    } source_elements;
+
+    struct
+    {
       vm_instr_counter_t header_pos;
     } for_in;
   } u;
@@ -635,7 +860,7 @@ typedef struct
 static_assert (sizeof (jsp_state_t) == 64, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
-#define JSP_STATE_STACK_MAX 128
+#define JSP_STATE_STACK_MAX 256
 jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
 uint32_t jsp_state_stack_pos = 0;
 
@@ -863,8 +1088,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
         jsp_operand_t ret = state_p->operand;
         jsp_state_pop ();
 
-        lexer_save_token (tok);
-
         return ret;
       }
       else
@@ -1035,12 +1258,12 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       skip_token ();
     }
-    else if (state_p->state == JSP_STATE_STAT_STATEMENT_LIST)
+    else if (state_p->state == JSP_STATE_SOURCE_ELEMENT_LIST)
     {
       JERRY_ASSERT (!state_p->is_completed);
 
       /* FIXME: merge with parse_statement_ */
-      parse_source_element_list ();
+      parse_statement_ ();
 
       state_p->is_completed = true;
     }
@@ -1051,8 +1274,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       if (is_subexpr_end)
       {
         jsp_finish_parse_function_scope (true);
-
-        skip_token ();
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
       }
@@ -1071,7 +1292,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         state_p->operand = jsp_start_parse_function_scope (name, true, NULL);
 
-        jsp_push_new_expr_state (JSP_STATE_STAT_STATEMENT_LIST, JSP_STATE_STAT_STATEMENT_LIST, true);
+        jsp_push_new_expr_state (JSP_STATE_SOURCE_ELEMENT_LIST, JSP_STATE_SOURCE_ELEMENT_LIST, true);
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_DATA_PROP_DECL)
@@ -1111,8 +1332,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
       if (is_subexpr_end)
       {
         jsp_finish_parse_function_scope (true);
-
-        skip_token ();
 
         jsp_operand_t prop_name = state_p->u.accessor_prop_decl.prop_name;
         jsp_operand_t func = state_p->operand;
@@ -1173,7 +1392,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         state_p->u.accessor_prop_decl.prop_name = prop_name;
         state_p->u.accessor_prop_decl.is_setter = is_setter;
 
-        jsp_push_new_expr_state (JSP_STATE_STAT_STATEMENT_LIST, JSP_STATE_STAT_STATEMENT_LIST, true);
+        jsp_push_new_expr_state (JSP_STATE_SOURCE_ELEMENT_LIST, JSP_STATE_SOURCE_ELEMENT_LIST, true);
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_OBJECT_LITERAL)
@@ -2510,10 +2729,6 @@ parse_variable_declaration (void)
 
     dump_variable_assignment (name, dump_assignment_of_lhs_if_value_based_reference (expr));
   }
-  else
-  {
-    lexer_save_token (tok);
-  }
 
   return name;
 } /* parse_variable_declaration */
@@ -2521,13 +2736,11 @@ parse_variable_declaration (void)
 static jsp_operand_t
 parse_expression_inside_parens (void)
 {
-  skip_token ();
   current_token_must_be (TOK_OPEN_PAREN);
   skip_token ();
 
   const jsp_operand_t res = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
 
-  skip_token ();
   current_token_must_be (TOK_CLOSE_PAREN);
 
   return res;
@@ -2560,19 +2773,19 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
 static void
 insert_semicolon (void)
 {
-  // We cannot use tok, since we may use lexer_save_token
-  skip_token ();
-
   bool is_new_line_occured = lexer_is_preceded_by_newlines (tok);
   bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
 
-  if (is_new_line_occured || is_close_brace_or_eof)
+  if (!is_new_line_occured && !is_close_brace_or_eof)
   {
-    lexer_save_token (tok);
-  }
-  else if (!token_is (TOK_SEMICOLON) && !token_is (TOK_EOF))
-  {
-    EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
+    if (token_is (TOK_SEMICOLON))
+    {
+      skip_token ();
+    }
+    else if (!token_is (TOK_EOF))
+    {
+      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
+    }
   }
 }
 
@@ -2601,9 +2814,11 @@ while (0)
 static void
 parse_statement_ (void)
 {
+  dumper_new_scope ();
+
   dumper_new_statement ();
 
-  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+  jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
   uint32_t start_pos = jsp_state_stack_pos;
 
   while (true)
@@ -2617,6 +2832,7 @@ parse_statement_ (void)
       if (start_pos == jsp_state_stack_pos) // FIXME: jsp_is_stack_empty ()
       {
         jsp_state_pop ();
+        dumper_finish_scope ();
         break;
       }
       else
@@ -2626,29 +2842,114 @@ parse_statement_ (void)
       }
     }
 
-    if (state_p->state == JSP_STATE_EXPR_EMPTY)
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
+    {
+      scope_type_t scope_type = serializer_get_scope ()->type;
+
+      state_p->u.source_elements.prev_label_set_p = jsp_label_new_set ();
+
+      dumper_new_scope ();
+
+      state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
+      state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
+
+      if (scope_type == SCOPE_TYPE_EVAL)
+      {
+        dump_undefined_assignment (eval_ret_operand ());
+      }
+
+      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
+    }
+    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      scope_type_t scope_type = serializer_get_scope ()->type;
+
+      jsp_token_type_t end_token_type = (scope_type == SCOPE_TYPE_FUNCTION) ? TOK_CLOSE_BRACE : TOK_EOF;
+
+      if (token_is (end_token_type))
+      {
+        opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
+
+        scopes_tree fe_scope_tree = serializer_get_scope ();
+        if (fe_scope_tree->strict_mode)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
+        }
+
+        if (!fe_scope_tree->ref_arguments)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
+        }
+
+        if (!fe_scope_tree->ref_eval)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
+        }
+
+#ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
+        vm_instr_counter_t number_of_instrs_removed_from_function_header;
+
+        scope_flags = jsp_try_move_vars_to_regs (scope_flags, &number_of_instrs_removed_from_function_header);
+
+        JERRY_ASSERT (state_p->u.source_elements.scope_code_flags_oc >= number_of_instrs_removed_from_function_header);
+        JERRY_ASSERT (state_p->u.source_elements.reg_var_decl_oc >= number_of_instrs_removed_from_function_header);
+
+        vm_instr_counter_t new_oc;
+
+        new_oc = state_p->u.source_elements.scope_code_flags_oc;
+        new_oc = (vm_instr_counter_t) (new_oc - number_of_instrs_removed_from_function_header);
+        state_p->u.source_elements.scope_code_flags_oc = new_oc;
+
+        new_oc = state_p->u.source_elements.reg_var_decl_oc;
+        new_oc = (vm_instr_counter_t) (new_oc - number_of_instrs_removed_from_function_header);
+        state_p->u.source_elements.reg_var_decl_oc = new_oc;
+#endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
+
+        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
+        rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
+
+        jsp_label_restore_previous_set (state_p->u.source_elements.prev_label_set_p);
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+
+        dumper_finish_scope ();
+      }
+      else
+      {
+        if (!token_is (TOK_KW_FUNCTION)) // FIXME: Remove
+        {
+          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT);
+        }
+        else
+        {
+          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS);
+        }
+      }
+    }
+    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT)
+    {
+      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
+    }
+    else if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
       if (token_is (TOK_KW_IF)) /* IfStatement */
       {
+        skip_token ();
+
         jsp_operand_t cond = parse_expression_inside_parens ();
+        skip_token ();
+
         cond = dump_assignment_of_lhs_if_value_based_reference (cond);
         dump_conditional_check_for_rewrite (cond);
-
-        skip_token ();
 
         JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_IF_BRANCH_START);
       }
       else if (token_is (TOK_OPEN_BRACE))
       {
         skip_token ();
-        if (!token_is (TOK_CLOSE_BRACE))
-        {
-          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_STATEMENT_LIST);
-        }
-        else
-        {
-          JSP_COMPLETE_STATEMENT_PARSE ();
-        }
+
+        state_p->state = JSP_STATE_STAT_BLOCK;
+        jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
       }
       else if (token_is (TOK_KW_VAR))
       {
@@ -2732,7 +3033,6 @@ parse_statement_ (void)
               if (!token_is (TOK_SEMICOLON))
               {
                 parse_expression (false, JSP_EVAL_RET_STORE_NOT_DUMP); // TODO: add state for expression parsing
-                skip_token ();
               }
               else
               {
@@ -2849,8 +3149,8 @@ parse_statement_ (void)
         }
         else
         {
-          lexer_save_token (tok);
-          tok = temp;
+          lexer_seek (temp.loc);
+          skip_token ();
           jsp_operand_t expr = parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
           dump_assignment_of_lhs_if_reference (expr);
           insert_semicolon ();
@@ -2860,8 +3160,11 @@ parse_statement_ (void)
       }
       else if (token_is (TOK_KW_SWITCH))
       {
+        skip_token ();
+
         const jsp_operand_t switch_expr = parse_expression_inside_parens ();
         skip_token ();
+
         current_token_must_be (TOK_OPEN_BRACE);
 
         start_dumping_case_clauses ();
@@ -2880,7 +3183,6 @@ parse_statement_ (void)
             jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
             case_expr = dump_assignment_of_lhs_if_value_based_reference (case_expr);
 
-            skip_token ();
             current_token_must_be (TOK_COLON);
 
             dump_case_clause_check_for_rewrite (switch_expr, case_expr);
@@ -2941,7 +3243,7 @@ parse_statement_ (void)
       }
       else if (token_is (TOK_SEMICOLON))
       {
-        // skip_token ();
+        skip_token ();
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
@@ -2992,7 +3294,6 @@ parse_statement_ (void)
           }
         }
 
-        lexer_save_token (tok);
         insert_semicolon ();
 
         JERRY_ASSERT (label_p != NULL);
@@ -3022,11 +3323,6 @@ parse_statement_ (void)
         }
         else
         {
-          if (token_is (TOK_CLOSE_BRACE))
-          {
-            lexer_save_token (tok);
-          }
-
           dump_ret ();
         }
 
@@ -3034,26 +3330,30 @@ parse_statement_ (void)
       }
       else if (token_is (TOK_KW_TRY))
       {
+        skip_token ();
+
         scopes_tree_set_contains_try (serializer_get_scope ());
 
         state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
 
         dump_try_for_rewrite ();
 
-        skip_token ();
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_TRY;
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
       else if (token_is (TOK_KW_WITH))
       {
+        skip_token ();
+
         if (is_strict_mode ())
         {
           EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
         }
+
         const jsp_operand_t expr = parse_expression_inside_parens ();
 
         scopes_tree_set_contains_with (serializer_get_scope ());
@@ -3086,7 +3386,7 @@ parse_statement_ (void)
         jsp_start_parse_function_scope (func_name, false, NULL);
 
         state_p->state = JSP_STATE_FUNC_DECL_FINISH;
-        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENT_LIST);
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
       }
       else
       {
@@ -3095,9 +3395,15 @@ parse_statement_ (void)
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
     }
+    else if (state_p->state == JSP_STATE_STAT_BLOCK)
+    {
+      current_token_must_be (TOK_CLOSE_BRACE);
+      skip_token ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
     else if (state_p->state == JSP_STATE_STAT_IF_BRANCH_START)
     {
-      skip_token ();
       if (token_is (TOK_KW_ELSE))
       {
         dump_jump_to_end_for_rewrite ();
@@ -3108,7 +3414,6 @@ parse_statement_ (void)
       }
       else
       {
-        lexer_save_token (tok);
         rewrite_conditional_check ();
 
         JSP_COMPLETE_STATEMENT_PARSE ();
@@ -3122,7 +3427,7 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_STAT_STATEMENT_LIST)
     {
-      skip_token ();
+      // skip_token ();
       while (token_is (TOK_SEMICOLON))
       {
         skip_token ();
@@ -3163,39 +3468,30 @@ parse_statement_ (void)
 
         dump_variable_assignment (name, dump_assignment_of_lhs_if_value_based_reference (expr));
       }
-      else
-      {
-        lexer_save_token (tok);
-      }
 
-      skip_token ();
       if (!token_is (TOK_COMMA))
       {
         JSP_COMPLETE_STATEMENT_PARSE ();
 
         if (state_p->var_decl)
         {
-          lexer_save_token (tok);
-
-          if (token_is (TOK_SEMICOLON))
-          {
-            skip_token ();
-          }
-          else
-          {
-            insert_semicolon ();
-          }
+          insert_semicolon ();
         }
       }
     }
     else if (state_p->state == JSP_STATE_STAT_DO_WHILE)
     {
+      assert_keyword (TOK_KW_WHILE);
+      skip_token ();
+
       jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
                                        serializer_get_current_instr_counter ());
 
-      skip_token ();
-      assert_keyword (TOK_KW_WHILE);
       const jsp_operand_t cond = parse_expression_inside_parens (); // TDOO: add state for expression parsing
+      skip_token ();
+
+      insert_semicolon ();
+
       dump_continue_iterations_check (cond);
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
@@ -3209,6 +3505,8 @@ parse_statement_ (void)
 
       const locus end_loc = tok.loc;
       lexer_seek (state_p->u.statement.loc[0]);
+      skip_token ();
+
       const jsp_operand_t cond = parse_expression_inside_parens (); // TDOO: add state for expression parsing
       dump_continue_iterations_check (cond);
 
@@ -3290,10 +3588,6 @@ parse_statement_ (void)
 
       lexer_seek (loop_end_loc);
       skip_token ();
-      if (tok.type != TOK_CLOSE_BRACE)
-      {
-        lexer_save_token (tok);
-      }
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
     }
@@ -3314,10 +3608,6 @@ parse_statement_ (void)
 
       lexer_seek (loop_end_loc);
       tok = lexer_next_token (false);
-      if (tok.type != TOK_CLOSE_BRACE)
-      {
-        lexer_save_token (tok);
-      }
 
       if (state_p->is_raised)
       {
@@ -3356,6 +3646,7 @@ parse_statement_ (void)
           continue;
         }
       }
+
       JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_STATEMENT_LIST);
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_FINISH)
@@ -3373,90 +3664,85 @@ parse_statement_ (void)
 
       finish_dumping_case_clauses ();
 
-      lexer_save_token (tok);
-
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
     else if (state_p->state == JSP_STATE_STAT_TRY)
     {
-      current_token_must_be (TOK_CLOSE_BRACE);
-
       rewrite_try ();
 
-      skip_token ();
+      if (!token_is (TOK_KW_CATCH)
+          && !token_is (TOK_KW_FINALLY))
+      {
+        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either 'catch' or 'finally' token");
+      }
 
       if (token_is (TOK_KW_CATCH))
       {
-        assert_keyword (TOK_KW_CATCH);
-
         skip_token ();
+
         current_token_must_be (TOK_OPEN_PAREN);
-
         skip_token ();
+
         current_token_must_be (TOK_NAME);
 
         const jsp_operand_t exception = literal_operand (token_data_as_lit_cp ());
         jsp_early_error_check_for_eval_and_arguments_in_strict_mode (exception, is_strict_mode (), tok.loc);
 
         skip_token ();
+
         current_token_must_be (TOK_CLOSE_PAREN);
+        skip_token ();
 
         dump_catch_for_rewrite (exception);
 
-        skip_token ();
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_CATCH_FINISH;
+
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
-      else if (token_is (TOK_KW_FINALLY))
+      else
       {
+        JERRY_ASSERT (token_is (TOK_KW_FINALLY));
+        skip_token ();
+
         dump_finally_for_rewrite ();
 
-        skip_token ();
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
-      }
-      else
-      {
-        EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either 'catch' or 'finally' token");
       }
     }
     else if (state_p->state == JSP_STATE_STAT_CATCH_FINISH)
     {
-      current_token_must_be (TOK_CLOSE_BRACE);
-
       rewrite_catch ();
 
-      skip_token ();
       if (token_is (TOK_KW_FINALLY))
       {
+        skip_token ();
         dump_finally_for_rewrite ();
 
-        skip_token ();
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+
+        jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
       }
       else
       {
-        lexer_save_token (tok);
         state_p->state = JSP_STATE_STAT_TRY_FINISH;
       }
     }
     else if (state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
     {
-      current_token_must_be (TOK_CLOSE_BRACE);
-
       rewrite_finally ();
 
       state_p->state = JSP_STATE_STAT_TRY_FINISH;
@@ -3487,11 +3773,6 @@ parse_statement_ (void)
     else if (state_p->state == JSP_STATE_FUNC_DECL_FINISH)
     {
       jsp_finish_parse_function_scope (false);
-      JSP_COMPLETE_STATEMENT_PARSE ();
-    }
-    else if (state_p->state == JSP_STATE_SOURCE_ELEMENT_LIST)
-    {
-      parse_source_element_list ();
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
   }
@@ -3597,296 +3878,9 @@ parse_statement (void)
 
   dumper_new_statement ();
 
-  if (token_is (TOK_CLOSE_BRACE))
-  {
-    lexer_save_token (tok);
-    return;
-  }
-
   parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
   insert_semicolon ();
 }
-
-/* source_element
-  : function_declaration
-  | statement
-  ; */
-static void
-parse_source_element (void)
-{
-  parse_statement_ ();
-}
-
-/**
- * Parse source element list
- *
- *  source_element_list
- *   : source_element (LT!* source_element)*
- *   ;
- */
-static void
-parse_source_element_list (void)
-{
-  jsp_label_t *prev_label_set_p = jsp_label_new_set ();
-
-  bool is_function = (serializer_get_scope ()->type == SCOPE_TYPE_FUNCTION);
-
-
-  /*
-   * We don't try to perform replacement of local variables with registers for global code, eval code.
-   *
-   * For global and eval code the replacement can be connected with side effects,
-   * that currently can only be figured out in runtime. For example, a variable
-   * can be redefined as accessor property of the Global object.
-   */
-  bool is_try_replace_local_vars_with_regs = is_function;
-
-  const jsp_token_type_t end_tt = is_function? TOK_CLOSE_BRACE : TOK_EOF;
-
-  dumper_new_scope ();
-
-  vm_instr_counter_t scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
-
-  vm_instr_counter_t reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
-
-  if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL)
-  {
-    dump_undefined_assignment (eval_ret_operand ());
-  }
-
-  skip_token ();
-  while (!token_is (TOK_EOF) && !token_is (TOK_CLOSE_BRACE))
-  {
-    parse_source_element ();
-    skip_token ();
-  }
-
-  if (!token_is (end_tt))
-  {
-    PARSE_ERROR (JSP_EARLY_ERROR_SYNTAX, "Unexpected token", tok.loc);
-  }
-
-  lexer_save_token (tok);
-
-  opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
-
-  scopes_tree fe_scope_tree = serializer_get_scope ();
-  if (fe_scope_tree->strict_mode)
-  {
-    scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
-  }
-
-  if (!fe_scope_tree->ref_arguments)
-  {
-    scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
-  }
-
-  if (!fe_scope_tree->ref_eval)
-  {
-    scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
-  }
-
-#ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
-  if (is_try_replace_local_vars_with_regs
-      && fe_scope_tree->type == SCOPE_TYPE_FUNCTION)
-  {
-    bool may_replace_vars_with_regs = (!fe_scope_tree->ref_eval /* 'eval' can reference variables in a way,
-                                                                    * that can't be figured out through static
-                                                                    * analysis */
-                                       && !fe_scope_tree->ref_arguments /* 'arguments' variable, if declared,
-                                                                         * should not be moved to a register,
-                                                                         * as it is currently declared in
-                                                                         * function's lexical environment
-                                                                         * (generally, the problem is the same,
-                                                                         *   as with function's arguments) */
-                                       && !fe_scope_tree->contains_with /* 'with' create new lexical environment
-                                                                         *  and so can change way identifier
-                                                                         *  is evaluated */
-                                       && !fe_scope_tree->contains_try /* same for 'catch' */
-                                       && !fe_scope_tree->contains_delete /* 'delete' handles variable's names,
-                                                                           * not values */
-                                       && !fe_scope_tree->contains_functions); /* nested functions can reference
-                                                                                * variables of current function */
-
-    if (may_replace_vars_with_regs)
-    {
-      /* no subscopes, as no function declarations / eval etc. in the scope */
-      JERRY_ASSERT (fe_scope_tree->t.children == null_list);
-
-      vm_instr_counter_t instr_pos = 0u;
-
-      const vm_instr_counter_t header_oc = instr_pos++;
-      op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, header_oc);
-      JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
-
-      vm_instr_counter_t function_end_pos = instr_pos;
-      while (true)
-      {
-        op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, function_end_pos);
-        JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
-
-        opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
-
-        if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
-        {
-          /* marker of function argument list end reached */
-          break;
-        }
-        else
-        {
-          JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
-
-          function_end_pos++;
-        }
-      }
-
-      uint32_t args_num = (uint32_t) (function_end_pos - instr_pos);
-
-      dumper_start_move_of_vars_to_regs ();
-
-      /* remove declarations of variables with names equal to an argument's name */
-      vm_instr_counter_t var_decl_pos = 0;
-      while (var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls))
-      {
-        op_meta *om_p = (op_meta *) linked_list_element (fe_scope_tree->var_decls, var_decl_pos);
-        bool is_removed = false;
-
-        for (vm_instr_counter_t arg_index = instr_pos;
-             arg_index < function_end_pos;
-             arg_index++)
-        {
-          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, arg_index);
-          JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
-
-          JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-          JERRY_ASSERT (om_p->op.data.var_decl.variable_name == VM_IDX_REWRITE_LITERAL_UID);
-
-          if (meta_opm.lit_id[1].packed_value == om_p->lit_id[0].packed_value)
-          {
-            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
-
-            is_removed = true;
-            break;
-          }
-        }
-
-        if (!is_removed)
-        {
-          if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
-          {
-            var_decl_pos++;
-          }
-          else
-          {
-            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
-          }
-        }
-      }
-
-      if (dumper_start_move_of_args_to_regs (args_num))
-      {
-        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
-
-        JERRY_ASSERT (linked_list_get_length (fe_scope_tree->var_decls) == 0);
-        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
-
-        /* at this point all arguments can be moved to registers */
-        if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
-        {
-          header_opm.op.data.func_expr_n.arg_list = 0;
-        }
-        else
-        {
-          JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
-
-          header_opm.op.data.func_decl_n.arg_list = 0;
-        }
-
-        scopes_tree_set_op_meta (fe_scope_tree, header_oc, header_opm);
-
-        /*
-         * Mark duplicated arguments names as empty,
-         * leaving only last declaration for each duplicated
-         * argument name
-         */
-        for (vm_instr_counter_t arg1_index = instr_pos;
-             arg1_index < function_end_pos;
-             arg1_index++)
-        {
-          op_meta meta_opm1 = scopes_tree_op_meta (fe_scope_tree, arg1_index);
-          JERRY_ASSERT (meta_opm1.op.op_idx == VM_OP_META);
-
-          for (vm_instr_counter_t arg2_index = (vm_instr_counter_t) (arg1_index + 1u);
-               arg2_index < function_end_pos;
-               arg2_index++)
-          {
-            op_meta meta_opm2 = scopes_tree_op_meta (fe_scope_tree, arg2_index);
-            JERRY_ASSERT (meta_opm2.op.op_idx == VM_OP_META);
-
-            if (meta_opm1.lit_id[1].packed_value == meta_opm2.lit_id[1].packed_value)
-            {
-              meta_opm1.op.data.meta.data_1 = VM_IDX_EMPTY;
-              meta_opm1.lit_id[1] = NOT_A_LITERAL;
-
-              scopes_tree_set_op_meta (fe_scope_tree, arg1_index, meta_opm1);
-
-              break;
-            }
-          }
-        }
-
-        while (true)
-        {
-          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos);
-          JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
-
-          opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
-
-          if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
-          {
-            /* marker of function argument list end reached */
-            break;
-          }
-          else
-          {
-            JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
-
-            if (meta_opm.op.data.meta.data_1 == VM_IDX_EMPTY)
-            {
-              JERRY_ASSERT (meta_opm.lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
-
-              dumper_alloc_reg_for_unused_arg ();
-            }
-            else
-            {
-              /* the varg specifies argument name, and so should be a string literal */
-              JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-              JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
-
-              bool is_replaced = dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm);
-              JERRY_ASSERT (is_replaced);
-            }
-
-            scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
-
-            reg_var_decl_oc--;
-            scope_code_flags_oc--;
-            dumper_decrement_function_end_pos ();
-          }
-        }
-      }
-    }
-  }
-#else /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
-  (void) is_try_replace_local_vars_with_regs;
-#endif /* !CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
-
-  rewrite_scope_code_flags (scope_code_flags_oc, scope_flags);
-  rewrite_reg_var_decl (reg_var_decl_oc);
-  dumper_finish_scope ();
-
-  jsp_label_restore_previous_set (prev_label_set_p);
-} /* parse_source_element_list */
 
 /**
  * Parse program
@@ -3948,9 +3942,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_parse_directive_prologue ();
 
-    parse_source_element_list ();
+    parse_statement_ ();
 
-    skip_token ();
     JERRY_ASSERT (token_is (TOK_EOF));
 
     if (scope_type == SCOPE_TYPE_EVAL)
