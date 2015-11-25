@@ -1580,19 +1580,6 @@ lexer_next_token (bool maybe_regexp) /**< read '/' as regexp? */
 }
 
 void
-lexer_save_token (token tok)
-{
-  JERRY_ASSERT (is_empty (saved_token));
-  saved_token = tok;
-}
-
-token
-lexer_prev_token (void)
-{
-  return prev_token;
-}
-
-void
 lexer_seek (lit_utf8_iterator_pos_t locus)
 {
   JERRY_ASSERT (is_token_parse_in_progress == false);
