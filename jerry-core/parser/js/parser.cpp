@@ -99,7 +99,10 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_CATCH_FINISH       = 0x45,
   JSP_STATE_STAT_FINALLY_FINISH     = 0x46,
   JSP_STATE_STAT_TRY_FINISH         = 0x47,
-  JSP_STATE_STAT_WITH_FINISH        = 0x48
+  JSP_STATE_STAT_WITH_FINISH        = 0x48,
+
+  JSP_STATE_FUNC_DECL_FINISH        = 0x60,
+  JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -570,31 +573,6 @@ jsp_finish_parse_function_scope (bool is_function_expression)
   }
 
   lexer_set_strict_mode (scopes_tree_strict_mode (parent_scope));
-}
-
-/* function_declaration
-  : 'function' LT!* Identifier LT!*
-    '(' (LT!* Identifier (LT!* ',' LT!* Identifier)*) ? LT!* ')' LT!* function_body
-  ;
-
-   function_body
-  : '{' LT!* sourceElements LT!* '}' */
-static void
-parse_function_declaration (void)
-{
-  assert_keyword (TOK_KW_FUNCTION);
-  skip_token ();
-
-  current_token_must_be (TOK_NAME);
-
-  const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
-  skip_token ();
-
-  jsp_start_parse_function_scope (func_name, false, NULL);
-
-  parse_source_element_list ();
-
-  jsp_finish_parse_function_scope (false);
 }
 
 typedef struct
@@ -3096,6 +3074,20 @@ parse_statement_ (void)
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
+      else if (token_is (TOK_KW_FUNCTION))
+      {
+        skip_token ();
+
+        current_token_must_be (TOK_NAME);
+
+        const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
+        skip_token ();
+
+        jsp_start_parse_function_scope (func_name, false, NULL);
+
+        state_p->state = JSP_STATE_FUNC_DECL_FINISH;
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENT_LIST);
+      }
       else
       {
         parse_statement ();
@@ -3492,6 +3484,16 @@ parse_statement_ (void)
 
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
+    else if (state_p->state == JSP_STATE_FUNC_DECL_FINISH)
+    {
+      jsp_finish_parse_function_scope (false);
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_SOURCE_ELEMENT_LIST)
+    {
+      parse_source_element_list ();
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
   }
 } /* parse_statement_ */
 
@@ -3591,17 +3593,13 @@ parse_statement (void)
   JERRY_ASSERT (!token_is (TOK_OPEN_BRACE));
   JERRY_ASSERT (!token_is (TOK_KW_VAR));
   JERRY_ASSERT (!token_is (TOK_KW_THROW));
+  JERRY_ASSERT (!token_is (TOK_KW_FUNCTION));
 
   dumper_new_statement ();
 
   if (token_is (TOK_CLOSE_BRACE))
   {
     lexer_save_token (tok);
-    return;
-  }
-  if (token_is (TOK_KW_FUNCTION))
-  {
-    parse_function_declaration ();
     return;
   }
 
@@ -3616,14 +3614,7 @@ parse_statement (void)
 static void
 parse_source_element (void)
 {
-  if (token_is (TOK_KW_FUNCTION))
-  {
-    parse_function_declaration ();
-  }
-  else
-  {
-    parse_statement_ ();
-  }
+  parse_statement_ ();
 }
 
 /**
