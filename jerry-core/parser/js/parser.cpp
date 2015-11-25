@@ -2589,7 +2589,7 @@ while (0)
 do \
 { \
   state_p->state = (s); \
-  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY); \
+  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY); \
   dumper_new_statement (); \
 } \
 while (0)
@@ -2602,7 +2602,7 @@ parse_statement_ (void)
 {
   dumper_new_statement ();
 
-  jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
   uint32_t start_pos = jsp_state_stack_pos;
 
   while (true)
@@ -2625,7 +2625,7 @@ parse_statement_ (void)
       }
     }
 
-    if (state_p->state == JSP_STATE_EXPR_EMPTY)
+    if (state_p->state == JSP_STATE_STAT_EMPTY)
     {
       dumper_new_statement ();
 
@@ -2845,7 +2845,7 @@ parse_statement_ (void)
                                                          : &state_p->u.statement.label);
 
           state_p->state = JSP_STATE_STAT_ITER_FINISH;
-          jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
           jsp_state_top ()->u.statement.outermost_stmt_label_p = state_p->u.statement.outermost_stmt_label_p;
         }
         else
@@ -3048,7 +3048,7 @@ parse_statement_ (void)
         if (!token_is (TOK_CLOSE_BRACE))
         {
           jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-          jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
         }
         state_p->state = JSP_STATE_STAT_TRY;
       }
@@ -3140,7 +3140,7 @@ parse_statement_ (void)
       }
       else
       {
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+        jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
       }
     }
     else if (state_p->state == JSP_STATE_STAT_VAR_DECL)
@@ -3415,7 +3415,7 @@ parse_statement_ (void)
         if (!token_is (TOK_CLOSE_BRACE))
         {
           jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-          jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
         }
         state_p->state = JSP_STATE_STAT_CATCH_FINISH;
       }
@@ -3429,7 +3429,7 @@ parse_statement_ (void)
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-        jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+        jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
       }
       else
       {
@@ -3453,7 +3453,7 @@ parse_statement_ (void)
         if (!token_is (TOK_CLOSE_BRACE))
         {
           jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
-          jsp_start_statement_parse (JSP_STATE_EXPR_EMPTY);
+          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
         }
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
       }
