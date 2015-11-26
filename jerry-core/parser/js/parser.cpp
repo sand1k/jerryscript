@@ -104,6 +104,7 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_FINALLY_FINISH     = 0x50,
   JSP_STATE_STAT_TRY_FINISH         = 0x51,
   JSP_STATE_STAT_WITH_FINISH        = 0x52,
+  JSP_STATE_STAT_EXPRESSION         = 0x53,
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
@@ -3241,11 +3242,10 @@ parse_statement_ (void)
         {
           lexer_seek (temp.loc);
           skip_token ();
-          jsp_operand_t expr = parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-          dump_assignment_of_lhs_if_reference (expr);
-          insert_semicolon ();
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+          jsp_state_top ()->is_dump_eval_ret_store = true;
 
-          JSP_COMPLETE_STATEMENT_PARSE ();
+          state_p->state = JSP_STATE_STAT_EXPRESSION;
         }
       }
       else if (token_is (TOK_KW_SWITCH))
@@ -3985,6 +3985,16 @@ parse_statement_ (void)
     else if (state_p->state == JSP_STATE_STAT_NAMED_LABEL)
     {
       jsp_state_pop ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_EXPRESSION)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      jsp_operand_t expr = subexpr_operand;
+      dump_assignment_of_lhs_if_reference (expr);
+      insert_semicolon ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
     }
     else
     {
