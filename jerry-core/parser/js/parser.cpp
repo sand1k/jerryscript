@@ -3191,8 +3191,10 @@ parse_statement_ (void)
       {
         skip_token ();
 
-        const jsp_operand_t switch_expr = parse_expression_inside_parens ();
+        jsp_operand_t switch_expr = parse_expression_inside_parens ();
         skip_token ();
+
+        switch_expr = dump_assignment_of_lhs_if_reference (switch_expr);
 
         current_token_must_be (TOK_OPEN_BRACE);
 
