@@ -93,15 +93,17 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_FOR_INCREMENT      = 0x39,
   JSP_STATE_STAT_FOR_COND           = 0x40,
   JSP_STATE_STAT_FOR_FINISH         = 0x41,
-  JSP_STATE_STAT_FOR_IN_FINISH      = 0x42,
-  JSP_STATE_STAT_ITER_FINISH        = 0x43,
-  JSP_STATE_STAT_SWITCH_BRANCH      = 0x44,
-  JSP_STATE_STAT_SWITCH_FINISH      = 0x45,
-  JSP_STATE_STAT_TRY                = 0x46,
-  JSP_STATE_STAT_CATCH_FINISH       = 0x47,
-  JSP_STATE_STAT_FINALLY_FINISH     = 0x48,
-  JSP_STATE_STAT_TRY_FINISH         = 0x49,
-  JSP_STATE_STAT_WITH_FINISH        = 0x50,
+  JSP_STATE_STAT_FOR_IN             = 0x42,
+  JSP_STATE_STAT_FOR_IN_EXPR        = 0x43,
+  JSP_STATE_STAT_FOR_IN_FINISH      = 0x44,
+  JSP_STATE_STAT_ITER_FINISH        = 0x45,
+  JSP_STATE_STAT_SWITCH_BRANCH      = 0x46,
+  JSP_STATE_STAT_SWITCH_FINISH      = 0x47,
+  JSP_STATE_STAT_TRY                = 0x48,
+  JSP_STATE_STAT_CATCH_FINISH       = 0x49,
+  JSP_STATE_STAT_FINALLY_FINISH     = 0x50,
+  JSP_STATE_STAT_TRY_FINISH         = 0x51,
+  JSP_STATE_STAT_WITH_FINISH        = 0x52,
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
@@ -818,6 +820,7 @@ typedef struct
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
   uint8_t is_default_branch       : 1; /**< marks default branch of switch statement */
+  uint8_t is_dump_eval_ret_store  : 1; /**< expression's result should be stored to eval's return register */
 
   union u
   {
@@ -938,6 +941,7 @@ jsp_push_new_expr_state (jsp_state_expr_t expr_type,
   new_state.var_decl = false;
 
   new_state.is_no_in_mode = !in_allowed;
+  new_state.is_dump_eval_ret_store = false;
 
   jsp_state_push (new_state);
 } /* jsp_push_new_expr_state */
@@ -2830,6 +2834,8 @@ jsp_find_unnamed_label (bool is_label_for_break,
 
     bool is_iterational_stmt = (state_p->state == JSP_STATE_STAT_WHILE
                                 || state_p->state == JSP_STATE_STAT_DO_WHILE
+                                || state_p->state == JSP_STATE_STAT_FOR_IN
+                                || state_p->state == JSP_STATE_STAT_FOR_IN_EXPR
                                 || state_p->state == JSP_STATE_STAT_FOR_IN_FINISH
                                 || state_p->state == JSP_STATE_STAT_FOR_INCREMENT);
     bool is_switch_stmt = (state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
@@ -3051,9 +3057,19 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
-      state_p->operand = parse_expression (!state_p->is_no_in_mode, JSP_EVAL_RET_STORE_NOT_DUMP);
-      state_p->state = JSP_STATE_EXPR_EXPRESSION;
+      jsp_operand_t expr = parse_expression_ (state_p->req_expr_type, !state_p->is_no_in_mode);
+
+      if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL
+          && state_p->is_dump_eval_ret_store)
+      {
+        expr = dump_assignment_of_lhs_if_value_based_reference (expr);
+
+        dump_variable_assignment (eval_ret_operand (), expr);
+      }
+
+      state_p->operand = expr;
       state_p->is_completed = true;
+      state_p->state = state_p->req_expr_type;
     }
     else if (state_p->state == JSP_STATE_STAT_EMPTY)
     {
@@ -3172,7 +3188,7 @@ parse_statement_ (void)
             skip_token ();
 
             // Save Iterator location
-            locus iterator_loc = tok.loc;
+            state_p->u.statement.loc[1] = tok.loc;
 
             while (lit_utf8_iterator_pos_cmp (tok.loc, for_body_statement_loc) < 0)
             {
@@ -3192,51 +3208,8 @@ parse_statement_ (void)
             skip_token ();
 
             // Collection
-            jsp_operand_t collection = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-            // TODO: add state for expression parsing
-            current_token_must_be (TOK_CLOSE_PAREN);
-            skip_token ();
-
-            // Dump for-in instruction
-            collection = dump_assignment_of_lhs_if_value_based_reference (collection);
-            state_p->u.statement.iterational.for_in.header_pos = dump_for_in_for_rewrite (collection);
-
-            // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
-            lexer_seek (iterator_loc);
-            tok = lexer_next_token (false);
-
-            jsp_operand_t iterator, for_in_special_reg;
-            for_in_special_reg = jsp_create_operand_for_in_special_reg ();
-
-            if (token_is (TOK_KW_VAR))
-            {
-              skip_token ();
-
-              jsp_operand_t name = parse_variable_declaration ();
-              JERRY_ASSERT (name.is_literal_operand ());
-
-              iterator = jsp_operand_t::make_identifier_operand (name.get_literal ());
-            }
-            else
-            {
-              iterator = parse_expression_ (JSP_STATE_EXPR_LEFTHANDSIDE, true);
-              // TODO: add state for expression parsing
-            }
-
-            if (iterator.is_value_based_reference_operand ())
-            {
-              dump_prop_setter (iterator, for_in_special_reg);
-            }
-            else
-            {
-              dump_variable_assignment (iterator, for_in_special_reg);
-            }
-
-            // Body
-            lexer_seek (for_body_statement_loc);
-            tok = lexer_next_token (false);
-
-            JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+            state_p->state = JSP_STATE_STAT_FOR_IN;
           }
         }
       }
@@ -3737,7 +3710,6 @@ parse_statement_ (void)
       if (is_subexpr_end)
       {
           jsp_operand_t cond = subexpr_operand;
-          // TODO: add state for expression parsing
           dump_continue_iterations_check (cond);
 
           state_p->state = JSP_STATE_STAT_FOR_FINISH;
@@ -3770,6 +3742,58 @@ parse_statement_ (void)
       skip_token ();
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_IN)
+    {
+      jsp_operand_t collection = subexpr_operand;
+
+      current_token_must_be (TOK_CLOSE_PAREN);
+      skip_token ();
+
+      // Dump for-in instruction
+      collection = dump_assignment_of_lhs_if_value_based_reference (collection);
+      state_p->u.statement.iterational.for_in.header_pos = dump_for_in_for_rewrite (collection);
+
+      // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
+      lexer_seek (state_p->u.statement.loc[1]);
+      tok = lexer_next_token (false);
+
+      if (token_is (TOK_KW_VAR))
+      {
+        skip_token ();
+
+        jsp_operand_t name = parse_variable_declaration ();
+        JERRY_ASSERT (name.is_literal_operand ());
+
+        state_p->operand = jsp_operand_t::make_identifier_operand (name.get_literal ());
+      }
+      else
+      {
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LEFTHANDSIDE, true);
+      }
+
+      state_p->state = JSP_STATE_STAT_FOR_IN_EXPR;
+    }
+    else if (state_p->state == JSP_STATE_STAT_FOR_IN_EXPR)
+    {
+      jsp_operand_t iterator = is_subexpr_end ? subexpr_operand : state_p->operand;
+      jsp_operand_t for_in_special_reg;
+      for_in_special_reg = jsp_create_operand_for_in_special_reg ();
+
+      if (iterator.is_value_based_reference_operand ())
+      {
+        dump_prop_setter (iterator, for_in_special_reg);
+      }
+      else
+      {
+        dump_variable_assignment (iterator, for_in_special_reg);
+      }
+
+      // Body
+      lexer_seek (state_p->u.statement.loc[0]);
+      tok = lexer_next_token (false);
+
+      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_IN_FINISH)
     {
