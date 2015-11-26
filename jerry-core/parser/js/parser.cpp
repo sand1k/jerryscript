@@ -108,9 +108,10 @@ typedef enum __attr_packed___
 
   JSP_STATE_SOURCE_ELEMENTS_INIT    = 0x62,
   JSP_STATE_SOURCE_ELEMENTS         = 0x63,
-  JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT = 0x64,
 
   JSP_STATE_STAT_BLOCK              = 0x65,
+
+  JSP_STATE_STAT_NAMED_LABEL        = 0x66
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -840,9 +841,25 @@ typedef struct
     struct
     {
       locus loc[2]; /**< remembered location for parsing continuation */
-      jsp_label_t label; /**< label for iteration statements processing */
-      jsp_label_t *outermost_stmt_label_p; /**< pointer to outermost label, used by labelled and iteration statements */
+
+      vm_instr_counter_t breaks_rewrite_chain;
+
+      struct
+      {
+        vm_instr_counter_t continues_rewrite_chain;
+        vm_instr_counter_t continue_tgt_oc;
+
+        struct
+        {
+          vm_instr_counter_t header_pos;
+        } for_in;
+      } iterational;
     } statement;
+
+    struct
+    {
+      lit_cpointer_t name_cp;
+    } named_label;
 
     struct
     {
@@ -858,7 +875,7 @@ typedef struct
   } u;
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 64, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 32, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -2770,7 +2787,8 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   new_state.req_expr_type = JSP_STATE_STAT_STATEMENT;
   new_state.operand = empty_operand ();
   new_state.token_type = TOK_EMPTY;
-  new_state.u.statement.outermost_stmt_label_p = NULL;
+
+  new_state.u.statement.breaks_rewrite_chain = MAX_OPCODES;
 
   new_state.is_completed = false;
   new_state.is_list_in_process = false;
@@ -2784,6 +2802,93 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
 
   jsp_state_push (new_state);
 } /* jsp_start_statement_parse */
+
+static jsp_state_t *
+jsp_find_unnamed_label (bool is_label_for_break,
+                        bool *out_is_simply_jumpable_p)
+{
+  *out_is_simply_jumpable_p = true;
+
+  uint32_t stack_pos = jsp_state_stack_pos;
+
+  while (stack_pos != 0)
+  {
+    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      break;
+    }
+
+    if (state_p->state == JSP_STATE_STAT_WITH_FINISH
+        || state_p->state == JSP_STATE_STAT_TRY
+        || state_p->state == JSP_STATE_STAT_CATCH_FINISH
+        || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    {
+      *out_is_simply_jumpable_p = false;
+    }
+
+    bool is_iterational_stmt = (state_p->state == JSP_STATE_STAT_WHILE
+                                || state_p->state == JSP_STATE_STAT_DO_WHILE
+                                || state_p->state == JSP_STATE_STAT_FOR_IN_FINISH
+                                || state_p->state == JSP_STATE_STAT_FOR_INCREMENT);
+    bool is_switch_stmt = (state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
+
+    if ((is_switch_stmt && is_label_for_break) || is_iterational_stmt)
+    {
+      return state_p;
+    }
+  }
+
+  return NULL;
+}
+
+static jsp_state_t *
+jsp_find_named_label (lit_cpointer_t name_cp,
+                      bool *out_is_simply_jumpable_p)
+{
+  *out_is_simply_jumpable_p = true;
+
+  uint32_t stack_pos = jsp_state_stack_pos;
+
+  while (stack_pos != 0)
+  {
+    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      break;
+    }
+
+    if (state_p->state == JSP_STATE_STAT_WITH_FINISH
+        || state_p->state == JSP_STATE_STAT_TRY
+        || state_p->state == JSP_STATE_STAT_CATCH_FINISH
+        || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    {
+      *out_is_simply_jumpable_p = false;
+    }
+
+    if (state_p->state == JSP_STATE_STAT_NAMED_LABEL
+        && state_p->u.named_label.name_cp.packed_value == name_cp.packed_value)
+    {
+      while (++stack_pos < jsp_state_stack_pos)
+      {
+        state_p = &jsp_state_stack [stack_pos];
+
+        if (state_p->state != JSP_STATE_STAT_NAMED_LABEL)
+        {
+          break;
+        }
+      }
+
+      JERRY_ASSERT (stack_pos < jsp_state_stack_pos);
+
+      return state_p;
+    }
+  }
+
+  return NULL;
+}
 
 static void
 insert_semicolon (void)
@@ -2809,7 +2914,7 @@ insert_semicolon (void)
 do \
 { \
   state_p->state = JSP_STATE_STAT_STATEMENT; \
-  state_p->is_completed = true; \
+  JERRY_ASSERT (!state_p->is_completed); \
   dumper_new_statement (); \
 } \
 while (0)
@@ -2834,6 +2939,8 @@ parse_statement_ (void)
   dumper_new_statement ();
 
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+  jsp_state_top ()->req_expr_type = JSP_STATE_SOURCE_ELEMENTS;
+
   uint32_t start_pos = jsp_state_stack_pos;
   bool in_allowed = true;
 
@@ -2933,25 +3040,14 @@ parse_statement_ (void)
 
         jsp_label_restore_previous_set (state_p->u.source_elements.prev_label_set_p);
 
-        JSP_COMPLETE_STATEMENT_PARSE ();
+        state_p->is_completed = true;
 
         dumper_finish_scope ();
       }
       else
       {
-        if (!token_is (TOK_KW_FUNCTION)) // FIXME: Remove
-        {
-          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT);
-        }
-        else
-        {
-          JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS);
-        }
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS);
       }
-    }
-    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_WAIT_STATEMENT)
-    {
-      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
     }
     else if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
@@ -2989,13 +3085,8 @@ parse_statement_ (void)
                || token_is (TOK_KW_WHILE)
                || token_is (TOK_KW_FOR))
       {
-        jsp_label_push (&state_p->u.statement.label,
-                        (jsp_label_type_flag_t) (JSP_LABEL_TYPE_UNNAMED_BREAKS | JSP_LABEL_TYPE_UNNAMED_CONTINUES),
-                        NOT_A_LITERAL);
-
-        state_p->u.statement.outermost_stmt_label_p = (state_p->u.statement.outermost_stmt_label_p != NULL
-                                                      ? state_p->u.statement.outermost_stmt_label_p
-                                                      : &state_p->u.statement.label);
+        state_p->u.statement.iterational.continues_rewrite_chain = MAX_OPCODES;
+        state_p->u.statement.iterational.continue_tgt_oc = MAX_OPCODES;
 
         if (token_is (TOK_KW_DO))
         {
@@ -3108,7 +3199,7 @@ parse_statement_ (void)
 
             // Dump for-in instruction
             collection = dump_assignment_of_lhs_if_value_based_reference (collection);
-            state_p->u.for_in.header_pos = dump_for_in_for_rewrite (collection); /**< for in pos */
+            state_p->u.statement.iterational.for_in.header_pos = dump_for_in_for_rewrite (collection);
 
             // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
             lexer_seek (iterator_loc);
@@ -3160,21 +3251,18 @@ parse_statement_ (void)
           lit_cpointer_t name_cp;
           name_cp.packed_value = temp.uid;
 
-          jsp_label_t *label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, name_cp, NULL);
-          if (label_p != NULL)
+          bool is_simply_jumpable;
+          jsp_state_t *named_label_state_p = jsp_find_named_label (name_cp, &is_simply_jumpable);
+
+          if (named_label_state_p != NULL)
           {
             EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
           }
 
-          jsp_label_push (&state_p->u.statement.label, JSP_LABEL_TYPE_NAMED, name_cp);
+          state_p->state = JSP_STATE_STAT_NAMED_LABEL;
+          state_p->u.named_label.name_cp = name_cp;
 
-          state_p->u.statement.outermost_stmt_label_p = (state_p->u.statement.outermost_stmt_label_p != NULL
-                                                         ? state_p->u.statement.outermost_stmt_label_p
-                                                         : &state_p->u.statement.label);
-
-          state_p->state = JSP_STATE_STAT_ITER_FINISH;
           jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
-          jsp_state_top ()->u.statement.outermost_stmt_label_p = state_p->u.statement.outermost_stmt_label_p;
         }
         else
         {
@@ -3247,10 +3335,6 @@ parse_statement_ (void)
         skip_token ();
         current_token_must_be (TOK_OPEN_BRACE);
 
-        jsp_label_push (&state_p->u.statement.label,
-                        JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                        NOT_A_LITERAL);
-
         // Second, parse case clauses' bodies and rewrite jumps
         skip_token ();
 
@@ -3285,51 +3369,54 @@ parse_statement_ (void)
 
         skip_token ();
 
-        jsp_label_t *label_p;
+        jsp_state_t *labelled_stmt_p;
         bool is_simply_jumpable = true;
-        if (!lexer_is_preceded_by_newlines (tok)
-            && token_is (TOK_NAME))
+
+        if (!lexer_is_preceded_by_newlines (tok) && token_is (TOK_NAME))
         {
           /* break or continue on a label */
-          label_p = jsp_label_find (JSP_LABEL_TYPE_NAMED, token_data_as_lit_cp (), &is_simply_jumpable);
+          labelled_stmt_p = jsp_find_named_label (token_data_as_lit_cp (), &is_simply_jumpable);
 
-          if (label_p == NULL)
+          if (labelled_stmt_p == NULL)
           {
             EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label not found");
           }
 
           skip_token ();
         }
-        else if (is_break)
-        {
-          label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_BREAKS,
-                                    NOT_A_LITERAL,
-                                    &is_simply_jumpable);
-
-          if (label_p == NULL)
-          {
-            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the break");
-          }
-        }
         else
         {
-          JERRY_ASSERT (!is_break);
+          labelled_stmt_p = jsp_find_unnamed_label (is_break, &is_simply_jumpable);
 
-          label_p = jsp_label_find (JSP_LABEL_TYPE_UNNAMED_CONTINUES,
-                                    NOT_A_LITERAL,
-                                    &is_simply_jumpable);
-
-          if (label_p == NULL)
+          if (labelled_stmt_p == NULL)
           {
-            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the continue");
+            if (is_break)
+            {
+              EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the break");
+            }
+            else
+            {
+              EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "No corresponding statement for the continue");
+            }
           }
         }
 
         insert_semicolon ();
 
-        JERRY_ASSERT (label_p != NULL);
+        JERRY_ASSERT (labelled_stmt_p != NULL);
 
-        jsp_label_add_jump (label_p, is_simply_jumpable, is_break);
+        vm_instr_counter_t *rewrite_chain_p;
+        if (is_break)
+        {
+          rewrite_chain_p = &labelled_stmt_p->u.statement.breaks_rewrite_chain;
+        }
+        else
+        {
+          rewrite_chain_p = &labelled_stmt_p->u.statement.iterational.continues_rewrite_chain;
+        }
+
+        vm_op_t jmp_opcode = is_simply_jumpable ? VM_OP_JMP_DOWN : VM_OP_JMP_BREAK_CONTINUE;
+        *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, empty_operand (), *rewrite_chain_p);
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
@@ -3417,7 +3504,9 @@ parse_statement_ (void)
         jsp_start_parse_function_scope (func_name, false, NULL);
 
         state_p->state = JSP_STATE_FUNC_DECL_FINISH;
+
         jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+        jsp_state_top ()->req_expr_type = JSP_STATE_SOURCE_ELEMENTS;
       }
       else
       {
@@ -3541,8 +3630,8 @@ parse_statement_ (void)
         assert_keyword (TOK_KW_WHILE);
         skip_token ();
 
-        jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                         serializer_get_current_instr_counter ());
+        JERRY_ASSERT (state_p->u.statement.iterational.continue_tgt_oc == MAX_OPCODES);
+        state_p->u.statement.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
         parse_expression_inside_parens_begin ();
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
@@ -3564,8 +3653,8 @@ parse_statement_ (void)
       }
       else
       {
-        jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                         serializer_get_current_instr_counter ());
+        JERRY_ASSERT (state_p->u.statement.iterational.continue_tgt_oc == MAX_OPCODES);
+        state_p->u.statement.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
         rewrite_jump_to_end ();
 
@@ -3625,8 +3714,8 @@ parse_statement_ (void)
         const locus loop_end_loc = tok.loc;
 
         // Setup ContinueTarget
-        jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                         serializer_get_current_instr_counter ());
+        JERRY_ASSERT (state_p->u.statement.iterational.continue_tgt_oc == MAX_OPCODES);
+        state_p->u.statement.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
         // Increment
         lexer_seek (state_p->u.statement.loc[1]);
@@ -3688,11 +3777,11 @@ parse_statement_ (void)
       const locus loop_end_loc = tok.loc;
 
       // Setup ContinueTarget
-      jsp_label_setup_continue_target (state_p->u.statement.outermost_stmt_label_p,
-                                       serializer_get_current_instr_counter ());
+      JERRY_ASSERT (state_p->u.statement.iterational.continue_tgt_oc == MAX_OPCODES);
+      state_p->u.statement.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
       // Write position of for-in end to for_in instruction
-      rewrite_for_in (state_p->u.for_in.header_pos);
+      rewrite_for_in (state_p->u.statement.iterational.for_in.header_pos);
 
       // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
       dump_for_in_end ();
@@ -3711,8 +3800,14 @@ parse_statement_ (void)
     {
       JSP_COMPLETE_STATEMENT_PARSE ();
 
-      jsp_label_rewrite_jumps_and_pop (&state_p->u.statement.label,
-                                       serializer_get_current_instr_counter ());
+      vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.iterational.continues_rewrite_chain;
+      vm_instr_counter_t continue_tgt_oc = state_p->u.statement.iterational.continue_tgt_oc;
+
+      while (*rewrite_chain_p != MAX_OPCODES)
+      {
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                       continue_tgt_oc);
+      }
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH)
     {
@@ -3749,9 +3844,6 @@ parse_statement_ (void)
 
       current_token_must_be (TOK_CLOSE_BRACE);
       skip_token ();
-
-      jsp_label_rewrite_jumps_and_pop (&state_p->u.statement.label,
-                                       serializer_get_current_instr_counter ());
 
       finish_dumping_case_clauses ();
 
@@ -3865,6 +3957,25 @@ parse_statement_ (void)
     {
       jsp_finish_parse_function_scope (false);
       JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_NAMED_LABEL)
+    {
+      jsp_state_pop ();
+    }
+    else
+    {
+      JERRY_ASSERT (state_p->state == JSP_STATE_STAT_STATEMENT);
+      JERRY_ASSERT (!state_p->is_completed);
+
+      vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.breaks_rewrite_chain;
+      vm_instr_counter_t break_tgt_oc = serializer_get_current_instr_counter ();
+
+      while (*rewrite_chain_p != MAX_OPCODES)
+      {
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, break_tgt_oc);
+      }
+
+      state_p->is_completed = true;
     }
   }
 } /* parse_statement_ */
