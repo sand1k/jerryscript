@@ -815,7 +815,6 @@ typedef struct
   uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
                                           *   put to register, specified by operand, specified in state */
   uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
-  uint8_t is_rewrite_chain_active   : 1; /**< flag, indicating whether rewrite chain is associated with current state */
   uint8_t var_decl                  : 1; /**< this flag tells that we are parsing VariableStatement, not
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
@@ -831,8 +830,6 @@ typedef struct
   {
     u (void) { }
 
-    vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
-
     struct
     {
       vm_instr_counter_t header_pos; /**< position of a varg header instruction */
@@ -842,9 +839,25 @@ typedef struct
 
     struct
     {
-      jsp_operand_t prop_name;
-      bool is_setter;
-    } accessor_prop_decl;
+      union
+      {
+        struct
+        {
+          jsp_operand_t prop_name;
+          bool is_setter;
+        } accessor_prop_decl;
+
+        struct
+        {
+          vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
+        } logical_and;
+
+        struct
+        {
+          vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
+        } logical_or;
+      } u;
+    } expression;
 
     struct
     {
@@ -978,7 +991,6 @@ jsp_push_new_expr_state (jsp_state_expr_t expr_type,
   new_state.is_list_in_process = false;
   new_state.is_fixed_ret_operand = false;
   new_state.is_complex_production = false;
-  new_state.is_rewrite_chain_active = false;
   new_state.var_decl = false;
   new_state.is_var_decl_no_in = false;
 
@@ -1147,7 +1159,6 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   new_state.is_no_in_mode = false;
   new_state.is_fixed_ret_operand = false;
   new_state.is_complex_production = false;
-  new_state.is_rewrite_chain_active = false;
   new_state.var_decl = false;
   new_state.was_default = false;
   new_state.is_default_branch = false;
@@ -1618,9 +1629,9 @@ parse_statement_ (void)
       {
         jsp_finish_parse_function_scope (true);
 
-        jsp_operand_t prop_name = state_p->u.accessor_prop_decl.prop_name;
+        jsp_operand_t prop_name = state_p->u.expression.u.accessor_prop_decl.prop_name;
         jsp_operand_t func = state_p->operand;
-        bool is_setter = state_p->u.accessor_prop_decl.is_setter;
+        bool is_setter = state_p->u.expression.u.accessor_prop_decl.is_setter;
 
         if (is_setter)
         {
@@ -1674,8 +1685,8 @@ parse_statement_ (void)
         JERRY_ASSERT (state_p->operand.is_empty_operand ());
         state_p->operand = func;
 
-        state_p->u.accessor_prop_decl.prop_name = prop_name;
-        state_p->u.accessor_prop_decl.is_setter = is_setter;
+        state_p->u.expression.u.accessor_prop_decl.prop_name = prop_name;
+        state_p->u.expression.u.accessor_prop_decl.is_setter = is_setter;
 
         jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
         jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
@@ -2612,6 +2623,9 @@ parse_statement_ (void)
       {
         /* propagate to LogicalAndExpression */
         state_p->state = JSP_STATE_EXPR_LOGICAL_AND;
+
+        state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
+
         state_p->is_completed = false;
       }
       else
@@ -2647,6 +2661,9 @@ parse_statement_ (void)
       {
         /* propagate to LogicalOrExpression */
         state_p->state = JSP_STATE_EXPR_LOGICAL_OR;
+
+        state_p->u.expression.u.logical_or.rewrite_chain = MAX_OPCODES;
+
         state_p->is_completed = false;
       }
       else
@@ -2684,8 +2701,7 @@ parse_statement_ (void)
             {
               state_p->is_complex_production = true;
 
-              state_p->is_rewrite_chain_active = true;
-              state_p->u.rewrite_chain = MAX_OPCODES;
+              state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
 
               JERRY_ASSERT (!state_p->is_fixed_ret_operand);
 
@@ -2699,11 +2715,11 @@ parse_statement_ (void)
             }
 
             JERRY_ASSERT (state_p->is_complex_production);
-            JERRY_ASSERT (state_p->is_rewrite_chain_active);
 
-            state_p->u.rewrite_chain = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_FALSE_JMP_DOWN,
-                                                                               state_p->operand,
-                                                                               state_p->u.rewrite_chain);
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
+            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_FALSE_JMP_DOWN,
+                                                                       state_p->operand,
+                                                                       *rewrite_chain_p);
 
             state_p->token_type = TOK_DOUBLE_AND;
 
@@ -2716,15 +2732,10 @@ parse_statement_ (void)
 
             vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
 
-            if (state_p->is_rewrite_chain_active)
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
+            while (*rewrite_chain_p != MAX_OPCODES)
             {
-              while (state_p->u.rewrite_chain != MAX_OPCODES)
-              {
-                state_p->u.rewrite_chain = rewrite_simple_or_nested_jump_and_get_next (state_p->u.rewrite_chain,
-                                                                                       target_oc);
-              }
-
-              state_p->is_rewrite_chain_active = false;
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
             }
 
             state_p->is_complex_production = false;
@@ -2796,8 +2807,7 @@ parse_statement_ (void)
             {
               state_p->is_complex_production = true;
 
-              state_p->is_rewrite_chain_active = true;
-              state_p->u.rewrite_chain = MAX_OPCODES;
+              state_p->u.expression.u.logical_or.rewrite_chain = MAX_OPCODES;
 
               jsp_operand_t ret = tmp_operand ();
 
@@ -2811,11 +2821,11 @@ parse_statement_ (void)
             }
 
             JERRY_ASSERT (state_p->is_complex_production);
-            JERRY_ASSERT (state_p->is_rewrite_chain_active);
 
-            state_p->u.rewrite_chain = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_TRUE_JMP_DOWN,
-                                                                               state_p->operand,
-                                                                               state_p->u.rewrite_chain);
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
+            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_TRUE_JMP_DOWN,
+                                                                       state_p->operand,
+                                                                       *rewrite_chain_p);
 
             state_p->token_type = TOK_DOUBLE_OR;
 
@@ -2828,15 +2838,10 @@ parse_statement_ (void)
 
             vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
 
-            if (state_p->is_rewrite_chain_active)
+            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
+            while (*rewrite_chain_p != MAX_OPCODES)
             {
-              while (state_p->u.rewrite_chain != MAX_OPCODES)
-              {
-                state_p->u.rewrite_chain = rewrite_simple_or_nested_jump_and_get_next (state_p->u.rewrite_chain,
-                                                                                       target_oc);
-              }
-
-              state_p->is_rewrite_chain_active = false;
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
             }
 
             state_p->is_complex_production = false;
