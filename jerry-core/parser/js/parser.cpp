@@ -105,7 +105,7 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_CATCH_FINISH       = 0x51,
   JSP_STATE_STAT_FINALLY_FINISH     = 0x52,
   JSP_STATE_STAT_TRY_FINISH         = 0x53,
-  JSP_STATE_STAT_WITH_FINISH        = 0x54,
+  JSP_STATE_STAT_WITH               = 0x54,
   JSP_STATE_STAT_EXPRESSION         = 0x55,
   JSP_STATE_STAT_RETURN             = 0x56,
 
@@ -2767,19 +2767,6 @@ parse_variable_declaration (void)
   return name;
 } /* parse_variable_declaration */
 
-static jsp_operand_t
-parse_expression_inside_parens (void)
-{
-  current_token_must_be (TOK_OPEN_PAREN);
-  skip_token ();
-
-  const jsp_operand_t res = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-
-  current_token_must_be (TOK_CLOSE_PAREN);
-
-  return res;
-}
-
 static void
 parse_expression_inside_parens_begin (void)
 {
@@ -2837,7 +2824,7 @@ jsp_find_unnamed_label (bool is_label_for_break,
       break;
     }
 
-    if (state_p->state == JSP_STATE_STAT_WITH_FINISH
+    if (state_p->state == JSP_STATE_STAT_WITH
         || state_p->state == JSP_STATE_STAT_TRY
         || state_p->state == JSP_STATE_STAT_CATCH_FINISH
         || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
@@ -2879,7 +2866,7 @@ jsp_find_named_label (lit_cpointer_t name_cp,
       break;
     }
 
-    if (state_p->state == JSP_STATE_STAT_WITH_FINISH
+    if (state_p->state == JSP_STATE_STAT_WITH
         || state_p->state == JSP_STATE_STAT_TRY
         || state_p->state == JSP_STATE_STAT_CATCH_FINISH
         || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
@@ -3380,16 +3367,9 @@ parse_statement_ (void)
           EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "'with' expression is not allowed in strict mode.");
         }
 
-        const jsp_operand_t expr = parse_expression_inside_parens ();
-
-        scopes_tree_set_contains_with (serializer_get_scope ());
-
-        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
-
-        state_p->u.rewrite_chain = dump_with_for_rewrite (expr);
-        skip_token ();
-
-        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WITH_FINISH);
+        parse_expression_inside_parens_begin();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        state_p->state = JSP_STATE_STAT_WITH;
       }
       else if (token_is (TOK_KW_THROW))
       {
@@ -4025,17 +4005,33 @@ parse_statement_ (void)
 
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
-    else if (state_p->state == JSP_STATE_STAT_WITH_FINISH)
+    else if (state_p->state == JSP_STATE_STAT_WITH)
     {
-      rewrite_with (state_p->u.rewrite_chain);
-      dump_with_end ();
-
-      if (state_p->is_raised)
+      if (is_subexpr_end)
       {
-        jsp_label_remove_nested_jumpable_border ();
-      }
+        parse_expression_inside_parens_end();
+        const jsp_operand_t expr = subexpr_operand;
 
-      JSP_COMPLETE_STATEMENT_PARSE ();
+        scopes_tree_set_contains_with (serializer_get_scope ());
+
+        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
+
+        state_p->u.rewrite_chain = dump_with_for_rewrite (expr);
+
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WITH);
+      }
+      else
+      {
+        rewrite_with (state_p->u.rewrite_chain);
+        dump_with_end ();
+
+        if (state_p->is_raised)
+        {
+          jsp_label_remove_nested_jumpable_border ();
+        }
+
+        JSP_COMPLETE_STATEMENT_PARSE ();
+      }
     }
     else if (state_p->state == JSP_STATE_FUNC_DECL_FINISH)
     {
