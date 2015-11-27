@@ -121,7 +121,7 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_NAMED_LABEL
 } jsp_state_expr_t;
 
-static void parse_statement_ (void);
+static void jsp_parse_source_element_list (void);
 static void skip_case_clause_body (void);
 
 static bool
@@ -791,7 +791,13 @@ static_assert (sizeof (jsp_state_t) == 32, "Please, update if size is changed");
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
 jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
-uint32_t jsp_state_stack_pos = 0;
+uint32_t jsp_state_stack_pos;
+
+static void
+jsp_stack_init (void)
+{
+  jsp_state_stack_pos = 0;
+} /* jsp_stack_init */
 
 static void
 jsp_state_push (jsp_state_t state)
@@ -815,10 +821,10 @@ jsp_state_top (void)
 } /* jsp_state_top */
 
 static bool
-jsp_is_stack_empty (void)
+jsp_is_stack_contains_exactly_one_element (void)
 {
-  return (jsp_state_stack_pos == 0);
-} /* jsp_is_stack_empty */
+  return (jsp_state_stack_pos == 1);
+} /* jsp_is_stack_contains_exactly_one_element */
 
 static void
 jsp_state_pop (void)
@@ -1340,15 +1346,15 @@ do \
 while (0)
 
 /**
- * Parse statement
+ * Parse source element list
  */
 static void
-parse_statement_ (void)
+jsp_parse_source_element_list (void)
 {
+  jsp_stack_init ();
+
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
   jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
-
-  uint32_t start_pos = jsp_state_stack_pos;
 
   while (true)
   {
@@ -1360,13 +1366,13 @@ parse_statement_ (void)
 
     if (state_p->state == state_p->req_state && state_p->is_completed)
     {
-      (void) jsp_is_stack_empty ();
-
-      if (start_pos == jsp_state_stack_pos) // FIXME: jsp_is_stack_empty ()
+      if (jsp_is_stack_contains_exactly_one_element ())
       {
+        JERRY_ASSERT (state_p->state == JSP_STATE_SOURCE_ELEMENTS);
+
         jsp_state_pop ();
 
-        break;
+        return;
       }
       else
       {
@@ -4076,7 +4082,7 @@ parse_statement_ (void)
       state_p->is_completed = true;
     }
   }
-} /* parse_statement_ */
+} /* jsp_parse_source_element_list */
 
 static void
 skip_case_clause_body (void)
@@ -4144,7 +4150,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
      * Note:
      *      Operations that could raise an early error can be performed only during execution of the block.
      */
-
     lexer_init (source_p, source_size, parser_show_instrs);
     lexer_set_strict_mode (scopes_tree_strict_mode (scope));
 
@@ -4152,7 +4157,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_parse_directive_prologue ();
 
-    parse_statement_ ();
+    jsp_parse_source_element_list ();
 
     JERRY_ASSERT (token_is (TOK_EOF));
 
