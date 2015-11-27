@@ -121,7 +121,6 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_NAMED_LABEL
 } jsp_state_expr_t;
 
-static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
 static void parse_statement_ (void);
 static void skip_case_clause_body (void);
 
@@ -1082,20 +1081,179 @@ jsp_get_prop_name_after_dot (void)
   }
 } /* jsp_get_prop_name_after_dot */
 
-/**
- * Parse an expression
- *
- * expression
- *  : assignment_expression (LT!* ',' LT!* assignment_expression)*
- *  ;
- *
- * @return jsp_operand_t which holds result of expression
- */
-static jsp_operand_t __attr_unused___
-parse_expression_ (jsp_state_expr_t req_expr,
-                   bool in_allowed) /**< flag indicating if 'in' is allowed inside expression to parse */
+static void
+parse_expression_inside_parens_begin (void)
 {
-  jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, req_expr, in_allowed);
+  current_token_must_be (TOK_OPEN_PAREN);
+  skip_token ();
+}
+
+static void
+parse_expression_inside_parens_end (void)
+{
+  current_token_must_be (TOK_CLOSE_PAREN);
+  skip_token ();
+}
+
+static void
+jsp_start_statement_parse (jsp_state_expr_t stat)
+{
+  jsp_state_t new_state;
+
+  new_state.state = stat;
+  new_state.req_state = JSP_STATE_STAT_STATEMENT;
+  new_state.operand = empty_operand ();
+  new_state.token_type = TOK_EMPTY;
+
+  new_state.u.statement.breaks_rewrite_chain = MAX_OPCODES;
+
+  new_state.is_completed = false;
+  new_state.is_list_in_process = false;
+  new_state.is_no_in_mode = false;
+  new_state.is_fixed_ret_operand = false;
+  new_state.is_complex_production = false;
+  new_state.is_rewrite_chain_active = false;
+  new_state.var_decl = false;
+  new_state.was_default = false;
+  new_state.is_default_branch = false;
+  new_state.is_simply_jumpable_border = false;
+
+  jsp_state_push (new_state);
+} /* jsp_start_statement_parse */
+
+static jsp_state_t *
+jsp_find_unnamed_label (bool is_label_for_break,
+                        bool *out_is_simply_jumpable_p)
+{
+  *out_is_simply_jumpable_p = true;
+
+  uint32_t stack_pos = jsp_state_stack_pos;
+
+  while (stack_pos != 0)
+  {
+    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      break;
+    }
+
+    if (state_p->is_simply_jumpable_border)
+    {
+      *out_is_simply_jumpable_p = false;
+    }
+
+    bool is_iterational_stmt = (state_p->state == JSP_STATE_STAT_WHILE
+                                || state_p->state == JSP_STATE_STAT_DO_WHILE
+                                || state_p->state == JSP_STATE_STAT_FOR_IN
+                                || state_p->state == JSP_STATE_STAT_FOR_IN_EXPR
+                                || state_p->state == JSP_STATE_STAT_FOR_IN_FINISH
+                                || state_p->state == JSP_STATE_STAT_FOR_INCREMENT);
+    bool is_switch_stmt = (state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
+
+    if ((is_switch_stmt && is_label_for_break) || is_iterational_stmt)
+    {
+      return state_p;
+    }
+  }
+
+  return NULL;
+}
+
+static jsp_state_t *
+jsp_find_named_label (lit_cpointer_t name_cp,
+                      bool *out_is_simply_jumpable_p)
+{
+  *out_is_simply_jumpable_p = true;
+
+  uint32_t stack_pos = jsp_state_stack_pos;
+
+  while (stack_pos != 0)
+  {
+    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      break;
+    }
+
+    if (state_p->is_simply_jumpable_border)
+    {
+      *out_is_simply_jumpable_p = false;
+    }
+
+    if (state_p->state == JSP_STATE_STAT_NAMED_LABEL
+        && state_p->u.named_label.name_cp.packed_value == name_cp.packed_value)
+    {
+      while (++stack_pos < jsp_state_stack_pos)
+      {
+        state_p = &jsp_state_stack [stack_pos];
+
+        if (state_p->state != JSP_STATE_STAT_NAMED_LABEL)
+        {
+          break;
+        }
+      }
+
+      JERRY_ASSERT (stack_pos < jsp_state_stack_pos);
+
+      return state_p;
+    }
+  }
+
+  return NULL;
+}
+
+static void
+insert_semicolon (void)
+{
+  bool is_new_line_occured = lexer_is_preceded_by_newlines (tok);
+  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
+
+  if (!is_new_line_occured && !is_close_brace_or_eof)
+  {
+    if (token_is (TOK_SEMICOLON))
+    {
+      skip_token ();
+    }
+    else if (!token_is (TOK_EOF))
+    {
+      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
+    }
+  }
+}
+
+
+#define JSP_COMPLETE_STATEMENT_PARSE() \
+do \
+{ \
+  state_p->state = JSP_STATE_STAT_STATEMENT; \
+  JERRY_ASSERT (!state_p->is_completed); \
+  dumper_new_statement (); \
+} \
+while (0)
+
+#define JSP_PUSH_STATE_AND_STATEMENT_PARSE(s) \
+do \
+{ \
+  state_p->state = (s); \
+  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY); \
+  dumper_new_statement (); \
+} \
+while (0)
+
+/**
+ * Parse statement
+ */
+static void
+parse_statement_ (void)
+{
+  dumper_new_scope ();
+
+  dumper_new_statement ();
+
+  jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+  jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
 
   uint32_t start_pos = jsp_state_stack_pos;
 
@@ -1105,7 +1263,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
     jsp_operand_t subexpr_operand;
     jsp_state_expr_t subexpr_type;
 
-    jsp_state_t* state_p = jsp_state_top ();
+    jsp_state_t *state_p = jsp_state_top ();
 
     if (state_p->state == state_p->req_state && state_p->is_completed)
     {
@@ -1113,15 +1271,13 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       if (start_pos == jsp_state_stack_pos) // FIXME: jsp_is_stack_empty ()
       {
-        /* expression parse finished */
-        jsp_operand_t ret = state_p->operand;
         jsp_state_pop ();
-
-        return ret;
+        dumper_finish_scope ();
+        break;
       }
       else
       {
-        is_subexpr_end = true;
+        is_subexpr_end = (state_p->req_state != JSP_STATE_STAT_STATEMENT);
 
         subexpr_operand = state_p->operand;
         subexpr_type = state_p->state;
@@ -1146,7 +1302,80 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
     const bool in_allowed = !state_p->is_no_in_mode;
 
-    if (state_p->state == JSP_STATE_EXPR_EMPTY)
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
+    {
+      scope_type_t scope_type = serializer_get_scope ()->type;
+
+      dumper_new_scope ();
+
+      state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
+      state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
+
+      if (scope_type == SCOPE_TYPE_EVAL)
+      {
+        dump_undefined_assignment (eval_ret_operand ());
+      }
+
+      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
+    }
+    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    {
+      scope_type_t scope_type = serializer_get_scope ()->type;
+
+      jsp_token_type_t end_token_type = (scope_type == SCOPE_TYPE_FUNCTION) ? TOK_CLOSE_BRACE : TOK_EOF;
+
+      if (token_is (end_token_type))
+      {
+        opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
+
+        scopes_tree fe_scope_tree = serializer_get_scope ();
+        if (fe_scope_tree->strict_mode)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
+        }
+
+        if (!fe_scope_tree->ref_arguments)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
+        }
+
+        if (!fe_scope_tree->ref_eval)
+        {
+          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
+        }
+
+#ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
+        vm_instr_counter_t number_of_instrs_removed_from_function_header;
+
+        scope_flags = jsp_try_move_vars_to_regs (scope_flags, &number_of_instrs_removed_from_function_header);
+
+        JERRY_ASSERT (state_p->u.source_elements.scope_code_flags_oc >= number_of_instrs_removed_from_function_header);
+        JERRY_ASSERT (state_p->u.source_elements.reg_var_decl_oc >= number_of_instrs_removed_from_function_header);
+
+        vm_instr_counter_t new_oc;
+
+        new_oc = state_p->u.source_elements.scope_code_flags_oc;
+        new_oc = (vm_instr_counter_t) (new_oc - number_of_instrs_removed_from_function_header);
+        state_p->u.source_elements.scope_code_flags_oc = new_oc;
+
+        new_oc = state_p->u.source_elements.reg_var_decl_oc;
+        new_oc = (vm_instr_counter_t) (new_oc - number_of_instrs_removed_from_function_header);
+        state_p->u.source_elements.reg_var_decl_oc = new_oc;
+#endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
+
+        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
+        rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
+
+        state_p->is_completed = true;
+
+        dumper_finish_scope ();
+      }
+      else
+      {
+        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS);
+      }
+    }
+    else if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
       rescan_regexp_token ();
 
@@ -1287,15 +1516,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
       skip_token ();
     }
-    else if (state_p->state == JSP_STATE_SOURCE_ELEMENT_LIST)
-    {
-      JERRY_ASSERT (!state_p->is_completed);
-
-      /* FIXME: merge with parse_statement_ */
-      parse_statement_ ();
-
-      state_p->is_completed = true;
-    }
     else if (state_p->state == JSP_STATE_EXPR_FUNCTION)
     {
       JERRY_ASSERT (!state_p->is_completed);
@@ -1321,7 +1541,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
         state_p->operand = jsp_start_parse_function_scope (name, true, NULL);
 
-        jsp_push_new_expr_state (JSP_STATE_SOURCE_ELEMENT_LIST, JSP_STATE_SOURCE_ELEMENT_LIST, true);
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_DATA_PROP_DECL)
@@ -1421,7 +1642,8 @@ parse_expression_ (jsp_state_expr_t req_expr,
         state_p->u.accessor_prop_decl.prop_name = prop_name;
         state_p->u.accessor_prop_decl.is_setter = is_setter;
 
-        jsp_push_new_expr_state (JSP_STATE_SOURCE_ELEMENT_LIST, JSP_STATE_SOURCE_ELEMENT_LIST, true);
+        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_OBJECT_LITERAL)
@@ -2648,7 +2870,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
         state_p->is_completed = true;
       }
     }
-    else
+    else if (state_p->state == JSP_STATE_EXPR_EXPRESSION)
     {
       /* ECMA-262 v5, 11.14 */
       JERRY_ASSERT (state_p->state == JSP_STATE_EXPR_EXPRESSION);
@@ -2695,297 +2917,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
           state_p->is_completed = true;
         }
       }
-    }
-  }
-
-  return empty_operand ();
-} /* parse_expression_ */
-
-static void
-parse_expression_inside_parens_begin (void)
-{
-  current_token_must_be (TOK_OPEN_PAREN);
-  skip_token ();
-}
-
-static void
-parse_expression_inside_parens_end (void)
-{
-  current_token_must_be (TOK_CLOSE_PAREN);
-  skip_token ();
-}
-
-static void
-jsp_start_statement_parse (jsp_state_expr_t stat)
-{
-  jsp_state_t new_state;
-
-  new_state.state = stat;
-  new_state.req_state = JSP_STATE_STAT_STATEMENT;
-  new_state.operand = empty_operand ();
-  new_state.token_type = TOK_EMPTY;
-
-  new_state.u.statement.breaks_rewrite_chain = MAX_OPCODES;
-
-  new_state.is_completed = false;
-  new_state.is_list_in_process = false;
-  new_state.is_no_in_mode = false;
-  new_state.is_fixed_ret_operand = false;
-  new_state.is_complex_production = false;
-  new_state.is_rewrite_chain_active = false;
-  new_state.var_decl = false;
-  new_state.was_default = false;
-  new_state.is_default_branch = false;
-  new_state.is_simply_jumpable_border = false;
-
-  jsp_state_push (new_state);
-} /* jsp_start_statement_parse */
-
-static jsp_state_t *
-jsp_find_unnamed_label (bool is_label_for_break,
-                        bool *out_is_simply_jumpable_p)
-{
-  *out_is_simply_jumpable_p = true;
-
-  uint32_t stack_pos = jsp_state_stack_pos;
-
-  while (stack_pos != 0)
-  {
-    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
-
-    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
-    {
-      break;
-    }
-
-    if (state_p->is_simply_jumpable_border)
-    {
-      *out_is_simply_jumpable_p = false;
-    }
-
-    bool is_iterational_stmt = (state_p->state == JSP_STATE_STAT_WHILE
-                                || state_p->state == JSP_STATE_STAT_DO_WHILE
-                                || state_p->state == JSP_STATE_STAT_FOR_IN
-                                || state_p->state == JSP_STATE_STAT_FOR_IN_EXPR
-                                || state_p->state == JSP_STATE_STAT_FOR_IN_FINISH
-                                || state_p->state == JSP_STATE_STAT_FOR_INCREMENT);
-    bool is_switch_stmt = (state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
-
-    if ((is_switch_stmt && is_label_for_break) || is_iterational_stmt)
-    {
-      return state_p;
-    }
-  }
-
-  return NULL;
-}
-
-static jsp_state_t *
-jsp_find_named_label (lit_cpointer_t name_cp,
-                      bool *out_is_simply_jumpable_p)
-{
-  *out_is_simply_jumpable_p = true;
-
-  uint32_t stack_pos = jsp_state_stack_pos;
-
-  while (stack_pos != 0)
-  {
-    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
-
-    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
-    {
-      break;
-    }
-
-    if (state_p->is_simply_jumpable_border)
-    {
-      *out_is_simply_jumpable_p = false;
-    }
-
-    if (state_p->state == JSP_STATE_STAT_NAMED_LABEL
-        && state_p->u.named_label.name_cp.packed_value == name_cp.packed_value)
-    {
-      while (++stack_pos < jsp_state_stack_pos)
-      {
-        state_p = &jsp_state_stack [stack_pos];
-
-        if (state_p->state != JSP_STATE_STAT_NAMED_LABEL)
-        {
-          break;
-        }
-      }
-
-      JERRY_ASSERT (stack_pos < jsp_state_stack_pos);
-
-      return state_p;
-    }
-  }
-
-  return NULL;
-}
-
-static void
-insert_semicolon (void)
-{
-  bool is_new_line_occured = lexer_is_preceded_by_newlines (tok);
-  bool is_close_brace_or_eof = (token_is (TOK_CLOSE_BRACE) || token_is (TOK_EOF));
-
-  if (!is_new_line_occured && !is_close_brace_or_eof)
-  {
-    if (token_is (TOK_SEMICOLON))
-    {
-      skip_token ();
-    }
-    else if (!token_is (TOK_EOF))
-    {
-      EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Expected either ';' or newline token");
-    }
-  }
-}
-
-
-#define JSP_COMPLETE_STATEMENT_PARSE() \
-do \
-{ \
-  state_p->state = JSP_STATE_STAT_STATEMENT; \
-  JERRY_ASSERT (!state_p->is_completed); \
-  dumper_new_statement (); \
-} \
-while (0)
-
-#define JSP_PUSH_STATE_AND_STATEMENT_PARSE(s) \
-do \
-{ \
-  state_p->state = (s); \
-  jsp_start_statement_parse (JSP_STATE_STAT_EMPTY); \
-  dumper_new_statement (); \
-} \
-while (0)
-
-/**
- * Parse statement
- */
-static void
-parse_statement_ (void)
-{
-  dumper_new_scope ();
-
-  dumper_new_statement ();
-
-  jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-  jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
-
-  uint32_t start_pos = jsp_state_stack_pos;
-  bool in_allowed = true;
-
-  while (true)
-  {
-    bool is_subexpr_end = false;
-    jsp_operand_t subexpr_operand;
-
-    jsp_state_t *state_p = jsp_state_top ();
-
-    if (state_p->state == state_p->req_state && state_p->is_completed)
-    {
-      (void) jsp_is_stack_empty ();
-
-      if (start_pos == jsp_state_stack_pos) // FIXME: jsp_is_stack_empty ()
-      {
-        jsp_state_pop ();
-        dumper_finish_scope ();
-        break;
-      }
-      else
-      {
-        is_subexpr_end = (state_p->req_state != JSP_STATE_STAT_STATEMENT);
-
-        subexpr_operand = state_p->operand;
-
-        jsp_state_pop ();
-        state_p = jsp_state_top ();
-      }
-    }
-
-    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
-    {
-      scope_type_t scope_type = serializer_get_scope ()->type;
-
-      dumper_new_scope ();
-
-      state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
-      state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
-
-      if (scope_type == SCOPE_TYPE_EVAL)
-      {
-        dump_undefined_assignment (eval_ret_operand ());
-      }
-
-      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
-    }
-    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
-    {
-      scope_type_t scope_type = serializer_get_scope ()->type;
-
-      jsp_token_type_t end_token_type = (scope_type == SCOPE_TYPE_FUNCTION) ? TOK_CLOSE_BRACE : TOK_EOF;
-
-      if (token_is (end_token_type))
-      {
-        opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
-
-        scopes_tree fe_scope_tree = serializer_get_scope ();
-        if (fe_scope_tree->strict_mode)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
-        }
-
-        if (!fe_scope_tree->ref_arguments)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
-        }
-
-        if (!fe_scope_tree->ref_eval)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
-        }
-
-#ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
-        vm_instr_counter_t number_of_instrs_removed_from_function_header;
-
-        scope_flags = jsp_try_move_vars_to_regs (scope_flags, &number_of_instrs_removed_from_function_header);
-
-        JERRY_ASSERT (state_p->u.source_elements.scope_code_flags_oc >= number_of_instrs_removed_from_function_header);
-        JERRY_ASSERT (state_p->u.source_elements.reg_var_decl_oc >= number_of_instrs_removed_from_function_header);
-
-        vm_instr_counter_t new_oc;
-
-        new_oc = state_p->u.source_elements.scope_code_flags_oc;
-        new_oc = (vm_instr_counter_t) (new_oc - number_of_instrs_removed_from_function_header);
-        state_p->u.source_elements.scope_code_flags_oc = new_oc;
-
-        new_oc = state_p->u.source_elements.reg_var_decl_oc;
-        new_oc = (vm_instr_counter_t) (new_oc - number_of_instrs_removed_from_function_header);
-        state_p->u.source_elements.reg_var_decl_oc = new_oc;
-#endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
-
-        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
-        rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
-
-        state_p->is_completed = true;
-
-        dumper_finish_scope ();
-      }
-      else
-      {
-        JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_SOURCE_ELEMENTS);
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_EMPTY)
-    {
-      jsp_operand_t expr = parse_expression_ (state_p->req_state, !state_p->is_no_in_mode);
-
-      state_p->operand = expr;
-      state_p->is_completed = true;
-      state_p->state = state_p->req_state;
     }
     else if (state_p->state == JSP_STATE_STAT_EMPTY)
     {
