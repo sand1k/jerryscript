@@ -804,7 +804,7 @@ typedef struct
   jsp_operand_t operand; /**< operand, associated with expression */
 
   jsp_state_expr_t state; /**< current state */
-  jsp_state_expr_t req_expr_type; /**< requested type of expression */
+  jsp_state_expr_t req_state; /**< required state */
 
   jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
 
@@ -932,13 +932,13 @@ jsp_state_pop (void)
 
 static void
 jsp_push_new_expr_state (jsp_state_expr_t expr_type,
-                         jsp_state_expr_t req_expr_type,
+                         jsp_state_expr_t req_state,
                          bool in_allowed)
 {
   jsp_state_t new_state;
 
   new_state.state = expr_type;
-  new_state.req_expr_type = req_expr_type;
+  new_state.req_state = req_state;
   new_state.operand = empty_operand ();
   new_state.token_type = TOK_EMPTY;
 
@@ -1110,7 +1110,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
     jsp_state_t* state_p = jsp_state_top ();
 
-    if (state_p->state == state_p->req_expr_type && state_p->is_completed)
+    if (state_p->state == state_p->req_state && state_p->is_completed)
     {
       (void) jsp_is_stack_empty ();
 
@@ -1144,7 +1144,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
        * its invalid to reach Expression production type if required production is lower
        * (i.e. is not Expression production type).
        */
-      JERRY_ASSERT (!(state_p->state == JSP_STATE_EXPR_EXPRESSION && state_p->req_expr_type != JSP_STATE_EXPR_EXPRESSION));
+      JERRY_ASSERT (!(state_p->state == JSP_STATE_EXPR_EXPRESSION && state_p->req_state != JSP_STATE_EXPR_EXPRESSION));
     }
 
     const bool in_allowed = !state_p->is_no_in_mode;
@@ -2758,7 +2758,7 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   jsp_state_t new_state;
 
   new_state.state = stat;
-  new_state.req_expr_type = JSP_STATE_STAT_STATEMENT;
+  new_state.req_state = JSP_STATE_STAT_STATEMENT;
   new_state.operand = empty_operand ();
   new_state.token_type = TOK_EMPTY;
 
@@ -2916,7 +2916,7 @@ parse_statement_ (void)
   dumper_new_statement ();
 
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-  jsp_state_top ()->req_expr_type = JSP_STATE_SOURCE_ELEMENTS;
+  jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
 
   uint32_t start_pos = jsp_state_stack_pos;
   bool in_allowed = true;
@@ -2928,7 +2928,7 @@ parse_statement_ (void)
 
     jsp_state_t *state_p = jsp_state_top ();
 
-    if (state_p->state == state_p->req_expr_type && state_p->is_completed)
+    if (state_p->state == state_p->req_state && state_p->is_completed)
     {
       (void) jsp_is_stack_empty ();
 
@@ -2940,7 +2940,7 @@ parse_statement_ (void)
       }
       else
       {
-        is_subexpr_end = (state_p->req_expr_type != JSP_STATE_STAT_STATEMENT);
+        is_subexpr_end = (state_p->req_state != JSP_STATE_STAT_STATEMENT);
 
         subexpr_operand = state_p->operand;
 
@@ -3028,7 +3028,7 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
-      jsp_operand_t expr = parse_expression_ (state_p->req_expr_type, !state_p->is_no_in_mode);
+      jsp_operand_t expr = parse_expression_ (state_p->req_state, !state_p->is_no_in_mode);
 
       if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL
           && state_p->is_dump_eval_ret_store)
@@ -3040,7 +3040,7 @@ parse_statement_ (void)
 
       state_p->operand = expr;
       state_p->is_completed = true;
-      state_p->state = state_p->req_expr_type;
+      state_p->state = state_p->req_state;
     }
     else if (state_p->state == JSP_STATE_STAT_EMPTY)
     {
@@ -3362,7 +3362,7 @@ parse_statement_ (void)
         state_p->state = JSP_STATE_FUNC_DECL_FINISH;
 
         jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-        jsp_state_top ()->req_expr_type = JSP_STATE_SOURCE_ELEMENTS;
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
       }
       else
       {
