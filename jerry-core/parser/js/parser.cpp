@@ -501,7 +501,6 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   /* parse formal parameters list */
   size_t formal_parameters_num = 0;
-  jsp_early_error_start_checking_of_vargs ();
 
   current_token_must_be (TOK_OPEN_PAREN);
   skip_token ();
@@ -512,13 +511,14 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (vlt, func_name);
 
+  locus formal_parameters_list_loc = tok.loc;
+
   while (!token_is (TOK_CLOSE_PAREN))
   {
     current_token_must_be (TOK_NAME);
     jsp_operand_t formal_parameter_name = literal_operand (token_data_as_lit_cp ());
     skip_token ();
 
-    jsp_early_error_add_varg (formal_parameter_name);
     dump_varg (formal_parameter_name);
 
     formal_parameters_num++;
@@ -545,7 +545,79 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
   jsp_parse_directive_prologue ();
 
   jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
-  jsp_early_error_check_for_syntax_errors_in_formal_param_list (is_strict_mode (), tok.loc);
+
+  if (is_strict_mode ())
+  {
+    locus body_loc = tok.loc;
+
+    lexer_seek (formal_parameters_list_loc);
+    skip_token ();
+
+    /* Check duplication of formal parameters names */
+    while (!token_is (TOK_CLOSE_PAREN))
+    {
+      current_token_must_be (TOK_NAME);
+
+      literal_t current_parameter_name_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
+      locus current_parameter_loc = tok.loc;
+
+      skip_token ();
+
+      if (token_is (TOK_COMMA))
+      {
+        skip_token ();
+      }
+
+      jsp_early_error_emit_error_on_eval_and_arguments (current_parameter_name_lit,
+                                                        current_parameter_loc);
+
+      while (!token_is (TOK_CLOSE_PAREN))
+      {
+        current_token_must_be (TOK_NAME);
+
+        if (lit_utf8_iterator_pos_cmp (tok.loc, current_parameter_loc) != 0)
+        {
+          literal_t iter_parameter_name_lit = lit_get_literal_by_cp (token_data_as_lit_cp ());
+
+          if (lit_literal_equal_type (current_parameter_name_lit, iter_parameter_name_lit))
+          {
+            PARSE_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX,
+                              "Duplication of literal '%s' in FormalParameterList is not allowed in strict mode",
+                              tok.loc, lit_literal_to_str_internal_buf (iter_parameter_name_lit));
+          }
+        }
+
+        skip_token ();
+
+        if (token_is (TOK_COMMA))
+        {
+          skip_token ();
+        }
+        else
+        {
+          current_token_must_be (TOK_CLOSE_PAREN);
+        }
+      }
+
+      lexer_seek (current_parameter_loc);
+      skip_token ();
+
+      JERRY_ASSERT (lit_utf8_iterator_pos_cmp (tok.loc, current_parameter_loc) == 0);
+      skip_token ();
+
+      if (token_is (TOK_COMMA))
+      {
+        skip_token ();
+      }
+      else
+      {
+        current_token_must_be (TOK_CLOSE_PAREN);
+      }
+    }
+
+    lexer_seek (body_loc);
+    skip_token ();
+  }
 
   if (out_formal_parameters_num_p != NULL)
   {
