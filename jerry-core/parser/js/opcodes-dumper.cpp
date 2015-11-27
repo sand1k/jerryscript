@@ -13,11 +13,9 @@
  * limitations under the License.
  */
 
-#include "opcodes-dumper.h"
-
-#include "serializer.h"
-#include "stack.h"
 #include "jsp-early-error.h"
+#include "opcodes-dumper.h"
+#include "serializer.h"
 
 /**
  * Register allocator's counter
