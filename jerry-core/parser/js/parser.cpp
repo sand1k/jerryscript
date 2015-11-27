@@ -108,6 +108,7 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_WITH               = 0x54,
   JSP_STATE_STAT_EXPRESSION         = 0x55,
   JSP_STATE_STAT_RETURN             = 0x56,
+  JSP_STATE_STAT_THROW              = 0x57,
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
@@ -3374,11 +3375,8 @@ parse_statement_ (void)
       else if (token_is (TOK_KW_THROW))
       {
         skip_token ();
-        const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-        insert_semicolon ();
-        dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
-
-        JSP_COMPLETE_STATEMENT_PARSE ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        state_p->state = JSP_STATE_STAT_THROW;
       }
       else if (token_is (TOK_KW_FUNCTION))
       {
@@ -4059,6 +4057,16 @@ parse_statement_ (void)
       const jsp_operand_t op = subexpr_operand;
       dump_retval (dump_assignment_of_lhs_if_value_based_reference (op));
       insert_semicolon ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_THROW)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      const jsp_operand_t op = subexpr_operand;
+      insert_semicolon ();
+      dump_throw (dump_assignment_of_lhs_if_value_based_reference (op));
 
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
