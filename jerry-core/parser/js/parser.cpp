@@ -848,8 +848,6 @@ typedef struct
 
     struct
     {
-      locus loc[2]; /**< remembered location for parsing continuation */
-
       vm_instr_counter_t breaks_rewrite_chain;
 
       union
@@ -859,16 +857,53 @@ typedef struct
           vm_instr_counter_t continues_rewrite_chain;
           vm_instr_counter_t continue_tgt_oc;
 
-          struct
+          union
           {
-            vm_instr_counter_t header_pos;
-          } for_in;
+            struct
+            {
+              locus iterator_expr_loc;
+              locus body_loc;
+
+              vm_instr_counter_t header_pos;
+            } loop_for_in;
+
+            struct
+            {
+              union
+              {
+                locus cond_expr_start_loc;
+                locus end_loc;
+              } u;
+            } loop_while;
+
+            struct
+            {
+              union
+              {
+                locus body_loc;
+                locus condition_expr_loc;
+              } u1;
+
+              union
+              {
+                locus increment_expr_loc;
+                locus end_loc;
+              } u2;
+            } loop_for;
+          } u;
         } iterational;
 
         struct
         {
+          locus loc;
+
           uint16_t case_clause_count;
         } switch_statement;
+
+        struct
+        {
+          vm_instr_counter_t header_pos;
+        } with_statement;
       } u;
     } statement;
 
@@ -885,7 +920,7 @@ typedef struct
   } u;
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 28, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 32, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -2962,7 +2997,7 @@ parse_statement_ (void)
         {
           skip_token ();
           current_token_must_be (TOK_OPEN_PAREN);
-          state_p->u.statement.loc[0] = tok.loc;
+          state_p->u.statement.u.iterational.u.loop_while.u.cond_expr_start_loc = tok.loc;
           jsp_skip_braces (TOK_OPEN_PAREN);
 
           dump_jump_to_end_for_rewrite ();
@@ -2998,10 +3033,10 @@ parse_statement_ (void)
           lexer_seek (for_open_paren_loc);
           tok = lexer_next_token (false);
 
-          state_p->u.statement.loc[0] = for_body_statement_loc;
-
           if (is_plain_for)
           {
+            state_p->u.statement.u.iterational.u.loop_for.u1.body_loc = for_body_statement_loc;
+
             current_token_must_be (TOK_OPEN_PAREN);
             skip_token ();
 
@@ -3026,11 +3061,13 @@ parse_statement_ (void)
           }
           else
           {
+            state_p->u.statement.u.iterational.u.loop_for_in.body_loc = for_body_statement_loc;
+
             current_token_must_be (TOK_OPEN_PAREN);
             skip_token ();
 
             // Save Iterator location
-            state_p->u.statement.loc[1] = tok.loc;
+            state_p->u.statement.u.iterational.u.loop_for_in.iterator_expr_loc = tok.loc;
 
             while (lit_utf8_iterator_pos_cmp (tok.loc, for_body_statement_loc) < 0)
             {
@@ -3386,7 +3423,7 @@ parse_statement_ (void)
         const jsp_operand_t cond = subexpr_operand;
         dump_continue_iterations_check (cond);
 
-        lexer_seek (state_p->u.statement.loc[0]);
+        lexer_seek (state_p->u.statement.u.iterational.u.loop_while.u.end_loc);
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_ITER_FINISH;
@@ -3400,10 +3437,10 @@ parse_statement_ (void)
 
         const locus end_loc = tok.loc;
 
-        lexer_seek (state_p->u.statement.loc[0]);
+        lexer_seek (state_p->u.statement.u.iterational.u.loop_while.u.cond_expr_start_loc);
         skip_token ();
 
-        state_p->u.statement.loc[0] = end_loc;
+        state_p->u.statement.u.iterational.u.loop_while.u.end_loc = end_loc;
 
         parse_expression_inside_parens_begin ();
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
@@ -3419,9 +3456,10 @@ parse_statement_ (void)
       current_token_must_be (TOK_SEMICOLON);
       skip_token ();
 
-      locus for_body_statement_loc = state_p->u.statement.loc[0];
+      locus for_body_statement_loc = state_p->u.statement.u.iterational.u.loop_for.u1.body_loc;
+
       // Save Condition locus
-      state_p->u.statement.loc[0] = tok.loc;
+      state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc = tok.loc;
 
       if (!jsp_find_next_token_before_the_locus (TOK_SEMICOLON,
                                                  for_body_statement_loc,
@@ -3434,7 +3472,7 @@ parse_statement_ (void)
       skip_token ();
 
       // Save Increment locus
-      state_p->u.statement.loc[1] = tok.loc;
+      state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc = tok.loc;
 
       // Body
       lexer_seek (for_body_statement_loc);
@@ -3458,8 +3496,8 @@ parse_statement_ (void)
         state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
         // Increment
-        lexer_seek (state_p->u.statement.loc[1]);
-        state_p->u.statement.loc[1] = loop_end_loc;
+        lexer_seek (state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc);
+        state_p->u.statement.u.iterational.u.loop_for.u2.end_loc = loop_end_loc;
         skip_token ();
 
         if (!token_is (TOK_CLOSE_PAREN))
@@ -3489,7 +3527,7 @@ parse_statement_ (void)
         rewrite_jump_to_end ();
 
         // Condition
-        lexer_seek (state_p->u.statement.loc[0]);
+        lexer_seek (state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc);
         skip_token ();
 
         if (token_is (TOK_SEMICOLON))
@@ -3505,7 +3543,7 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_FINISH)
     {
-      lexer_seek (state_p->u.statement.loc[1]);
+      lexer_seek (state_p->u.statement.u.iterational.u.loop_for.u2.end_loc);
       skip_token ();
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
@@ -3519,10 +3557,10 @@ parse_statement_ (void)
 
       // Dump for-in instruction
       collection = dump_assignment_of_lhs_if_value_based_reference (collection);
-      state_p->u.statement.u.iterational.for_in.header_pos = dump_for_in_for_rewrite (collection);
+      state_p->u.statement.u.iterational.u.loop_for_in.header_pos = dump_for_in_for_rewrite (collection);
 
       // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
-      lexer_seek (state_p->u.statement.loc[1]);
+      lexer_seek (state_p->u.statement.u.iterational.u.loop_for_in.iterator_expr_loc);
       tok = lexer_next_token (false);
 
       if (token_is (TOK_KW_VAR))
@@ -3591,7 +3629,7 @@ parse_statement_ (void)
       }
 
       // Body
-      lexer_seek (state_p->u.statement.loc[0]);
+      lexer_seek (state_p->u.statement.u.iterational.u.loop_for_in.body_loc);
       tok = lexer_next_token (false);
 
       state_p->is_simply_jumpable_border = true;
@@ -3608,7 +3646,7 @@ parse_statement_ (void)
       state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
       // Write position of for-in end to for_in instruction
-      rewrite_for_in (state_p->u.statement.u.iterational.for_in.header_pos);
+      rewrite_for_in (state_p->u.statement.u.iterational.u.loop_for_in.header_pos);
 
       // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
       dump_for_in_end ();
@@ -3651,7 +3689,7 @@ parse_statement_ (void)
       state_p->state = JSP_STATE_STAT_SWITCH_FINISH;
       jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH_EXPR);
       jsp_state_top()->u.statement.u.switch_statement.case_clause_count = 0;
-      jsp_state_top()->u.statement.loc[0] = start_loc;
+      jsp_state_top()->u.statement.u.switch_statement.loc = start_loc;
       jsp_state_top()->operand = switch_expr;
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH_EXPR)
@@ -3670,7 +3708,7 @@ parse_statement_ (void)
         jsp_state_t tmp_state = *state_p;
         jsp_state_pop ();
         jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
-        jsp_state_top ()->u.statement.loc[0] = tok.loc;
+        jsp_state_top ()->u.statement.u.switch_statement.loc = tok.loc;
         jsp_state_push (tmp_state);
         state_p = jsp_state_top ();
 
@@ -3701,7 +3739,7 @@ parse_statement_ (void)
           jsp_state_t tmp_state = *state_p;
           jsp_state_pop ();
           jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
-          jsp_state_top ()->u.statement.loc[0] = tok.loc;
+          jsp_state_top ()->u.statement.u.switch_statement.loc = tok.loc;
           jsp_state_top ()->is_default_branch = true;
           jsp_state_push (tmp_state);
           state_p = jsp_state_top ();
@@ -3715,7 +3753,7 @@ parse_statement_ (void)
          * Reorder siwtch branches here, so that they are processed in reverse stack push order
          */
         uint16_t case_clause_count = state_p->u.statement.u.switch_statement.case_clause_count;
-        locus start_loc = state_p->u.statement.loc[0];
+        locus start_loc = state_p->u.statement.u.switch_statement.loc;
         bool was_default = state_p->was_default;
         jsp_state_pop ();
 
@@ -3727,9 +3765,9 @@ parse_statement_ (void)
           jsp_state_t *tmp_state2_p = &jsp_state_stack [jsp_state_stack_pos - 1 - i];
           JERRY_ASSERT (tmp_state2_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
 
-          locus loc = tmp_state_p->u.statement.loc[0];
-          tmp_state_p->u.statement.loc[0] = tmp_state2_p->u.statement.loc[0];
-          tmp_state2_p->u.statement.loc[0] = loc;
+          locus loc = tmp_state_p->u.statement.u.switch_statement.loc;
+          tmp_state_p->u.statement.u.switch_statement.loc = tmp_state2_p->u.statement.u.switch_statement.loc;
+          tmp_state2_p->u.statement.u.switch_statement.loc = loc;
 
           bool is_default_branch = tmp_state_p->is_default_branch;
           tmp_state_p->is_default_branch = tmp_state2_p->is_default_branch;
@@ -3758,7 +3796,7 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH)
     {
-      lexer_seek (state_p->u.statement.loc[0]);
+      lexer_seek (state_p->u.statement.u.switch_statement.loc);
       skip_token ();
 
       if (state_p->is_default_branch)
@@ -3900,13 +3938,13 @@ parse_statement_ (void)
 
         state_p->is_simply_jumpable_border = true;
 
-        state_p->u.rewrite_chain = dump_with_for_rewrite (expr);
+        state_p->u.statement.u.with_statement.header_pos = dump_with_for_rewrite (expr);
 
         JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_WITH);
       }
       else
       {
-        rewrite_with (state_p->u.rewrite_chain);
+        rewrite_with (state_p->u.statement.u.with_statement.header_pos);
         dump_with_end ();
 
         JSP_COMPLETE_STATEMENT_PARSE ();
