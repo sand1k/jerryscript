@@ -485,31 +485,6 @@ dump_triple_address (vm_op_t opcode,
   serializer_dump_op_meta (jsp_dmp_create_op_meta_3 (opcode, res, lhs, rhs));
 }
 
-static jsp_operand_t
-dump_prop_setter_or_triple_address_res (vm_op_t opcode,
-                                        jsp_operand_t res,
-                                        jsp_operand_t op)
-{
-  JERRY_ASSERT (res.is_reference_operand ());
-
-  if (res.is_value_based_reference_operand ())
-  {
-    JERRY_ASSERT (res.is_evaluated_value_based_reference_operand ());
-
-    const jsp_operand_t tmp = dump_prop_getter_res (res);
-
-    dump_triple_address (opcode, tmp, tmp, op);
-
-    dump_prop_setter (res, tmp);
-  }
-  else
-  {
-    dump_triple_address (opcode, res, res, op);
-  }
-
-  return res;
-}
-
 static vm_instr_counter_t
 get_diff_from (vm_instr_counter_t oc)
 {
@@ -645,24 +620,18 @@ dumper_is_eval_literal (jsp_operand_t obj) /**< byte-code operand */
 } /* dumper_is_eval_literal */
 
 /**
- * Dump assignment of an array-hole simple value to a register
- *
- * @return register number, to which the value vas assigned
+ * Dump assignment of an array-hole simple value
  */
-jsp_operand_t
-dump_array_hole_assignment_res (void)
+void
+dump_array_hole_assignment (jsp_operand_t op)
 {
-  jsp_operand_t op, type_operand, value_operand;
-
-  op = tmp_operand ();
+  jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
   value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_ARRAY_HOLE);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-
-  return op;
-} /* dump_array_hole_assignment_res */
+} /* dump_array_hole_assignment */
 
 void
 dump_boolean_assignment (jsp_operand_t op, bool is_true)
@@ -730,14 +699,6 @@ dump_undefined_assignment (jsp_operand_t op)
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
 
-jsp_operand_t
-dump_undefined_assignment_res (void)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_undefined_assignment (op);
-  return op;
-}
-
 void
 dump_null_assignment (jsp_operand_t op)
 {
@@ -750,6 +711,47 @@ dump_null_assignment (jsp_operand_t op)
 }
 
 void
+dump_assignment (jsp_operand_t res,
+                 jsp_operand_t op)
+{
+  JERRY_ASSERT (res.is_reference_operand ());
+
+  if (res.is_value_based_reference_operand ())
+  {
+    dump_prop_setter (res, op);
+  }
+  else
+  {
+    dump_variable_assignment (res, op);
+  }
+}
+
+void
+dump_compound_assignment (vm_op_t opcode,
+                          jsp_operand_t lhs,
+                          jsp_operand_t reg,
+                          jsp_operand_t op)
+{
+  JERRY_ASSERT (lhs.is_reference_operand ());
+  JERRY_ASSERT (reg.is_register_operand ());
+
+  if (lhs.is_value_based_reference_operand ())
+  {
+    JERRY_ASSERT (lhs.is_evaluated_value_based_reference_operand ());
+
+    dump_prop_getter (reg, lhs);
+
+    dump_triple_address (opcode, reg, reg, op);
+  }
+  else
+  {
+    dump_triple_address (opcode, reg, lhs, op);
+  }
+
+  dump_assignment (lhs, reg);
+}
+
+void
 dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
 {
   jsp_operand_t type_operand;
@@ -757,14 +759,6 @@ dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_VARIABLE);
 
   dump_triple_address (VM_OP_ASSIGNMENT, res, type_operand, var);
-}
-
-jsp_operand_t
-dump_variable_assignment_res (jsp_operand_t var)
-{
-  jsp_operand_t op = tmp_operand ();
-  dump_variable_assignment (op, var);
-  return op;
 }
 
 vm_instr_counter_t
@@ -1009,14 +1003,6 @@ dump_prop_getter (jsp_operand_t res, jsp_operand_t obj)
   dump_triple_address (VM_OP_PROP_GETTER, res, base, prop_name);
 }
 
-jsp_operand_t
-dump_prop_getter_res (jsp_operand_t obj)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_prop_getter (res, obj);
-  return res;
-}
-
 void
 dump_prop_setter (jsp_operand_t res, jsp_operand_t obj)
 {
@@ -1086,17 +1072,17 @@ rewrite_function_end (vm_instr_counter_t pos)
 }
 
 jsp_operand_t
-dump_this_res (void)
+this_operand (void)
 {
   return jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
 }
 
-jsp_operand_t
-dump_post_increment_res (jsp_operand_t op)
+void
+dump_post_increment (jsp_operand_t reg,
+                     jsp_operand_t op)
 {
+  JERRY_ASSERT (reg.is_register_operand ());
   JERRY_ASSERT (op.is_reference_operand ());
-
-  const jsp_operand_t res = tmp_operand ();
 
   if (op.is_value_based_reference_operand ())
   {
@@ -1104,24 +1090,22 @@ dump_post_increment_res (jsp_operand_t op)
 
     dump_prop_getter (val, op);
 
-    dump_double_address (VM_OP_POST_INCR, res, val);
+    dump_double_address (VM_OP_POST_INCR, reg, val);
 
     dump_prop_setter (op, val);
   }
   else
   {
-    dump_double_address (VM_OP_POST_INCR, res, op);
+    dump_double_address (VM_OP_POST_INCR, reg, op);
   }
-
-  return res;
 }
 
-jsp_operand_t
-dump_post_decrement_res (jsp_operand_t op)
+void
+dump_post_decrement (jsp_operand_t reg,
+                     jsp_operand_t op)
 {
+  JERRY_ASSERT (reg.is_register_operand ());
   JERRY_ASSERT (op.is_reference_operand ());
-
-  const jsp_operand_t res = tmp_operand ();
 
   if (op.is_value_based_reference_operand ())
   {
@@ -1129,62 +1113,56 @@ dump_post_decrement_res (jsp_operand_t op)
 
     dump_prop_getter (val, op);
 
-    dump_double_address (VM_OP_POST_DECR, res, val);
+    dump_double_address (VM_OP_POST_DECR, reg, val);
 
     dump_prop_setter (op, val);
   }
   else
   {
-    dump_double_address (VM_OP_POST_DECR, res, op);
+    dump_double_address (VM_OP_POST_DECR, reg, op);
   }
-
-  return res;
 }
 
-jsp_operand_t
-dump_pre_increment_res (jsp_operand_t op)
+void
+dump_pre_increment (jsp_operand_t reg,
+                    jsp_operand_t op)
 {
+  JERRY_ASSERT (reg.is_register_operand ());
   JERRY_ASSERT (op.is_reference_operand ());
-
-  const jsp_operand_t res = tmp_operand ();
 
   if (op.is_value_based_reference_operand ())
   {
-    dump_prop_getter (res, op);
+    dump_prop_getter (reg, op);
 
-    dump_double_address (VM_OP_PRE_INCR, res, res);
+    dump_double_address (VM_OP_PRE_INCR, reg, reg);
 
-    dump_prop_setter (op, res);
+    dump_prop_setter (op, reg);
   }
   else
   {
-    dump_double_address (VM_OP_PRE_INCR, res, op);
+    dump_double_address (VM_OP_PRE_INCR, reg, op);
   }
-
-  return res;
 }
 
-jsp_operand_t
-dump_pre_decrement_res (jsp_operand_t op)
+void
+dump_pre_decrement (jsp_operand_t reg,
+                    jsp_operand_t op)
 {
+  JERRY_ASSERT (reg.is_register_operand ());
   JERRY_ASSERT (op.is_reference_operand ());
-
-  const jsp_operand_t res = tmp_operand ();
 
   if (op.is_value_based_reference_operand ())
   {
-    dump_prop_getter (res, op);
+    dump_prop_getter (reg, op);
 
-    dump_double_address (VM_OP_PRE_DECR, res, res);
+    dump_double_address (VM_OP_PRE_DECR, reg, reg);
 
-    dump_prop_setter (op, res);
+    dump_prop_setter (op, reg);
   }
   else
   {
-    dump_double_address (VM_OP_PRE_DECR, res, op);
+    dump_double_address (VM_OP_PRE_DECR, reg, op);
   }
-
-  return res;
 }
 
 void
@@ -1193,26 +1171,10 @@ dump_unary_plus (jsp_operand_t res, jsp_operand_t obj)
   dump_double_address (VM_OP_UNARY_PLUS, res, obj);
 }
 
-jsp_operand_t
-dump_unary_plus_res (jsp_operand_t op)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_unary_plus (res, op);
-  return res;
-}
-
 void
 dump_unary_minus (jsp_operand_t res, jsp_operand_t obj)
 {
   dump_double_address (VM_OP_UNARY_MINUS, res, obj);
-}
-
-jsp_operand_t
-dump_unary_minus_res (jsp_operand_t op)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_unary_minus (res, op);
-  return res;
 }
 
 void
@@ -1221,26 +1183,10 @@ dump_bitwise_not (jsp_operand_t res, jsp_operand_t obj)
   dump_double_address (VM_OP_B_NOT, res, obj);
 }
 
-jsp_operand_t
-dump_bitwise_not_res (jsp_operand_t op)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_bitwise_not (res, op);
-  return res;
-}
-
 void
 dump_logical_not (jsp_operand_t res, jsp_operand_t obj)
 {
   dump_double_address (VM_OP_LOGICAL_NOT, res, obj);
-}
-
-jsp_operand_t
-dump_logical_not_res (jsp_operand_t op)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_logical_not (res, op);
-  return res;
 }
 
 void
@@ -1282,26 +1228,10 @@ dump_delete (jsp_operand_t res, jsp_operand_t op)
   }
 }
 
-jsp_operand_t
-dump_delete_res (jsp_operand_t op)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_delete (res, op);
-  return res;
-}
-
 void
 dump_typeof (jsp_operand_t res, jsp_operand_t op)
 {
   dump_double_address (VM_OP_TYPEOF, res, op);
-}
-
-jsp_operand_t
-dump_typeof_res (jsp_operand_t op)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_typeof (res, op);
-  return res;
 }
 
 void
@@ -1310,26 +1240,10 @@ dump_multiplication (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_MULTIPLICATION, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_multiplication_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_multiplication (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_division (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_DIVISION, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_division_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_division (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1338,26 +1252,10 @@ dump_remainder (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_REMAINDER, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_remainder_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_remainder (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_addition (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_ADDITION, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_addition_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_addition (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1366,26 +1264,10 @@ dump_substraction (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_SUBSTRACTION, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_substraction_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_substraction (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_left_shift (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_B_SHIFT_LEFT, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_left_shift_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_left_shift (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1394,26 +1276,10 @@ dump_right_shift (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_B_SHIFT_RIGHT, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_right_shift_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_right_shift (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_right_shift_ex (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_B_SHIFT_URIGHT, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_right_shift_ex_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_right_shift_ex (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1422,26 +1288,10 @@ dump_less_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_LESS_THAN, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_less_than_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_less_than (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_greater_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_GREATER_THAN, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_greater_than_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_greater_than (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1450,26 +1300,10 @@ dump_less_or_equal_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs
   dump_triple_address (VM_OP_LESS_OR_EQUAL_THAN, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_less_or_equal_than_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_less_or_equal_than (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_greater_or_equal_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_GREATER_OR_EQUAL_THAN, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_greater_or_equal_than_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_greater_or_equal_than (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1478,26 +1312,10 @@ dump_instanceof (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_INSTANCEOF, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_instanceof_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_instanceof (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_in (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_IN, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_in_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_in (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1506,26 +1324,10 @@ dump_equal_value (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_EQUAL_VALUE, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_equal_value_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_equal_value (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_not_equal_value (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_NOT_EQUAL_VALUE, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_not_equal_value_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_not_equal_value (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1534,26 +1336,10 @@ dump_equal_value_type (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_EQUAL_VALUE_TYPE, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_equal_value_type_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_equal_value_type (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_not_equal_value_type (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_NOT_EQUAL_VALUE_TYPE, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_not_equal_value_type_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_not_equal_value_type (res, lhs, rhs);
-  return res;
 }
 
 void
@@ -1562,40 +1348,16 @@ dump_bitwise_and (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
   dump_triple_address (VM_OP_B_AND, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_bitwise_and_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_bitwise_and (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_bitwise_xor (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_B_XOR, res, lhs, rhs);
 }
 
-jsp_operand_t
-dump_bitwise_xor_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_bitwise_xor (res, lhs, rhs);
-  return res;
-}
-
 void
 dump_bitwise_or (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 {
   dump_triple_address (VM_OP_B_OR, res, lhs, rhs);
-}
-
-jsp_operand_t
-dump_bitwise_or_res (jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  const jsp_operand_t res = tmp_operand ();
-  dump_bitwise_or (res, lhs, rhs);
-  return res;
 }
 
 vm_instr_counter_t
@@ -1651,89 +1413,6 @@ rewrite_jump_to_end (vm_instr_counter_t pos)
   jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
 
   serializer_rewrite_op_meta (pos, jmp_op_meta);
-}
-
-jsp_operand_t
-dump_prop_setter_or_variable_assignment_res (jsp_operand_t res, jsp_operand_t op)
-{
-  JERRY_ASSERT (res.is_reference_operand ());
-
-  if (res.is_value_based_reference_operand ())
-  {
-    dump_prop_setter (res, op);
-  }
-  else
-  {
-    dump_variable_assignment (res, op);
-  }
-
-  return op;
-}
-
-jsp_operand_t
-dump_prop_setter_or_addition_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_ADDITION, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_multiplication_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_MULTIPLICATION, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_division_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_DIVISION, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_remainder_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_REMAINDER, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_substraction_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_SUBSTRACTION, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_left_shift_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_B_SHIFT_LEFT, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_right_shift_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_B_SHIFT_RIGHT, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_right_shift_ex_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_B_SHIFT_URIGHT, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_bitwise_and_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_B_AND, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_bitwise_xor_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_B_XOR, res, op);
-}
-
-jsp_operand_t
-dump_prop_setter_or_bitwise_or_res (jsp_operand_t res, jsp_operand_t op)
-{
-  return dump_prop_setter_or_triple_address_res (VM_OP_B_OR, res, op);
 }
 
 vm_instr_counter_t
