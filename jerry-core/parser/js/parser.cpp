@@ -17,7 +17,6 @@
 #include "ecma-helpers.h"
 #include "hash-table.h"
 #include "jrt-libc-includes.h"
-#include "jsp-label.h"
 #include "jsp-mm.h"
 #include "opcodes.h"
 #include "opcodes-dumper.h"
@@ -878,7 +877,6 @@ typedef struct
 
     struct
     {
-      jsp_label_t *prev_label_set_p;
       vm_instr_counter_t scope_code_flags_oc;
       vm_instr_counter_t reg_var_decl_oc;
     } source_elements;
@@ -890,7 +888,7 @@ typedef struct
   } u;
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 32, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 28, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -2950,8 +2948,6 @@ parse_statement_ (void)
     {
       scope_type_t scope_type = serializer_get_scope ()->type;
 
-      state_p->u.source_elements.prev_label_set_p = jsp_label_new_set ();
-
       dumper_new_scope ();
 
       state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
@@ -3011,8 +3007,6 @@ parse_statement_ (void)
 
         rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
         rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
-
-        jsp_label_restore_previous_set (state_p->u.source_elements.prev_label_set_p);
 
         state_p->is_completed = true;
 
@@ -3983,11 +3977,6 @@ parse_statement_ (void)
         rewrite_with (state_p->u.rewrite_chain);
         dump_with_end ();
 
-        if (state_p->is_raised)
-        {
-          jsp_label_remove_nested_jumpable_border ();
-        }
-
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
     }
@@ -4096,7 +4085,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
   jsp_status_t status;
 
   jsp_mm_init ();
-  jsp_label_init ();
 
   serializer_set_show_instrs (parser_show_instrs);
   dumper_init ();
@@ -4166,7 +4154,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     *out_bytecode_data_p = NULL;
 
-    jsp_label_remove_all_labels ();
     jsp_mm_free_all ();
 
     jsp_early_error_t type = jsp_early_error_get_type ();
@@ -4183,7 +4170,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
     }
   }
 
-  jsp_label_finalize ();
   jsp_mm_finalize ();
 
   return status;
