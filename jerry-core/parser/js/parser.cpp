@@ -97,14 +97,16 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_FOR_IN_EXPR        = 0x43,
   JSP_STATE_STAT_FOR_IN_FINISH      = 0x44,
   JSP_STATE_STAT_ITER_FINISH        = 0x45,
-  JSP_STATE_STAT_SWITCH_BRANCH      = 0x46,
-  JSP_STATE_STAT_SWITCH_FINISH      = 0x47,
-  JSP_STATE_STAT_TRY                = 0x48,
-  JSP_STATE_STAT_CATCH_FINISH       = 0x49,
-  JSP_STATE_STAT_FINALLY_FINISH     = 0x50,
-  JSP_STATE_STAT_TRY_FINISH         = 0x51,
-  JSP_STATE_STAT_WITH_FINISH        = 0x52,
-  JSP_STATE_STAT_EXPRESSION         = 0x53,
+  JSP_STATE_STAT_SWITCH             = 0x46,
+  JSP_STATE_STAT_SWITCH_BRANCH_EXPR = 0x47,
+  JSP_STATE_STAT_SWITCH_BRANCH      = 0x48,
+  JSP_STATE_STAT_SWITCH_FINISH      = 0x49,
+  JSP_STATE_STAT_TRY                = 0x50,
+  JSP_STATE_STAT_CATCH_FINISH       = 0x51,
+  JSP_STATE_STAT_FINALLY_FINISH     = 0x52,
+  JSP_STATE_STAT_TRY_FINISH         = 0x53,
+  JSP_STATE_STAT_WITH_FINISH        = 0x54,
+  JSP_STATE_STAT_EXPRESSION         = 0x55,
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
@@ -820,6 +822,7 @@ typedef struct
   uint8_t var_decl                : 1; /**< this flag tells that we are parsing VariableStatement, not
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
+  uint8_t was_default             : 1; /**< was default branch seen */
   uint8_t is_default_branch       : 1; /**< marks default branch of switch statement */
   uint8_t is_dump_eval_ret_store  : 1; /**< expression's result should be stored to eval's return register */
 
@@ -859,6 +862,13 @@ typedef struct
         } for_in;
       } iterational;
     } statement;
+
+    struct
+    {
+      locus loc;
+
+      uint16_t case_clause_count;
+    } switch_statement;
 
     struct
     {
@@ -2803,6 +2813,7 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   new_state.is_rewrite_chain_active = false;
   new_state.is_raised = false;
   new_state.var_decl = false;
+  new_state.was_default = false;
   new_state.is_default_branch = false;
 
   jsp_state_push (new_state);
@@ -3252,82 +3263,9 @@ parse_statement_ (void)
       {
         skip_token ();
 
-        jsp_operand_t switch_expr = parse_expression_inside_parens ();
-        skip_token ();
-
-        switch_expr = dump_assignment_of_lhs_if_reference (switch_expr);
-
-        current_token_must_be (TOK_OPEN_BRACE);
-
-        start_dumping_case_clauses ();
-        const locus start_loc = tok.loc;
-        bool was_default = false;
-        size_t default_body_index = 0;
-        array_list body_locs = array_list_init (sizeof (locus));
-
-        // First, generate table of jumps
-        skip_token ();
-        while (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
-        {
-          if (token_is (TOK_KW_CASE))
-          {
-            skip_token ();
-            jsp_operand_t case_expr = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-            case_expr = dump_assignment_of_lhs_if_value_based_reference (case_expr);
-
-            current_token_must_be (TOK_COLON);
-
-            dump_case_clause_check_for_rewrite (switch_expr, case_expr);
-            skip_token ();
-            body_locs = array_list_append (body_locs, (void*) &tok.loc);
-            skip_case_clause_body ();
-          }
-          else if (token_is (TOK_KW_DEFAULT))
-          {
-            if (was_default)
-            {
-              EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Duplication of 'default' clause");
-            }
-            was_default = true;
-
-            skip_token ();
-            current_token_must_be (TOK_COLON);
-            skip_token ();
-
-            default_body_index = array_list_len (body_locs);
-            body_locs = array_list_append (body_locs, (void*) &tok.loc);
-            skip_case_clause_body ();
-          }
-        }
-        current_token_must_be (TOK_CLOSE_BRACE);
-
-        dump_default_clause_check_for_rewrite ();
-
-        lexer_seek (start_loc);
-
-        skip_token ();
-        current_token_must_be (TOK_OPEN_BRACE);
-
-        // Second, parse case clauses' bodies and rewrite jumps
-        skip_token ();
-
-        if (array_list_len (body_locs) > 0)
-        {
-          for (size_t i = array_list_len (body_locs); i > 0; i--)
-          {
-            jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
-            jsp_state_top ()->u.statement.loc[0] = * (locus *) array_list_element (body_locs, i - 1);
-
-            if (was_default && default_body_index == i - 1)
-            {
-              jsp_state_top ()->is_default_branch = true;
-            }
-          }
-        }
-
-        array_list_free (body_locs);
-        state_p->state = JSP_STATE_STAT_SWITCH_FINISH;
-        state_p->is_default_branch = was_default;
+        parse_expression_inside_parens_begin ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        state_p->state = JSP_STATE_STAT_SWITCH;
       }
       else if (token_is (TOK_SEMICOLON))
       {
@@ -3833,9 +3771,134 @@ parse_statement_ (void)
                                                                        continue_tgt_oc);
       }
     }
+    else if (state_p->state == JSP_STATE_STAT_SWITCH)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      parse_expression_inside_parens_end ();
+      jsp_operand_t switch_expr = subexpr_operand;
+
+      switch_expr = dump_assignment_of_lhs_if_reference (switch_expr);
+
+      current_token_must_be (TOK_OPEN_BRACE);
+
+      start_dumping_case_clauses ();
+      locus start_loc = tok.loc;
+
+      // First, generate table of jumps
+      skip_token ();
+
+      state_p->state = JSP_STATE_STAT_SWITCH_FINISH;
+      jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH_EXPR);
+      jsp_state_top()->u.switch_statement.case_clause_count = 0;
+      jsp_state_top()->u.switch_statement.loc = start_loc;
+      jsp_state_top()->operand = switch_expr;
+    }
+    else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH_EXPR)
+    {
+      if (is_subexpr_end)
+      {
+        jsp_operand_t case_expr = subexpr_operand;
+        case_expr = dump_assignment_of_lhs_if_value_based_reference (case_expr);
+
+        current_token_must_be (TOK_COLON);
+
+        jsp_operand_t switch_expr = state_p->operand;
+        dump_case_clause_check_for_rewrite (switch_expr, case_expr);
+        skip_token ();
+
+        jsp_state_t tmp_state = *state_p;
+        jsp_state_pop ();
+        jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
+        jsp_state_top ()->u.switch_statement.loc = tok.loc;
+        jsp_state_push (tmp_state);
+        state_p = jsp_state_top ();
+
+        skip_case_clause_body ();
+      }
+
+      if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
+      {
+        state_p->u.switch_statement.case_clause_count++;
+
+        if (token_is (TOK_KW_CASE))
+        {
+          skip_token ();
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        }
+        else if (token_is (TOK_KW_DEFAULT))
+        {
+          if (state_p->was_default)
+          {
+            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Duplication of 'default' clause");
+          }
+          state_p->was_default = true;
+
+          skip_token ();
+          current_token_must_be (TOK_COLON);
+          skip_token ();
+
+          jsp_state_t tmp_state = *state_p;
+          jsp_state_pop ();
+          jsp_start_statement_parse (JSP_STATE_STAT_SWITCH_BRANCH);
+          jsp_state_top ()->u.switch_statement.loc = tok.loc;
+          jsp_state_top ()->is_default_branch = true;
+          jsp_state_push (tmp_state);
+          state_p = jsp_state_top ();
+
+          skip_case_clause_body ();
+        }
+      }
+      else
+      {
+        /**
+         * Reorder siwtch branches here, so that they are processed in reverse stack push order
+         */
+        uint16_t case_clause_count = state_p->u.switch_statement.case_clause_count;
+        locus start_loc = state_p->u.switch_statement.loc;
+        bool was_default = state_p->was_default;
+        jsp_state_pop ();
+
+        JERRY_ASSERT (jsp_state_stack_pos >= case_clause_count);
+        for (uint16_t i = 0; i < case_clause_count / 2; ++i)
+        {
+          jsp_state_t *tmp_state_p = &jsp_state_stack [jsp_state_stack_pos - case_clause_count + i];
+          JERRY_ASSERT (tmp_state_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
+          jsp_state_t *tmp_state2_p = &jsp_state_stack [jsp_state_stack_pos - 1 - i];
+          JERRY_ASSERT (tmp_state2_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
+
+          locus loc = tmp_state_p->u.switch_statement.loc;
+          tmp_state_p->u.switch_statement.loc = tmp_state2_p->u.switch_statement.loc;
+          tmp_state2_p->u.switch_statement.loc = loc;
+
+          bool is_default_branch = tmp_state_p->is_default_branch;
+          tmp_state_p->is_default_branch = tmp_state2_p->is_default_branch;
+          tmp_state2_p->is_default_branch = is_default_branch;
+        }
+
+        /**
+         * Mark final state if default branch was seen
+         */
+        jsp_state_t *tmp_state_p = &jsp_state_stack [jsp_state_stack_pos - case_clause_count - 1];
+        JERRY_ASSERT (tmp_state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
+        tmp_state_p->was_default = was_default;
+
+        current_token_must_be (TOK_CLOSE_BRACE);
+
+        dump_default_clause_check_for_rewrite ();
+
+        lexer_seek (start_loc);
+
+        skip_token ();
+        current_token_must_be (TOK_OPEN_BRACE);
+
+        // Second, parse case clauses' bodies and rewrite jumps
+        skip_token ();
+      }
+    }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH)
     {
-      lexer_seek (state_p->u.statement.loc[0]);
+      lexer_seek (state_p->u.switch_statement.loc);
       skip_token ();
 
       if (state_p->is_default_branch)
@@ -3861,7 +3924,7 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_FINISH)
     {
-      if (!state_p->is_default_branch)
+      if (!state_p->was_default)
       {
         rewrite_default_clause ();
       }
