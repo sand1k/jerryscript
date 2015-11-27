@@ -808,21 +808,23 @@ typedef struct
 
   jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
 
-  uint8_t is_completed           : 1; /**< the expression parse completed,
-                                       *   no more tokens can be added to the expression */
-  uint8_t is_list_in_process     : 1; /**< parsing a list, associated with the expression
-                                       *   (details depend on current expression type) */
-  uint8_t is_no_in_mode          : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
-  uint8_t is_fixed_ret_operand   : 1; /**< the expression's evaluation should produce value that should be
-                                       *   put to register, specified by operand, specified in state */
-  uint8_t is_complex_production  : 1; /**< the expression is being parsed in complex production mode */
-  uint8_t is_rewrite_chain_active : 1; /**< flag, indicating whether rewrite chain is associated with current state */
-  uint8_t is_raised               : 1; /**< nested label flag*/
-  uint8_t var_decl                : 1; /**< this flag tells that we are parsing VariableStatement, not
+  uint8_t is_completed              : 1; /**< the expression parse completed,
+                                          *   no more tokens can be added to the expression */
+  uint8_t is_list_in_process        : 1; /**< parsing a list, associated with the expression
+                                          *   (details depend on current expression type) */
+  uint8_t is_no_in_mode             : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
+                                          *   put to register, specified by operand, specified in state */
+  uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
+  uint8_t is_rewrite_chain_active   : 1; /**< flag, indicating whether rewrite chain is associated with current state */
+  uint8_t is_raised                 : 1; /**< nested label flag*/
+  uint8_t var_decl                  : 1; /**< this flag tells that we are parsing VariableStatement, not
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
   uint8_t was_default             : 1; /**< was default branch seen */
-  uint8_t is_default_branch       : 1; /**< marks default branch of switch statement */
+  uint8_t is_default_branch         : 1; /**< marks default branch of switch statement */
+  uint8_t is_simply_jumpable_border : 1; /**< flag, indicating whether simple jump could be performed
+                                          *   from current statement outside of the statement */
   uint8_t is_dump_eval_ret_store  : 1; /**< expression's result should be stored to eval's return register */
 
   union u
@@ -2774,6 +2776,7 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   new_state.var_decl = false;
   new_state.was_default = false;
   new_state.is_default_branch = false;
+  new_state.is_simply_jumpable_border = false;
 
   jsp_state_push (new_state);
 } /* jsp_start_statement_parse */
@@ -2795,10 +2798,7 @@ jsp_find_unnamed_label (bool is_label_for_break,
       break;
     }
 
-    if (state_p->state == JSP_STATE_STAT_WITH
-        || state_p->state == JSP_STATE_STAT_TRY
-        || state_p->state == JSP_STATE_STAT_CATCH_FINISH
-        || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    if (state_p->is_simply_jumpable_border)
     {
       *out_is_simply_jumpable_p = false;
     }
@@ -2837,10 +2837,7 @@ jsp_find_named_label (lit_cpointer_t name_cp,
       break;
     }
 
-    if (state_p->state == JSP_STATE_STAT_WITH
-        || state_p->state == JSP_STATE_STAT_TRY
-        || state_p->state == JSP_STATE_STAT_CATCH_FINISH
-        || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    if (state_p->is_simply_jumpable_border)
     {
       *out_is_simply_jumpable_p = false;
     }
@@ -3150,11 +3147,6 @@ parse_statement_ (void)
           }
           else
           {
-            if (jsp_label_raise_nested_jumpable_border ())
-            {
-              state_p->is_raised = true;
-            }
-
             current_token_must_be (TOK_OPEN_PAREN);
             skip_token ();
 
@@ -3318,12 +3310,12 @@ parse_statement_ (void)
 
         scopes_tree_set_contains_try (serializer_get_scope ());
 
-        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
-
         dump_try_for_rewrite ();
 
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
+
+        state_p->is_simply_jumpable_border = true;
 
         state_p->state = JSP_STATE_STAT_TRY;
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
@@ -3370,9 +3362,6 @@ parse_statement_ (void)
         jsp_state_top ()->is_dump_eval_ret_store = true;
 
         state_p->state = JSP_STATE_STAT_EXPRESSION;
-        /*insert_semicolon ();
-
-        JSP_COMPLETE_STATEMENT_PARSE ();*/
       }
     }
     else if (state_p->state == JSP_STATE_STAT_BLOCK)
@@ -3679,6 +3668,8 @@ parse_statement_ (void)
       lexer_seek (state_p->u.statement.loc[0]);
       tok = lexer_next_token (false);
 
+      state_p->is_simply_jumpable_border = true;
+
       JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_IN_FINISH)
@@ -3698,11 +3689,6 @@ parse_statement_ (void)
 
       lexer_seek (loop_end_loc);
       tok = lexer_next_token (false);
-
-      if (state_p->is_raised)
-      {
-        jsp_label_remove_nested_jumpable_border ();
-      }
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
     }
@@ -3918,6 +3904,8 @@ parse_statement_ (void)
 
         state_p->state = JSP_STATE_STAT_CATCH_FINISH;
 
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
       }
@@ -3932,6 +3920,8 @@ parse_statement_ (void)
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
 
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
@@ -3951,6 +3941,8 @@ parse_statement_ (void)
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
 
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
       }
@@ -3969,11 +3961,6 @@ parse_statement_ (void)
     {
       dump_end_try_catch_finally ();
 
-      if (state_p->is_raised)
-      {
-        jsp_label_remove_nested_jumpable_border ();
-      }
-
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
     else if (state_p->state == JSP_STATE_STAT_WITH)
@@ -3985,7 +3972,7 @@ parse_statement_ (void)
 
         scopes_tree_set_contains_with (serializer_get_scope ());
 
-        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
+        state_p->is_simply_jumpable_border = true;
 
         state_p->u.rewrite_chain = dump_with_for_rewrite (expr);
 
