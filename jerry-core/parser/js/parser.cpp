@@ -122,9 +122,6 @@ typedef enum __attr_packed___
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
-
-static jsp_operand_t parse_expression (bool, jsp_eval_ret_store_t);
-
 static void parse_statement_ (void);
 static void skip_case_clause_body (void);
 
@@ -2707,33 +2704,6 @@ parse_expression_ (jsp_state_expr_t req_expr,
   return empty_operand ();
 } /* parse_expression_ */
 
-/**
- * Parse an expression
- *
- * expression
- *  : assignment_expression (LT!* ',' LT!* assignment_expression)*
- *  ;
- *
- * @return jsp_operand_t which holds result of expression
- */
-static jsp_operand_t
-parse_expression (bool in_allowed, /**< flag indicating if 'in' is allowed inside expression to parse */
-                  jsp_eval_ret_store_t dump_eval_ret_store) /**< flag indicating if 'eval'
-                                                             *   result code store should be dumped */
-{
-  jsp_operand_t expr = parse_expression_ (JSP_STATE_EXPR_EXPRESSION, in_allowed);
-
-  if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL
-      && dump_eval_ret_store == JSP_EVAL_RET_STORE_DUMP)
-  {
-    expr = dump_assignment_of_lhs_if_value_based_reference (expr);
-
-    dump_variable_assignment (eval_ret_operand (), expr);
-  }
-
-  return expr;
-} /* parse_expression */
-
 /* variable_declaration
   : Identifier LT!* initialiser?
   ;
@@ -3396,10 +3366,13 @@ parse_statement_ (void)
       }
       else
       {
-        parse_expression (true, JSP_EVAL_RET_STORE_DUMP);
-        insert_semicolon ();
+        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        jsp_state_top ()->is_dump_eval_ret_store = true;
 
-        JSP_COMPLETE_STATEMENT_PARSE ();
+        state_p->state = JSP_STATE_STAT_EXPRESSION;
+        /*insert_semicolon ();
+
+        JSP_COMPLETE_STATEMENT_PARSE ();*/
       }
     }
     else if (state_p->state == JSP_STATE_STAT_BLOCK)
