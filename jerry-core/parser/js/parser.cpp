@@ -55,70 +55,70 @@ static bool parser_show_instrs = false;
 typedef enum __attr_packed___
 {
   /* ECMA-262 v5 expression types */
-  JSP_STATE_EXPR_EMPTY              = 0x01, /**< no expression yet (at start) */
-  JSP_STATE_EXPR_FUNCTION           = 0x03, /**< FunctionExpression (11.2.5) */
-  JSP_STATE_EXPR_MEMBER             = 0x04, /**< MemberExpression (11.2) */
-  JSP_STATE_EXPR_CALL               = 0x06, /**< CallExpression (11.2) */
-  JSP_STATE_EXPR_LEFTHANDSIDE       = 0x07, /**< LeftHandSideExpression (11.2) */
-  JSP_STATE_EXPR_UNARY              = 0x09, /**< UnaryExpression (11.4) */
-  JSP_STATE_EXPR_MULTIPLICATIVE     = 0x0A, /**< MultiplicativeExpression (11.5) */
-  JSP_STATE_EXPR_ADDITIVE           = 0x0B, /**< AdditiveExpression (11.6) */
-  JSP_STATE_EXPR_SHIFT              = 0x0C, /**< ShiftExpression (11.7) */
-  JSP_STATE_EXPR_RELATIONAL         = 0x0D, /**< RelationalExpression (11.8) */
-  JSP_STATE_EXPR_EQUALITY           = 0x0E, /**< EqualityExpression (11.9) */
-  JSP_STATE_EXPR_BITWISE_AND        = 0x0F, /**< BitwiseAndExpression (11.10) */
-  JSP_STATE_EXPR_BITWISE_XOR        = 0x10, /**< BitwiseXorExpression (11.10) */
-  JSP_STATE_EXPR_BITWISE_OR         = 0x11, /**< BitwiseOrExpression (11.10) */
-  JSP_STATE_EXPR_LOGICAL_AND        = 0x12, /**< LogicalAndExpression (11.11) */
-  JSP_STATE_EXPR_LOGICAL_OR         = 0x13, /**< LogicalOrExpression (11.11) */
-  JSP_STATE_EXPR_CONDITION          = 0x14, /**< ConditionalExpression (11.12) */
-  JSP_STATE_EXPR_ASSIGNMENT         = 0x15, /**< AssignmentExpression (11.13) */
-  JSP_STATE_EXPR_EXPRESSION         = 0x16, /**< Expression (11.14) */
+  JSP_STATE_EXPR_EMPTY,              /**< no expression yet (at start) */
+  JSP_STATE_EXPR_FUNCTION,           /**< FunctionExpression (11.2.5) */
+  JSP_STATE_EXPR_MEMBER,             /**< MemberExpression (11.2) */
+  JSP_STATE_EXPR_CALL,               /**< CallExpression (11.2) */
+  JSP_STATE_EXPR_LEFTHANDSIDE,       /**< LeftHandSideExpression (11.2) */
+  JSP_STATE_EXPR_UNARY,              /**< UnaryExpression (11.4) */
+  JSP_STATE_EXPR_MULTIPLICATIVE,     /**< MultiplicativeExpression (11.5) */
+  JSP_STATE_EXPR_ADDITIVE,           /**< AdditiveExpression (11.6) */
+  JSP_STATE_EXPR_SHIFT,              /**< ShiftExpression (11.7) */
+  JSP_STATE_EXPR_RELATIONAL,         /**< RelationalExpression (11.8) */
+  JSP_STATE_EXPR_EQUALITY,           /**< EqualityExpression (11.9) */
+  JSP_STATE_EXPR_BITWISE_AND,        /**< BitwiseAndExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_XOR,        /**< BitwiseXorExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_OR,         /**< BitwiseOrExpression (11.10) */
+  JSP_STATE_EXPR_LOGICAL_AND,        /**< LogicalAndExpression (11.11) */
+  JSP_STATE_EXPR_LOGICAL_OR,         /**< LogicalOrExpression (11.11) */
+  JSP_STATE_EXPR_CONDITION,          /**< ConditionalExpression (11.12) */
+  JSP_STATE_EXPR_ASSIGNMENT,         /**< AssignmentExpression (11.13) */
+  JSP_STATE_EXPR_EXPRESSION,         /**< Expression (11.14) */
 
-  JSP_STATE_EXPR_ARRAY_LITERAL      = 0x17, /**< ArrayLiteral (11.1.4) */
-  JSP_STATE_EXPR_OBJECT_LITERAL     = 0x18, /**< ObjectLiteral (11.1.5) */
+  JSP_STATE_EXPR_ARRAY_LITERAL,      /**< ArrayLiteral (11.1.4) */
+  JSP_STATE_EXPR_OBJECT_LITERAL,     /**< ObjectLiteral (11.1.5) */
 
-  JSP_STATE_EXPR_DATA_PROP_DECL     = 0x19, /**< a data property (ObjectLiteral, 11.1.5) */
-  JSP_STATE_EXPR_ACCESSOR_PROP_DECL = 0x20, /**< an accessor's property getter / setter (ObjectLiteral, 11.1.5) */
+  JSP_STATE_EXPR_DATA_PROP_DECL,     /**< a data property (ObjectLiteral, 11.1.5) */
+  JSP_STATE_EXPR_ACCESSOR_PROP_DECL, /**< an accessor's property getter / setter (ObjectLiteral, 11.1.5) */
 
-  JSP_STATE_STAT_EMPTY              = 0x30, /**< no statement yet (at start) */
-  JSP_STATE_STAT_IF_BRANCH_START    = 0x31, /**< IfStatement branch start */
-  JSP_STATE_STAT_IF_BRANCH_END      = 0x32, /**< IfStatement branch start */
-  JSP_STATE_STAT_STATEMENT          = 0x33, /**< Statement */
-  JSP_STATE_STAT_STATEMENT_LIST     = 0x34, /**< Statement list */
-  JSP_STATE_STAT_VAR_DECL           = 0x35, /**< VariableStatement */
-  JSP_STATE_STAT_DO_WHILE           = 0x36, /**< IterationStatement */
-  JSP_STATE_STAT_WHILE              = 0x37,
-  JSP_STATE_STAT_FOR_INIT_END       = 0x38,
-  JSP_STATE_STAT_FOR_INCREMENT      = 0x39,
-  JSP_STATE_STAT_FOR_COND           = 0x40,
-  JSP_STATE_STAT_FOR_FINISH         = 0x41,
-  JSP_STATE_STAT_FOR_IN             = 0x42,
-  JSP_STATE_STAT_FOR_IN_EXPR        = 0x43,
-  JSP_STATE_STAT_FOR_IN_FINISH      = 0x44,
-  JSP_STATE_STAT_ITER_FINISH        = 0x45,
-  JSP_STATE_STAT_SWITCH             = 0x46,
-  JSP_STATE_STAT_SWITCH_BRANCH_EXPR = 0x47,
-  JSP_STATE_STAT_SWITCH_BRANCH      = 0x48,
-  JSP_STATE_STAT_SWITCH_FINISH      = 0x49,
-  JSP_STATE_STAT_TRY                = 0x50,
-  JSP_STATE_STAT_CATCH_FINISH       = 0x51,
-  JSP_STATE_STAT_FINALLY_FINISH     = 0x52,
-  JSP_STATE_STAT_TRY_FINISH         = 0x53,
-  JSP_STATE_STAT_WITH               = 0x54,
-  JSP_STATE_STAT_EXPRESSION         = 0x55,
-  JSP_STATE_STAT_RETURN             = 0x56,
-  JSP_STATE_STAT_THROW              = 0x57,
+  JSP_STATE_STAT_EMPTY,              /**< no statement yet (at start) */
+  JSP_STATE_STAT_IF_BRANCH_START,    /**< IfStatement branch start */
+  JSP_STATE_STAT_IF_BRANCH_END,      /**< IfStatement branch start */
+  JSP_STATE_STAT_STATEMENT,          /**< Statement */
+  JSP_STATE_STAT_STATEMENT_LIST,     /**< Statement list */
+  JSP_STATE_STAT_VAR_DECL,           /**< VariableStatement */
+  JSP_STATE_STAT_DO_WHILE,           /**< IterationStatement */
+  JSP_STATE_STAT_WHILE,
+  JSP_STATE_STAT_FOR_INIT_END,
+  JSP_STATE_STAT_FOR_INCREMENT,
+  JSP_STATE_STAT_FOR_COND,
+  JSP_STATE_STAT_FOR_FINISH,
+  JSP_STATE_STAT_FOR_IN,
+  JSP_STATE_STAT_FOR_IN_EXPR,
+  JSP_STATE_STAT_FOR_IN_FINISH,
+  JSP_STATE_STAT_ITER_FINISH,
+  JSP_STATE_STAT_SWITCH,
+  JSP_STATE_STAT_SWITCH_BRANCH_EXPR,
+  JSP_STATE_STAT_SWITCH_BRANCH,
+  JSP_STATE_STAT_SWITCH_FINISH,
+  JSP_STATE_STAT_TRY,
+  JSP_STATE_STAT_CATCH_FINISH,
+  JSP_STATE_STAT_FINALLY_FINISH,
+  JSP_STATE_STAT_TRY_FINISH,
+  JSP_STATE_STAT_WITH,
+  JSP_STATE_STAT_EXPRESSION,
+  JSP_STATE_STAT_RETURN,
+  JSP_STATE_STAT_THROW,
 
-  JSP_STATE_FUNC_DECL_FINISH        = 0x60,
-  JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
+  JSP_STATE_FUNC_DECL_FINISH,
+  JSP_STATE_SOURCE_ELEMENT_LIST,
 
-  JSP_STATE_SOURCE_ELEMENTS_INIT    = 0x62,
-  JSP_STATE_SOURCE_ELEMENTS         = 0x63,
+  JSP_STATE_SOURCE_ELEMENTS_INIT,
+  JSP_STATE_SOURCE_ELEMENTS,
 
-  JSP_STATE_STAT_BLOCK              = 0x65,
+  JSP_STATE_STAT_BLOCK,
 
-  JSP_STATE_STAT_NAMED_LABEL        = 0x66
+  JSP_STATE_STAT_NAMED_LABEL
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
