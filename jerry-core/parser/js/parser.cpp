@@ -17,7 +17,6 @@
 #include "ecma-helpers.h"
 #include "hash-table.h"
 #include "jrt-libc-includes.h"
-#include "jsp-label.h"
 #include "jsp-mm.h"
 #include "opcodes.h"
 #include "opcodes-dumper.h"
@@ -55,70 +54,70 @@ static bool parser_show_instrs = false;
 typedef enum __attr_packed___
 {
   /* ECMA-262 v5 expression types */
-  JSP_STATE_EXPR_EMPTY              = 0x01, /**< no expression yet (at start) */
-  JSP_STATE_EXPR_FUNCTION           = 0x03, /**< FunctionExpression (11.2.5) */
-  JSP_STATE_EXPR_MEMBER             = 0x04, /**< MemberExpression (11.2) */
-  JSP_STATE_EXPR_CALL               = 0x06, /**< CallExpression (11.2) */
-  JSP_STATE_EXPR_LEFTHANDSIDE       = 0x07, /**< LeftHandSideExpression (11.2) */
-  JSP_STATE_EXPR_UNARY              = 0x09, /**< UnaryExpression (11.4) */
-  JSP_STATE_EXPR_MULTIPLICATIVE     = 0x0A, /**< MultiplicativeExpression (11.5) */
-  JSP_STATE_EXPR_ADDITIVE           = 0x0B, /**< AdditiveExpression (11.6) */
-  JSP_STATE_EXPR_SHIFT              = 0x0C, /**< ShiftExpression (11.7) */
-  JSP_STATE_EXPR_RELATIONAL         = 0x0D, /**< RelationalExpression (11.8) */
-  JSP_STATE_EXPR_EQUALITY           = 0x0E, /**< EqualityExpression (11.9) */
-  JSP_STATE_EXPR_BITWISE_AND        = 0x0F, /**< BitwiseAndExpression (11.10) */
-  JSP_STATE_EXPR_BITWISE_XOR        = 0x10, /**< BitwiseXorExpression (11.10) */
-  JSP_STATE_EXPR_BITWISE_OR         = 0x11, /**< BitwiseOrExpression (11.10) */
-  JSP_STATE_EXPR_LOGICAL_AND        = 0x12, /**< LogicalAndExpression (11.11) */
-  JSP_STATE_EXPR_LOGICAL_OR         = 0x13, /**< LogicalOrExpression (11.11) */
-  JSP_STATE_EXPR_CONDITION          = 0x14, /**< ConditionalExpression (11.12) */
-  JSP_STATE_EXPR_ASSIGNMENT         = 0x15, /**< AssignmentExpression (11.13) */
-  JSP_STATE_EXPR_EXPRESSION         = 0x16, /**< Expression (11.14) */
+  JSP_STATE_EXPR_EMPTY,              /**< no expression yet (at start) */
+  JSP_STATE_EXPR_FUNCTION,           /**< FunctionExpression (11.2.5) */
+  JSP_STATE_EXPR_MEMBER,             /**< MemberExpression (11.2) */
+  JSP_STATE_EXPR_CALL,               /**< CallExpression (11.2) */
+  JSP_STATE_EXPR_LEFTHANDSIDE,       /**< LeftHandSideExpression (11.2) */
+  JSP_STATE_EXPR_UNARY,              /**< UnaryExpression (11.4) */
+  JSP_STATE_EXPR_MULTIPLICATIVE,     /**< MultiplicativeExpression (11.5) */
+  JSP_STATE_EXPR_ADDITIVE,           /**< AdditiveExpression (11.6) */
+  JSP_STATE_EXPR_SHIFT,              /**< ShiftExpression (11.7) */
+  JSP_STATE_EXPR_RELATIONAL,         /**< RelationalExpression (11.8) */
+  JSP_STATE_EXPR_EQUALITY,           /**< EqualityExpression (11.9) */
+  JSP_STATE_EXPR_BITWISE_AND,        /**< BitwiseAndExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_XOR,        /**< BitwiseXorExpression (11.10) */
+  JSP_STATE_EXPR_BITWISE_OR,         /**< BitwiseOrExpression (11.10) */
+  JSP_STATE_EXPR_LOGICAL_AND,        /**< LogicalAndExpression (11.11) */
+  JSP_STATE_EXPR_LOGICAL_OR,         /**< LogicalOrExpression (11.11) */
+  JSP_STATE_EXPR_CONDITION,          /**< ConditionalExpression (11.12) */
+  JSP_STATE_EXPR_ASSIGNMENT,         /**< AssignmentExpression (11.13) */
+  JSP_STATE_EXPR_EXPRESSION,         /**< Expression (11.14) */
 
-  JSP_STATE_EXPR_ARRAY_LITERAL      = 0x17, /**< ArrayLiteral (11.1.4) */
-  JSP_STATE_EXPR_OBJECT_LITERAL     = 0x18, /**< ObjectLiteral (11.1.5) */
+  JSP_STATE_EXPR_ARRAY_LITERAL,      /**< ArrayLiteral (11.1.4) */
+  JSP_STATE_EXPR_OBJECT_LITERAL,     /**< ObjectLiteral (11.1.5) */
 
-  JSP_STATE_EXPR_DATA_PROP_DECL     = 0x19, /**< a data property (ObjectLiteral, 11.1.5) */
-  JSP_STATE_EXPR_ACCESSOR_PROP_DECL = 0x20, /**< an accessor's property getter / setter (ObjectLiteral, 11.1.5) */
+  JSP_STATE_EXPR_DATA_PROP_DECL,     /**< a data property (ObjectLiteral, 11.1.5) */
+  JSP_STATE_EXPR_ACCESSOR_PROP_DECL, /**< an accessor's property getter / setter (ObjectLiteral, 11.1.5) */
 
-  JSP_STATE_STAT_EMPTY              = 0x30, /**< no statement yet (at start) */
-  JSP_STATE_STAT_IF_BRANCH_START    = 0x31, /**< IfStatement branch start */
-  JSP_STATE_STAT_IF_BRANCH_END      = 0x32, /**< IfStatement branch start */
-  JSP_STATE_STAT_STATEMENT          = 0x33, /**< Statement */
-  JSP_STATE_STAT_STATEMENT_LIST     = 0x34, /**< Statement list */
-  JSP_STATE_STAT_VAR_DECL           = 0x35, /**< VariableStatement */
-  JSP_STATE_STAT_DO_WHILE           = 0x36, /**< IterationStatement */
-  JSP_STATE_STAT_WHILE              = 0x37,
-  JSP_STATE_STAT_FOR_INIT_END       = 0x38,
-  JSP_STATE_STAT_FOR_INCREMENT      = 0x39,
-  JSP_STATE_STAT_FOR_COND           = 0x40,
-  JSP_STATE_STAT_FOR_FINISH         = 0x41,
-  JSP_STATE_STAT_FOR_IN             = 0x42,
-  JSP_STATE_STAT_FOR_IN_EXPR        = 0x43,
-  JSP_STATE_STAT_FOR_IN_FINISH      = 0x44,
-  JSP_STATE_STAT_ITER_FINISH        = 0x45,
-  JSP_STATE_STAT_SWITCH             = 0x46,
-  JSP_STATE_STAT_SWITCH_BRANCH_EXPR = 0x47,
-  JSP_STATE_STAT_SWITCH_BRANCH      = 0x48,
-  JSP_STATE_STAT_SWITCH_FINISH      = 0x49,
-  JSP_STATE_STAT_TRY                = 0x50,
-  JSP_STATE_STAT_CATCH_FINISH       = 0x51,
-  JSP_STATE_STAT_FINALLY_FINISH     = 0x52,
-  JSP_STATE_STAT_TRY_FINISH         = 0x53,
-  JSP_STATE_STAT_WITH               = 0x54,
-  JSP_STATE_STAT_EXPRESSION         = 0x55,
-  JSP_STATE_STAT_RETURN             = 0x56,
-  JSP_STATE_STAT_THROW              = 0x57,
+  JSP_STATE_STAT_EMPTY,              /**< no statement yet (at start) */
+  JSP_STATE_STAT_IF_BRANCH_START,    /**< IfStatement branch start */
+  JSP_STATE_STAT_IF_BRANCH_END,      /**< IfStatement branch start */
+  JSP_STATE_STAT_STATEMENT,          /**< Statement */
+  JSP_STATE_STAT_STATEMENT_LIST,     /**< Statement list */
+  JSP_STATE_STAT_VAR_DECL,           /**< VariableStatement */
+  JSP_STATE_STAT_DO_WHILE,           /**< IterationStatement */
+  JSP_STATE_STAT_WHILE,
+  JSP_STATE_STAT_FOR_INIT_END,
+  JSP_STATE_STAT_FOR_INCREMENT,
+  JSP_STATE_STAT_FOR_COND,
+  JSP_STATE_STAT_FOR_FINISH,
+  JSP_STATE_STAT_FOR_IN,
+  JSP_STATE_STAT_FOR_IN_EXPR,
+  JSP_STATE_STAT_FOR_IN_FINISH,
+  JSP_STATE_STAT_ITER_FINISH,
+  JSP_STATE_STAT_SWITCH,
+  JSP_STATE_STAT_SWITCH_BRANCH_EXPR,
+  JSP_STATE_STAT_SWITCH_BRANCH,
+  JSP_STATE_STAT_SWITCH_FINISH,
+  JSP_STATE_STAT_TRY,
+  JSP_STATE_STAT_CATCH_FINISH,
+  JSP_STATE_STAT_FINALLY_FINISH,
+  JSP_STATE_STAT_TRY_FINISH,
+  JSP_STATE_STAT_WITH,
+  JSP_STATE_STAT_EXPRESSION,
+  JSP_STATE_STAT_RETURN,
+  JSP_STATE_STAT_THROW,
 
-  JSP_STATE_FUNC_DECL_FINISH        = 0x60,
-  JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
+  JSP_STATE_FUNC_DECL_FINISH,
+  JSP_STATE_SOURCE_ELEMENT_LIST,
 
-  JSP_STATE_SOURCE_ELEMENTS_INIT    = 0x62,
-  JSP_STATE_SOURCE_ELEMENTS         = 0x63,
+  JSP_STATE_SOURCE_ELEMENTS_INIT,
+  JSP_STATE_SOURCE_ELEMENTS,
 
-  JSP_STATE_STAT_BLOCK              = 0x65,
+  JSP_STATE_STAT_BLOCK,
 
-  JSP_STATE_STAT_NAMED_LABEL        = 0x66
+  JSP_STATE_STAT_NAMED_LABEL
 } jsp_state_expr_t;
 
 static jsp_operand_t parse_expression_ (jsp_state_expr_t, bool);
@@ -804,25 +803,27 @@ typedef struct
   jsp_operand_t operand; /**< operand, associated with expression */
 
   jsp_state_expr_t state; /**< current state */
-  jsp_state_expr_t req_expr_type; /**< requested type of expression */
+  jsp_state_expr_t req_state; /**< required state */
 
   jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
 
-  uint8_t is_completed           : 1; /**< the expression parse completed,
-                                       *   no more tokens can be added to the expression */
-  uint8_t is_list_in_process     : 1; /**< parsing a list, associated with the expression
-                                       *   (details depend on current expression type) */
-  uint8_t is_no_in_mode          : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
-  uint8_t is_fixed_ret_operand   : 1; /**< the expression's evaluation should produce value that should be
-                                       *   put to register, specified by operand, specified in state */
-  uint8_t is_complex_production  : 1; /**< the expression is being parsed in complex production mode */
-  uint8_t is_rewrite_chain_active : 1; /**< flag, indicating whether rewrite chain is associated with current state */
-  uint8_t is_raised               : 1; /**< nested label flag*/
-  uint8_t var_decl                : 1; /**< this flag tells that we are parsing VariableStatement, not
+  uint8_t is_completed              : 1; /**< the expression parse completed,
+                                          *   no more tokens can be added to the expression */
+  uint8_t is_list_in_process        : 1; /**< parsing a list, associated with the expression
+                                          *   (details depend on current expression type) */
+  uint8_t is_no_in_mode             : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
+  uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
+                                          *   put to register, specified by operand, specified in state */
+  uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
+  uint8_t is_rewrite_chain_active   : 1; /**< flag, indicating whether rewrite chain is associated with current state */
+  uint8_t is_raised                 : 1; /**< nested label flag*/
+  uint8_t var_decl                  : 1; /**< this flag tells that we are parsing VariableStatement, not
                                             VariableDeclarationList or VariableDeclaration inside
                                             IterationStatement */
   uint8_t was_default             : 1; /**< was default branch seen */
-  uint8_t is_default_branch       : 1; /**< marks default branch of switch statement */
+  uint8_t is_default_branch         : 1; /**< marks default branch of switch statement */
+  uint8_t is_simply_jumpable_border : 1; /**< flag, indicating whether simple jump could be performed
+                                          *   from current statement outside of the statement */
   uint8_t is_dump_eval_ret_store  : 1; /**< expression's result should be stored to eval's return register */
 
   union u
@@ -876,7 +877,6 @@ typedef struct
 
     struct
     {
-      jsp_label_t *prev_label_set_p;
       vm_instr_counter_t scope_code_flags_oc;
       vm_instr_counter_t reg_var_decl_oc;
     } source_elements;
@@ -888,7 +888,7 @@ typedef struct
   } u;
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 32, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 28, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -932,13 +932,13 @@ jsp_state_pop (void)
 
 static void
 jsp_push_new_expr_state (jsp_state_expr_t expr_type,
-                         jsp_state_expr_t req_expr_type,
+                         jsp_state_expr_t req_state,
                          bool in_allowed)
 {
   jsp_state_t new_state;
 
   new_state.state = expr_type;
-  new_state.req_expr_type = req_expr_type;
+  new_state.req_state = req_state;
   new_state.operand = empty_operand ();
   new_state.token_type = TOK_EMPTY;
 
@@ -1110,7 +1110,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
 
     jsp_state_t* state_p = jsp_state_top ();
 
-    if (state_p->state == state_p->req_expr_type && state_p->is_completed)
+    if (state_p->state == state_p->req_state && state_p->is_completed)
     {
       (void) jsp_is_stack_empty ();
 
@@ -1144,7 +1144,7 @@ parse_expression_ (jsp_state_expr_t req_expr,
        * its invalid to reach Expression production type if required production is lower
        * (i.e. is not Expression production type).
        */
-      JERRY_ASSERT (!(state_p->state == JSP_STATE_EXPR_EXPRESSION && state_p->req_expr_type != JSP_STATE_EXPR_EXPRESSION));
+      JERRY_ASSERT (!(state_p->state == JSP_STATE_EXPR_EXPRESSION && state_p->req_state != JSP_STATE_EXPR_EXPRESSION));
     }
 
     const bool in_allowed = !state_p->is_no_in_mode;
@@ -2758,7 +2758,7 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   jsp_state_t new_state;
 
   new_state.state = stat;
-  new_state.req_expr_type = JSP_STATE_STAT_STATEMENT;
+  new_state.req_state = JSP_STATE_STAT_STATEMENT;
   new_state.operand = empty_operand ();
   new_state.token_type = TOK_EMPTY;
 
@@ -2774,6 +2774,7 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
   new_state.var_decl = false;
   new_state.was_default = false;
   new_state.is_default_branch = false;
+  new_state.is_simply_jumpable_border = false;
 
   jsp_state_push (new_state);
 } /* jsp_start_statement_parse */
@@ -2795,10 +2796,7 @@ jsp_find_unnamed_label (bool is_label_for_break,
       break;
     }
 
-    if (state_p->state == JSP_STATE_STAT_WITH
-        || state_p->state == JSP_STATE_STAT_TRY
-        || state_p->state == JSP_STATE_STAT_CATCH_FINISH
-        || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    if (state_p->is_simply_jumpable_border)
     {
       *out_is_simply_jumpable_p = false;
     }
@@ -2837,10 +2835,7 @@ jsp_find_named_label (lit_cpointer_t name_cp,
       break;
     }
 
-    if (state_p->state == JSP_STATE_STAT_WITH
-        || state_p->state == JSP_STATE_STAT_TRY
-        || state_p->state == JSP_STATE_STAT_CATCH_FINISH
-        || state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
+    if (state_p->is_simply_jumpable_border)
     {
       *out_is_simply_jumpable_p = false;
     }
@@ -2916,7 +2911,7 @@ parse_statement_ (void)
   dumper_new_statement ();
 
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-  jsp_state_top ()->req_expr_type = JSP_STATE_SOURCE_ELEMENTS;
+  jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
 
   uint32_t start_pos = jsp_state_stack_pos;
   bool in_allowed = true;
@@ -2928,7 +2923,7 @@ parse_statement_ (void)
 
     jsp_state_t *state_p = jsp_state_top ();
 
-    if (state_p->state == state_p->req_expr_type && state_p->is_completed)
+    if (state_p->state == state_p->req_state && state_p->is_completed)
     {
       (void) jsp_is_stack_empty ();
 
@@ -2940,7 +2935,7 @@ parse_statement_ (void)
       }
       else
       {
-        is_subexpr_end = (state_p->req_expr_type != JSP_STATE_STAT_STATEMENT);
+        is_subexpr_end = (state_p->req_state != JSP_STATE_STAT_STATEMENT);
 
         subexpr_operand = state_p->operand;
 
@@ -2952,8 +2947,6 @@ parse_statement_ (void)
     if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
     {
       scope_type_t scope_type = serializer_get_scope ()->type;
-
-      state_p->u.source_elements.prev_label_set_p = jsp_label_new_set ();
 
       dumper_new_scope ();
 
@@ -3015,8 +3008,6 @@ parse_statement_ (void)
         rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
         rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
 
-        jsp_label_restore_previous_set (state_p->u.source_elements.prev_label_set_p);
-
         state_p->is_completed = true;
 
         dumper_finish_scope ();
@@ -3028,7 +3019,7 @@ parse_statement_ (void)
     }
     else if (state_p->state == JSP_STATE_EXPR_EMPTY)
     {
-      jsp_operand_t expr = parse_expression_ (state_p->req_expr_type, !state_p->is_no_in_mode);
+      jsp_operand_t expr = parse_expression_ (state_p->req_state, !state_p->is_no_in_mode);
 
       if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL
           && state_p->is_dump_eval_ret_store)
@@ -3040,7 +3031,7 @@ parse_statement_ (void)
 
       state_p->operand = expr;
       state_p->is_completed = true;
-      state_p->state = state_p->req_expr_type;
+      state_p->state = state_p->req_state;
     }
     else if (state_p->state == JSP_STATE_STAT_EMPTY)
     {
@@ -3150,11 +3141,6 @@ parse_statement_ (void)
           }
           else
           {
-            if (jsp_label_raise_nested_jumpable_border ())
-            {
-              state_p->is_raised = true;
-            }
-
             current_token_must_be (TOK_OPEN_PAREN);
             skip_token ();
 
@@ -3318,12 +3304,12 @@ parse_statement_ (void)
 
         scopes_tree_set_contains_try (serializer_get_scope ());
 
-        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
-
         dump_try_for_rewrite ();
 
         current_token_must_be (TOK_OPEN_BRACE);
         skip_token ();
+
+        state_p->is_simply_jumpable_border = true;
 
         state_p->state = JSP_STATE_STAT_TRY;
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
@@ -3362,7 +3348,7 @@ parse_statement_ (void)
         state_p->state = JSP_STATE_FUNC_DECL_FINISH;
 
         jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-        jsp_state_top ()->req_expr_type = JSP_STATE_SOURCE_ELEMENTS;
+        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
       }
       else
       {
@@ -3370,9 +3356,6 @@ parse_statement_ (void)
         jsp_state_top ()->is_dump_eval_ret_store = true;
 
         state_p->state = JSP_STATE_STAT_EXPRESSION;
-        /*insert_semicolon ();
-
-        JSP_COMPLETE_STATEMENT_PARSE ();*/
       }
     }
     else if (state_p->state == JSP_STATE_STAT_BLOCK)
@@ -3679,6 +3662,8 @@ parse_statement_ (void)
       lexer_seek (state_p->u.statement.loc[0]);
       tok = lexer_next_token (false);
 
+      state_p->is_simply_jumpable_border = true;
+
       JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_IN_FINISH)
@@ -3698,11 +3683,6 @@ parse_statement_ (void)
 
       lexer_seek (loop_end_loc);
       tok = lexer_next_token (false);
-
-      if (state_p->is_raised)
-      {
-        jsp_label_remove_nested_jumpable_border ();
-      }
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
     }
@@ -3918,6 +3898,8 @@ parse_statement_ (void)
 
         state_p->state = JSP_STATE_STAT_CATCH_FINISH;
 
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
       }
@@ -3932,6 +3914,8 @@ parse_statement_ (void)
         skip_token ();
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
+
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
 
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
@@ -3951,6 +3935,8 @@ parse_statement_ (void)
 
         state_p->state = JSP_STATE_STAT_FINALLY_FINISH;
 
+        JERRY_ASSERT (state_p->is_simply_jumpable_border);
+
         jsp_start_statement_parse (JSP_STATE_STAT_BLOCK);
         jsp_start_statement_parse (JSP_STATE_STAT_STATEMENT_LIST);
       }
@@ -3969,11 +3955,6 @@ parse_statement_ (void)
     {
       dump_end_try_catch_finally ();
 
-      if (state_p->is_raised)
-      {
-        jsp_label_remove_nested_jumpable_border ();
-      }
-
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
     else if (state_p->state == JSP_STATE_STAT_WITH)
@@ -3985,7 +3966,7 @@ parse_statement_ (void)
 
         scopes_tree_set_contains_with (serializer_get_scope ());
 
-        state_p->is_raised = jsp_label_raise_nested_jumpable_border ();
+        state_p->is_simply_jumpable_border = true;
 
         state_p->u.rewrite_chain = dump_with_for_rewrite (expr);
 
@@ -3995,11 +3976,6 @@ parse_statement_ (void)
       {
         rewrite_with (state_p->u.rewrite_chain);
         dump_with_end ();
-
-        if (state_p->is_raised)
-        {
-          jsp_label_remove_nested_jumpable_border ();
-        }
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
@@ -4109,7 +4085,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
   jsp_status_t status;
 
   jsp_mm_init ();
-  jsp_label_init ();
 
   serializer_set_show_instrs (parser_show_instrs);
   dumper_init ();
@@ -4179,7 +4154,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     *out_bytecode_data_p = NULL;
 
-    jsp_label_remove_all_labels ();
     jsp_mm_free_all ();
 
     jsp_early_error_t type = jsp_early_error_get_type ();
@@ -4196,7 +4170,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
     }
   }
 
-  jsp_label_finalize ();
   jsp_mm_finalize ();
 
   return status;
