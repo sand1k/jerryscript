@@ -107,6 +107,7 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_TRY_FINISH         = 0x53,
   JSP_STATE_STAT_WITH_FINISH        = 0x54,
   JSP_STATE_STAT_EXPRESSION         = 0x55,
+  JSP_STATE_STAT_RETURN             = 0x56,
 
   JSP_STATE_FUNC_DECL_FINISH        = 0x60,
   JSP_STATE_SOURCE_ELEMENT_LIST     = 0x61,
@@ -3344,18 +3345,14 @@ parse_statement_ (void)
             && !lexer_is_preceded_by_newlines (tok)
             && !token_is (TOK_CLOSE_BRACE))
         {
-          const jsp_operand_t op = parse_expression (true, JSP_EVAL_RET_STORE_NOT_DUMP);
-
-          dump_retval (dump_assignment_of_lhs_if_value_based_reference (op));
-
-          insert_semicolon ();
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+          state_p->state = JSP_STATE_STAT_RETURN;
         }
         else
         {
           dump_ret ();
+          JSP_COMPLETE_STATEMENT_PARSE ();
         }
-
-        JSP_COMPLETE_STATEMENT_PARSE ();
       }
       else if (token_is (TOK_KW_TRY))
       {
@@ -4055,6 +4052,16 @@ parse_statement_ (void)
 
       jsp_operand_t expr = subexpr_operand;
       dump_assignment_of_lhs_if_reference (expr);
+      insert_semicolon ();
+
+      JSP_COMPLETE_STATEMENT_PARSE ();
+    }
+    else if (state_p->state == JSP_STATE_STAT_RETURN)
+    {
+      JERRY_ASSERT (is_subexpr_end);
+
+      const jsp_operand_t op = subexpr_operand;
+      dump_retval (dump_assignment_of_lhs_if_value_based_reference (op));
       insert_semicolon ();
 
       JSP_COMPLETE_STATEMENT_PARSE ();
