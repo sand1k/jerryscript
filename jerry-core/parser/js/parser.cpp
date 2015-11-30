@@ -721,8 +721,6 @@ typedef struct
   jsp_state_expr_t state; /**< current state */
   jsp_state_expr_t req_state; /**< required state */
 
-  jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
-
   uint8_t is_completed              : 1; /**< the expression parse completed,
                                           *   no more tokens can be added to the expression */
   uint8_t is_list_in_process        : 1; /**< parsing a list, associated with the expression
@@ -749,6 +747,7 @@ typedef struct
     struct
     {
       jsp_operand_t operand; /**< operand, associated with expression */
+      jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
 
       union
       {
@@ -888,7 +887,7 @@ typedef struct
   } u;
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 32, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 28, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -946,7 +945,7 @@ jsp_push_new_expr_state (jsp_state_expr_t expr_type,
   new_state.state = expr_type;
   new_state.req_state = req_state;
   new_state.u.expression.operand = empty_operand ();
-  new_state.token_type = TOK_EMPTY;
+  new_state.u.expression.token_type = TOK_EMPTY;
 
   new_state.is_completed = false;
   new_state.is_list_in_process = false;
@@ -1308,7 +1307,6 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
 
   new_state.state = stat;
   new_state.req_state = JSP_STATE_STAT_STATEMENT;
-  new_state.token_type = TOK_EMPTY;
 
   new_state.u.statement.breaks_rewrite_chain = MAX_OPCODES;
 
@@ -1579,7 +1577,7 @@ jsp_parse_source_element_list (void)
       {
         /* UnaryExpression */
         state_p->state = JSP_STATE_EXPR_UNARY;
-        state_p->token_type = tt;
+        state_p->u.expression.token_type = tt;
 
         if (tt == TOK_KW_DELETE)
         {
@@ -1623,7 +1621,7 @@ jsp_parse_source_element_list (void)
         {
           case TOK_OPEN_PAREN:
           {
-            state_p->token_type = TOK_OPEN_PAREN;
+            state_p->u.expression.token_type = TOK_OPEN_PAREN;
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
             break;
@@ -1636,7 +1634,7 @@ jsp_parse_source_element_list (void)
           case TOK_KW_NEW:
           {
             state_p->state = JSP_STATE_EXPR_MEMBER;
-            state_p->token_type = TOK_KW_NEW;
+            state_p->u.expression.token_type = TOK_KW_NEW;
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MEMBER, true);
             break;
@@ -1982,7 +1980,7 @@ jsp_parse_source_element_list (void)
         {
           if (state_p->is_list_in_process)
           {
-            JERRY_ASSERT (state_p->token_type == TOK_KW_NEW);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_NEW);
             JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_ASSIGNMENT);
 
             subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
@@ -1994,7 +1992,7 @@ jsp_parse_source_element_list (void)
 
             if (token_is (TOK_CLOSE_PAREN))
             {
-              state_p->token_type = TOK_EMPTY;
+              state_p->u.expression.token_type = TOK_EMPTY;
               state_p->is_list_in_process = false;
 
               uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
@@ -2013,17 +2011,17 @@ jsp_parse_source_element_list (void)
 
             skip_token ();
           }
-          else if (state_p->token_type == TOK_OPEN_PAREN)
+          else if (state_p->u.expression.token_type == TOK_OPEN_PAREN)
           {
             JERRY_ASSERT (state_p->u.expression.operand.is_empty_operand ());
 
             state_p->u.expression.operand = subexpr_operand;
-            state_p->token_type = TOK_EMPTY;
+            state_p->u.expression.token_type = TOK_EMPTY;
 
             current_token_must_be (TOK_CLOSE_PAREN);
             skip_token ();
           }
-          else if (state_p->token_type == TOK_KW_NEW)
+          else if (state_p->u.expression.token_type == TOK_KW_NEW)
           {
             JERRY_ASSERT (subexpr_type == JSP_STATE_EXPR_MEMBER);
             JERRY_ASSERT (state_p->u.expression.operand.is_empty_operand ());
@@ -2063,7 +2061,7 @@ jsp_parse_source_element_list (void)
             }
             else
             {
-              state_p->token_type = TOK_EMPTY;
+              state_p->u.expression.token_type = TOK_EMPTY;
 
               if (is_arg_list_implicit)
               {
@@ -2076,8 +2074,8 @@ jsp_parse_source_element_list (void)
           }
           else
           {
-            JERRY_ASSERT (state_p->token_type == TOK_OPEN_SQUARE);
-            state_p->token_type = TOK_EMPTY;
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_OPEN_SQUARE);
+            state_p->u.expression.token_type = TOK_EMPTY;
 
             current_token_must_be (TOK_CLOSE_SQUARE);
             skip_token ();
@@ -2102,7 +2100,7 @@ jsp_parse_source_element_list (void)
         {
           skip_token ();
 
-          state_p->token_type = TOK_OPEN_SQUARE;
+          state_p->u.expression.token_type = TOK_OPEN_SQUARE;
 
           jsp_operand_t base = state_p->u.expression.operand;
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (base);
@@ -2177,8 +2175,8 @@ jsp_parse_source_element_list (void)
         }
         else
         {
-          JERRY_ASSERT (state_p->token_type == TOK_OPEN_SQUARE);
-          state_p->token_type = TOK_EMPTY;
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_OPEN_SQUARE);
+          state_p->u.expression.token_type = TOK_EMPTY;
 
           current_token_must_be (TOK_CLOSE_SQUARE);
 
@@ -2217,7 +2215,7 @@ jsp_parse_source_element_list (void)
         {
           skip_token ();
 
-          state_p->token_type = TOK_OPEN_SQUARE;
+          state_p->u.expression.token_type = TOK_OPEN_SQUARE;
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
@@ -2245,10 +2243,10 @@ jsp_parse_source_element_list (void)
 
       if (is_subexpr_end)
       {
-        jsp_token_type_t tt = state_p->token_type;
+        jsp_token_type_t tt = state_p->u.expression.token_type;
 
         state_p->state = JSP_STATE_EXPR_ASSIGNMENT;
-        state_p->token_type = TOK_EMPTY;
+        state_p->u.expression.token_type = TOK_EMPTY;
         state_p->is_completed = true;
 
         JERRY_ASSERT (tt >= TOKEN_TYPE__ASSIGNMENTS_BEGIN && tt <= TOKEN_TYPE__ASSIGNMENTS_END);
@@ -2317,7 +2315,7 @@ jsp_parse_source_element_list (void)
       }
       else
       {
-        JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
+        JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
         if (token_is (TOK_DOUBLE_PLUS)
             && !lexer_is_preceded_by_newlines (tok))
@@ -2376,7 +2374,7 @@ jsp_parse_source_element_list (void)
 
             /* skip the assignment operator */
             skip_token ();
-            state_p->token_type = tt;
+            state_p->u.expression.token_type = tt;
 
             if (state_p->u.expression.operand.is_value_based_reference_operand ()
                 && !state_p->u.expression.operand.is_evaluated_value_based_reference_operand ())
@@ -2405,7 +2403,7 @@ jsp_parse_source_element_list (void)
       {
         JERRY_ASSERT (is_subexpr_end);
 
-        if (state_p->token_type == TOK_DOUBLE_PLUS)
+        if (state_p->u.expression.token_type == TOK_DOUBLE_PLUS)
         {
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
 
@@ -2417,7 +2415,7 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = tmp_operand ();
           dump_pre_increment (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_DOUBLE_MINUS)
+        else if (state_p->u.expression.token_type == TOK_DOUBLE_MINUS)
         {
           jsp_early_error_check_for_eval_and_arguments_in_strict_mode (subexpr_operand, is_strict_mode (), tok.loc);
 
@@ -2429,35 +2427,35 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = tmp_operand ();
           dump_pre_decrement (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_PLUS)
+        else if (state_p->u.expression.token_type == TOK_PLUS)
         {
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           state_p->u.expression.operand = tmp_operand ();
           dump_unary_plus (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_MINUS)
+        else if (state_p->u.expression.token_type == TOK_MINUS)
         {
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           state_p->u.expression.operand = tmp_operand ();
           dump_unary_minus (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_COMPL)
+        else if (state_p->u.expression.token_type == TOK_COMPL)
         {
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           state_p->u.expression.operand = tmp_operand ();
           dump_bitwise_not (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_NOT)
+        else if (state_p->u.expression.token_type == TOK_NOT)
         {
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
           state_p->u.expression.operand = tmp_operand ();
           dump_logical_not (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_KW_DELETE)
+        else if (state_p->u.expression.token_type == TOK_KW_DELETE)
         {
           if (subexpr_operand.is_identifier_operand ())
           {
@@ -2467,7 +2465,7 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = tmp_operand ();
           dump_delete (state_p->u.expression.operand, subexpr_operand);
         }
-        else if (state_p->token_type == TOK_KW_VOID)
+        else if (state_p->u.expression.token_type == TOK_KW_VOID)
         {
           dump_evaluate_if_reference (subexpr_operand);
           state_p->u.expression.operand = tmp_operand ();
@@ -2476,7 +2474,7 @@ jsp_parse_source_element_list (void)
         }
         else
         {
-          JERRY_ASSERT (state_p->token_type == TOK_KW_TYPEOF);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_TYPEOF);
 
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
@@ -2484,7 +2482,7 @@ jsp_parse_source_element_list (void)
           dump_typeof (state_p->u.expression.operand, subexpr_operand);
         }
 
-        state_p->token_type = TOK_EMPTY;
+        state_p->u.expression.token_type = TOK_EMPTY;
         state_p->is_completed = true;
       }
     }
@@ -2503,28 +2501,28 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          if (state_p->token_type == TOK_MULT)
+          if (state_p->u.expression.token_type == TOK_MULT)
           {
             dump_multiplication (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_DIV)
+          else if (state_p->u.expression.token_type == TOK_DIV)
           {
             dump_division (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
           else
           {
-            JERRY_ASSERT (state_p->token_type == TOK_MOD);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_MOD);
 
             dump_remainder (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__MULTIPLICATIVE_END)
         {
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = lexer_get_token_type (tok);
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
 
@@ -2551,24 +2549,24 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          if (state_p->token_type == TOK_PLUS)
+          if (state_p->u.expression.token_type == TOK_PLUS)
           {
             dump_addition (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
           else
           {
-            JERRY_ASSERT (state_p->token_type == TOK_MINUS);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_MINUS);
 
             dump_substraction (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__ADDITIVE_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__ADDITIVE_END)
         {
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = lexer_get_token_type (tok);
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
 
@@ -2595,28 +2593,28 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          if (state_p->token_type == TOK_LSHIFT)
+          if (state_p->u.expression.token_type == TOK_LSHIFT)
           {
             dump_left_shift (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_RSHIFT)
+          else if (state_p->u.expression.token_type == TOK_RSHIFT)
           {
             dump_right_shift (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
           else
           {
-            JERRY_ASSERT (state_p->token_type == TOK_RSHIFT_EX);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_RSHIFT_EX);
 
             dump_right_shift_ex (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__SHIFT_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__SHIFT_END)
         {
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = lexer_get_token_type (tok);
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
 
@@ -2643,35 +2641,35 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          if (state_p->token_type == TOK_LESS)
+          if (state_p->u.expression.token_type == TOK_LESS)
           {
             dump_less_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_GREATER)
+          else if (state_p->u.expression.token_type == TOK_GREATER)
           {
             dump_greater_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_LESS_EQ)
+          else if (state_p->u.expression.token_type == TOK_LESS_EQ)
           {
             dump_less_or_equal_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_GREATER_EQ)
+          else if (state_p->u.expression.token_type == TOK_GREATER_EQ)
           {
             dump_greater_or_equal_than (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_KW_INSTANCEOF)
+          else if (state_p->u.expression.token_type == TOK_KW_INSTANCEOF)
           {
             dump_instanceof (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
           else
           {
-            JERRY_ASSERT (state_p->token_type == TOK_KW_IN);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_IN);
             JERRY_ASSERT (in_allowed);
 
             dump_in (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else if ((lexer_get_token_type (tok) >= TOKEN_TYPE__RELATIONAL_BEGIN
                   && lexer_get_token_type (tok) <= TOKEN_TYPE__RELATIONAL_END)
@@ -2679,7 +2677,7 @@ jsp_parse_source_element_list (void)
                  || (in_allowed && lexer_get_token_type (tok) == TOK_KW_IN))
         {
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = lexer_get_token_type (tok);
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
 
@@ -2706,32 +2704,32 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          if (state_p->token_type == TOK_DOUBLE_EQ)
+          if (state_p->u.expression.token_type == TOK_DOUBLE_EQ)
           {
             dump_equal_value (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_NOT_EQ)
+          else if (state_p->u.expression.token_type == TOK_NOT_EQ)
           {
             dump_not_equal_value (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
-          else if (state_p->token_type == TOK_TRIPLE_EQ)
+          else if (state_p->u.expression.token_type == TOK_TRIPLE_EQ)
           {
             dump_equal_value_type (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
           else
           {
-            JERRY_ASSERT (state_p->token_type == TOK_NOT_DOUBLE_EQ);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_NOT_DOUBLE_EQ);
 
             dump_not_equal_value_type (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
           }
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__EQUALITY_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__EQUALITY_END)
         {
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = lexer_get_token_type (tok);
+          state_p->u.expression.token_type = lexer_get_token_type (tok);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
 
@@ -2761,9 +2759,9 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          JERRY_ASSERT (state_p->token_type == TOK_AND);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_AND);
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
           dump_bitwise_and (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
         }
         else if (token_is (TOK_AND))
@@ -2771,7 +2769,7 @@ jsp_parse_source_element_list (void)
           skip_token ();
 
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = TOK_AND;
+          state_p->u.expression.token_type = TOK_AND;
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EQUALITY, in_allowed);
         }
@@ -2796,9 +2794,9 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          JERRY_ASSERT (state_p->token_type == TOK_XOR);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_XOR);
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
           dump_bitwise_xor (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
         }
         else if (token_is (TOK_XOR))
@@ -2806,7 +2804,7 @@ jsp_parse_source_element_list (void)
           skip_token ();
 
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = TOK_XOR;
+          state_p->u.expression.token_type = TOK_XOR;
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_AND, in_allowed);
         }
@@ -2834,9 +2832,9 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          JERRY_ASSERT (state_p->token_type == TOK_OR);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_OR);
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
           dump_bitwise_or (state_p->u.expression.operand, state_p->u.expression.operand, subexpr_operand);
         }
         else if (token_is (TOK_OR))
@@ -2844,7 +2842,7 @@ jsp_parse_source_element_list (void)
           skip_token ();
 
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
-          state_p->token_type = TOK_OR;
+          state_p->u.expression.token_type = TOK_OR;
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_XOR, in_allowed);
         }
@@ -2872,7 +2870,7 @@ jsp_parse_source_element_list (void)
           state_p->u.expression.operand = dump_assignment_of_lhs_if_value_based_reference (state_p->u.expression.operand);
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          JERRY_ASSERT (state_p->token_type == TOK_DOUBLE_AND);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_DOUBLE_AND);
 
           JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
 
@@ -2880,11 +2878,11 @@ jsp_parse_source_element_list (void)
 
           dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else
         {
-          JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
           if (token_is (TOK_DOUBLE_AND))
           {
@@ -2920,14 +2918,14 @@ jsp_parse_source_element_list (void)
                                                                        state_p->u.expression.operand,
                                                                        *rewrite_chain_p);
 
-            state_p->token_type = TOK_DOUBLE_AND;
+            state_p->u.expression.token_type = TOK_DOUBLE_AND;
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_OR, in_allowed);
           }
           else
           {
             /* end of LogicalAndExpression */
-            JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
             vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
 
@@ -2960,7 +2958,7 @@ jsp_parse_source_element_list (void)
           vm_instr_counter_t conditional_check_pos = dump_conditional_check_for_rewrite (state_p->u.expression.operand);
           state_p->u.expression.u.conditional.conditional_check_pos = conditional_check_pos;
 
-          state_p->token_type = TOK_QUERY;
+          state_p->u.expression.token_type = TOK_QUERY;
 
           JERRY_ASSERT (!state_p->is_fixed_ret_operand);
 
@@ -2982,16 +2980,16 @@ jsp_parse_source_element_list (void)
         {
           subexpr_operand = dump_assignment_of_lhs_if_value_based_reference (subexpr_operand);
 
-          JERRY_ASSERT (state_p->token_type == TOK_DOUBLE_OR);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_DOUBLE_OR);
 
           JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
           dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
 
-          state_p->token_type = TOK_EMPTY;
+          state_p->u.expression.token_type = TOK_EMPTY;
         }
         else
         {
-          JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
+          JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
           if (token_is (TOK_DOUBLE_OR))
           {
@@ -3027,14 +3025,14 @@ jsp_parse_source_element_list (void)
                                                                        state_p->u.expression.operand,
                                                                        *rewrite_chain_p);
 
-            state_p->token_type = TOK_DOUBLE_OR;
+            state_p->u.expression.token_type = TOK_DOUBLE_OR;
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LOGICAL_AND, in_allowed);
           }
           else
           {
             /* end of LogicalOrExpression */
-            JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
+            JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
             vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
 
@@ -3057,7 +3055,7 @@ jsp_parse_source_element_list (void)
       JERRY_ASSERT (!is_subexpr_end);
 
       JERRY_ASSERT (state_p->is_completed);
-      JERRY_ASSERT (state_p->token_type == TOK_EMPTY);
+      JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
       /* 'assignment expression' production can't be continued with an operator,
        *  so just propagating it to 'expression' production */
@@ -3070,7 +3068,7 @@ jsp_parse_source_element_list (void)
       JERRY_ASSERT (is_subexpr_end);
 
       /* ECMA-262 v5, 11.12 */
-      if (state_p->token_type == TOK_QUERY)
+      if (state_p->u.expression.token_type == TOK_QUERY)
       {
         current_token_must_be (TOK_COLON);
         skip_token ();
@@ -3087,13 +3085,13 @@ jsp_parse_source_element_list (void)
 
         rewrite_conditional_check (state_p->u.expression.u.conditional.conditional_check_pos);
 
-        state_p->token_type = TOK_COLON;
+        state_p->u.expression.token_type = TOK_COLON;
 
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, in_allowed);
       }
       else
       {
-        JERRY_ASSERT (state_p->token_type == TOK_COLON);
+        JERRY_ASSERT (state_p->u.expression.token_type == TOK_COLON);
 
         JERRY_ASSERT (state_p->is_fixed_ret_operand);
         JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
@@ -3104,7 +3102,7 @@ jsp_parse_source_element_list (void)
         dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
         rewrite_jump_to_end (state_p->u.expression.u.conditional.jump_to_end_pos);
 
-        state_p->token_type = TOK_EMPTY;
+        state_p->u.expression.token_type = TOK_EMPTY;
         state_p->is_fixed_ret_operand = false;
 
         state_p->state = JSP_STATE_EXPR_ASSIGNMENT;
@@ -3118,7 +3116,7 @@ jsp_parse_source_element_list (void)
 
       if (is_subexpr_end)
       {
-        JERRY_ASSERT (state_p->token_type == TOK_COMMA);
+        JERRY_ASSERT (state_p->u.expression.token_type == TOK_COMMA);
 
         /*
          * The operand should be already evaluated
@@ -3146,7 +3144,7 @@ jsp_parse_source_element_list (void)
 
           JERRY_ASSERT (!token_is (TOK_COMMA));
 
-          state_p->token_type = TOK_COMMA;
+          state_p->u.expression.token_type = TOK_COMMA;
 
           /* ECMA-262 v5, 11.14, step 2 */
           state_p->u.expression.operand = dump_assignment_of_lhs_if_reference (state_p->u.expression.operand);
