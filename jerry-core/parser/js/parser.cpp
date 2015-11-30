@@ -751,69 +751,72 @@ typedef struct
   {
     u (void) { }
 
-    struct
+    struct expression
     {
-      jsp_operand_t operand; /**< operand, associated with expression */
-      jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
-
-      union
+      union u
       {
         struct
         {
-          vm_instr_counter_t header_pos; /**< position of a varg header instruction */
           uint32_t list_length;
+          vm_instr_counter_t header_pos; /**< position of a varg header instruction */
           vm_idx_t reg_alloc_saved_state;
         } varg_sequence;
+        static_assert (sizeof (varg_sequence) == 8, "Please, update size if changed");
 
         struct
         {
           jsp_operand_t prop_name;
           bool is_setter;
         } accessor_prop_decl;
+        static_assert (sizeof (accessor_prop_decl) == 8, "Please, update size if changed");
 
         struct
         {
           vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
         } logical_and;
+        static_assert (sizeof (logical_and) == 2, "Please, update size if changed");
 
         struct
         {
           vm_instr_counter_t rewrite_chain; /**< chain of jmp instructions to rewrite */
         } logical_or;
+        static_assert (sizeof (logical_or) == 2, "Please, update size if changed");
 
         struct
         {
           vm_instr_counter_t conditional_check_pos;
           vm_instr_counter_t jump_to_end_pos;
         } conditional;
+        static_assert (sizeof (conditional) == 4, "Please, update size if changed");
       } u;
+      static_assert (sizeof (u) == 8, "Please, update size if changed");
+
+      jsp_operand_t operand; /**< operand, associated with expression */
+      jsp_token_type_t token_type; /**< token, related to current and, if binary, to previous expression */
     } expression;
+    static_assert (sizeof (expression) == 16, "Please, update size if changed");
 
-    struct
+    struct statement
     {
-      vm_instr_counter_t breaks_rewrite_chain;
-
-      union
+      union u
       {
-        struct
+        struct iterational
         {
-          vm_instr_counter_t continues_rewrite_chain;
-          vm_instr_counter_t continue_tgt_oc;
-
-          union
+          union u
           {
-            struct
+            struct loop_for_in
             {
               locus iterator_expr_loc;
               locus body_loc;
 
-              vm_instr_counter_t header_pos;
               jsp_operand_t iterator;
+              vm_instr_counter_t header_pos;
             } loop_for_in;
+            static_assert (sizeof (loop_for_in) == 16, "Please, update size if changed");
 
-            struct
+            struct loop_while
             {
-              union
+              union u
               {
                 locus cond_expr_start_loc;
                 locus end_loc;
@@ -822,21 +825,23 @@ typedef struct
               vm_instr_counter_t next_iter_tgt_pos;
               vm_instr_counter_t jump_to_end_pos;
             } loop_while;
+            static_assert (sizeof (loop_while) == 8, "Please, update size if changed");
 
-            struct
+            struct loop_do_while
             {
               vm_instr_counter_t next_iter_tgt_pos;
             } loop_do_while;
+            static_assert (sizeof (loop_do_while) == 2, "Please, update size if changed");
 
-            struct
+            struct loop_for
             {
-              union
+              union u1
               {
                 locus body_loc;
                 locus condition_expr_loc;
               } u1;
 
-              union
+              union u2
               {
                 locus increment_expr_loc;
                 locus end_loc;
@@ -845,16 +850,23 @@ typedef struct
               vm_instr_counter_t next_iter_tgt_pos;
               vm_instr_counter_t jump_to_end_pos;
             } loop_for;
+            static_assert (sizeof (loop_for) == 12, "Please, update size if changed");
           } u;
-        } iterational;
+          static_assert (sizeof (u) == 16, "Please, update size if changed");
 
-        struct
+          vm_instr_counter_t continues_rewrite_chain;
+          vm_instr_counter_t continue_tgt_oc;
+        } iterational;
+        static_assert (sizeof (iterational) == 20, "Please, update size if changed");
+
+        struct if_statement
         {
           vm_instr_counter_t conditional_check_pos;
           vm_instr_counter_t jump_to_end_pos;
         } if_statement;
+        static_assert (sizeof (if_statement) == 4, "Please, update size if changed");
 
-        struct
+        struct switch_statement
         {
           locus loc;
           jsp_operand_t expr;
@@ -863,27 +875,35 @@ typedef struct
 
           uint16_t case_clause_count;
         } switch_statement;
+        static_assert (sizeof (switch_statement) == 16, "Please, update size if changed");
 
-        struct
+        struct with_statement
         {
           vm_instr_counter_t header_pos;
         } with_statement;
+        static_assert (sizeof (with_statement) == 2, "Please, update size if changed");
 
-        struct
+        struct try_statement
         {
           vm_instr_counter_t try_pos;
           vm_instr_counter_t catch_pos;
           vm_instr_counter_t finally_pos;
         } try_statement;
+        static_assert (sizeof (try_statement) == 6, "Please, update size if changed");
       } u;
-    } statement;
+      static_assert (sizeof (u) == 20, "Please, update size if changed");
 
-    struct
+      vm_instr_counter_t breaks_rewrite_chain;
+    } statement;
+    static_assert (sizeof (statement) == 24, "Please, update size if changed");
+
+    struct named_label
     {
       lit_cpointer_t name_cp;
     } named_label;
+    static_assert (sizeof (named_label) == 2, "Please, update size if changed");
 
-    struct
+    struct source_elements
     {
       vm_instr_counter_t scope_code_flags_oc;
       vm_instr_counter_t reg_var_decl_oc;
@@ -891,7 +911,9 @@ typedef struct
       vm_idx_t saved_reg_next;
       vm_idx_t saved_reg_max_for_temps;
     } source_elements;
+    static_assert (sizeof (source_elements) == 6, "Please, update size if changed");
   } u;
+  static_assert (sizeof (u) == 24, "Please, update size if changed");
 } jsp_state_t;
 
 static_assert (sizeof (jsp_state_t) == 28, "Please, update if size is changed");
