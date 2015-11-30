@@ -3819,6 +3819,8 @@ jsp_parse_source_element_list (void)
         state_p->u.statement.u.iterational.u.loop_for_in.iterator = subexpr_operand;
       }
 
+      current_token_must_be (TOK_KW_IN);
+
       jsp_operand_t iterator = state_p->u.statement.u.iterational.u.loop_for_in.iterator;
       jsp_operand_t for_in_special_reg = jsp_create_operand_for_in_special_reg ();
 
