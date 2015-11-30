@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "bytecode-data.h"
 #include "ecma-helpers.h"
 #include "hash-table.h"
 #include "jrt-libc-includes.h"
@@ -23,7 +24,6 @@
 #include "parser.h"
 #include "re-parser.h"
 #include "scopes-tree.h"
-#include "serializer.h"
 #include "stack.h"
 #include "jsp-early-error.h"
 #include "vm.h"
@@ -125,13 +125,20 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_NAMED_LABEL
 } jsp_state_expr_t;
 
-static void jsp_parse_source_element_list (void);
+
+typedef enum
+{
+  PREPARSE,
+  DUMP
+} jsp_parse_mode_t;
+
+static void jsp_parse_source_element_list (jsp_parse_mode_t);
 static void skip_case_clause_body (void);
 
 static bool
 is_strict_mode (void)
 {
-  return scopes_tree_strict_mode (serializer_get_scope ());
+  return scopes_tree_strict_mode (dumper_get_scope ());
 }
 
 static bool
@@ -479,7 +486,7 @@ jsp_parse_directive_prologue ()
     if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "use strict")
         && lexer_is_no_escape_sequences_in_token_string (tok))
     {
-      scopes_tree_set_strict_mode (serializer_get_scope (), true);
+      scopes_tree_set_strict_mode (dumper_get_scope (), true);
       break;
     }
 
@@ -499,12 +506,12 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
                                 bool is_function_expression,
                                 size_t *out_formal_parameters_num_p)
 {
-  scopes_tree parent_scope = serializer_get_scope ();
+  scopes_tree parent_scope = dumper_get_scope ();
   scopes_tree_set_contains_functions (parent_scope);
 
   scopes_tree func_scope = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
 
-  serializer_set_scope (func_scope);
+  dumper_set_scope (func_scope);
   scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
 
   /* parse formal parameters list */
@@ -635,7 +642,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 static vm_instr_counter_t
 jsp_find_function_end (void)
 {
-  scopes_tree scope_tree = serializer_get_scope ();
+  scopes_tree scope_tree = dumper_get_scope ();
   JERRY_ASSERT (scope_tree->type == SCOPE_TYPE_FUNCTION);
 
   vm_instr_counter_t instr_pos = 0u;
@@ -669,7 +676,7 @@ jsp_find_function_end (void)
 static void
 jsp_finish_parse_function_scope (bool is_function_expression)
 {
-  scopes_tree func_scope = serializer_get_scope ();
+  scopes_tree func_scope = dumper_get_scope ();
   JERRY_ASSERT (func_scope != NULL && func_scope->type == SCOPE_TYPE_FUNCTION);
 
   scopes_tree parent_scope = (scopes_tree) func_scope->t.parent;
@@ -682,11 +689,11 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 
   rewrite_function_end (function_end_pos);
 
-  serializer_set_scope (parent_scope);
+  dumper_set_scope (parent_scope);
 
   if (is_function_expression)
   {
-    serializer_dump_subscope (func_scope);
+    scopes_tree_merge_subscope (dumper_get_scope (), func_scope);
     scopes_tree_free (func_scope);
   }
 }
@@ -1130,7 +1137,7 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
 {
   JERRY_ASSERT (state_p->state == JSP_STATE_SOURCE_ELEMENTS);
 
-  scopes_tree fe_scope_tree = serializer_get_scope ();
+  scopes_tree fe_scope_tree = dumper_get_scope ();
 
   /*
    * We don't try to perform replacement of local variables with registers for global code, eval code.
@@ -1473,9 +1480,10 @@ while (0)
  * Parse source element list
  */
 static void __attr_noinline___
-jsp_parse_source_element_list (void)
+jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 {
   jsp_stack_init ();
+  dumper_set_generate_bytecode (parse_mode == DUMP);
 
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
   jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
@@ -1545,7 +1553,7 @@ jsp_parse_source_element_list (void)
 
     if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
     {
-      scope_type_t scope_type = serializer_get_scope ()->type;
+      scope_type_t scope_type = dumper_get_scope ()->type;
 
       dumper_new_scope (&state_p->u.source_elements.saved_reg_next,
                         &state_p->u.source_elements.saved_reg_max_for_temps);
@@ -1562,7 +1570,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
     {
-      scope_type_t scope_type = serializer_get_scope ()->type;
+      scope_type_t scope_type = dumper_get_scope ()->type;
 
       jsp_token_type_t end_token_type = (scope_type == SCOPE_TYPE_FUNCTION) ? TOK_CLOSE_BRACE : TOK_EOF;
 
@@ -1570,7 +1578,7 @@ jsp_parse_source_element_list (void)
       {
         opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
 
-        scopes_tree fe_scope_tree = serializer_get_scope ();
+        scopes_tree fe_scope_tree = dumper_get_scope ();
         if (fe_scope_tree->strict_mode)
         {
           scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
@@ -1624,7 +1632,7 @@ jsp_parse_source_element_list (void)
 
         if (tt == TOK_KW_DELETE)
         {
-          scopes_tree_set_contains_delete (serializer_get_scope ());
+          scopes_tree_set_contains_delete (dumper_get_scope ());
         }
 
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
@@ -1686,11 +1694,11 @@ jsp_parse_source_element_list (void)
           {
             if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "arguments"))
             {
-              scopes_tree_set_arguments_used (serializer_get_scope ());
+              scopes_tree_set_arguments_used (dumper_get_scope ());
             }
             if (lit_literal_equal_type_cstr (lit_get_literal_by_cp (token_data_as_lit_cp ()), "eval"))
             {
-              scopes_tree_set_eval_used (serializer_get_scope ());
+              scopes_tree_set_eval_used (dumper_get_scope ());
             }
 
             state_p->u.expression.operand = jsp_operand_t::make_identifier_operand (token_data_as_lit_cp ());
@@ -3243,12 +3251,13 @@ jsp_parse_source_element_list (void)
             /* end of LogicalAndExpression */
             JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
-            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
+            vm_instr_counter_t target_oc = dumper_get_current_instr_counter ();
 
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
             while (*rewrite_chain_p != MAX_OPCODES)
             {
-              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                             target_oc);
             }
 
             state_p->is_complex_production = false;
@@ -3357,12 +3366,13 @@ jsp_parse_source_element_list (void)
             /* end of LogicalOrExpression */
             JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
-            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
+            vm_instr_counter_t target_oc = dumper_get_current_instr_counter ();
 
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
             while (*rewrite_chain_p != MAX_OPCODES)
             {
-              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                             target_oc);
             }
 
             state_p->is_complex_production = false;
@@ -3730,7 +3740,7 @@ jsp_parse_source_element_list (void)
       }
       else if (token_is (TOK_KW_RETURN))
       {
-        if (serializer_get_scope ()->type != SCOPE_TYPE_FUNCTION)
+        if (dumper_get_scope ()->type != SCOPE_TYPE_FUNCTION)
         {
           EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Return is illegal");
         }
@@ -3754,7 +3764,7 @@ jsp_parse_source_element_list (void)
       {
         skip_token ();
 
-        scopes_tree_set_contains_try (serializer_get_scope ());
+        scopes_tree_set_contains_try (dumper_get_scope ());
 
         state_p->u.statement.u.try_statement.try_pos = dump_try_for_rewrite ();
 
@@ -3884,7 +3894,7 @@ jsp_parse_source_element_list (void)
 
       jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
 
-      if (!scopes_tree_variable_declaration_exists (serializer_get_scope (), lit_cp))
+      if (!scopes_tree_variable_declaration_exists (dumper_get_scope (), lit_cp))
       {
         dump_variable_declaration (lit_cp);
       }
@@ -3931,7 +3941,7 @@ jsp_parse_source_element_list (void)
         skip_token ();
 
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+        state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
         parse_expression_inside_parens_begin ();
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
@@ -3953,7 +3963,7 @@ jsp_parse_source_element_list (void)
       else
       {
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+        state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
         rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_while.jump_to_end_pos);
 
@@ -4011,7 +4021,7 @@ jsp_parse_source_element_list (void)
 
         // Setup ContinueTarget
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+        state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
         // Increment
         seek_token (state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc);
@@ -4094,7 +4104,7 @@ jsp_parse_source_element_list (void)
 
         jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
 
-        if (!scopes_tree_variable_declaration_exists (serializer_get_scope (), lit_cp))
+        if (!scopes_tree_variable_declaration_exists (dumper_get_scope (), lit_cp))
         {
           dump_variable_declaration (lit_cp);
         }
@@ -4159,7 +4169,7 @@ jsp_parse_source_element_list (void)
 
       // Setup ContinueTarget
       JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-      state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+      state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
       // Write position of for-in end to for_in instruction
       rewrite_for_in (state_p->u.statement.u.iterational.u.loop_for_in.header_pos);
@@ -4466,7 +4476,7 @@ jsp_parse_source_element_list (void)
         parse_expression_inside_parens_end();
         const jsp_operand_t expr = subexpr_operand;
 
-        scopes_tree_set_contains_with (serializer_get_scope ());
+        scopes_tree_set_contains_with (dumper_get_scope ());
 
         state_p->is_simply_jumpable_border = true;
 
@@ -4500,7 +4510,7 @@ jsp_parse_source_element_list (void)
                                                   subexpr_prop_name_operand,
                                                   is_subexpr_value_based_reference);
 
-      if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL)
+      if (dumper_get_scope ()->type == SCOPE_TYPE_EVAL)
       {
         dump_variable_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET),
                                   expr);
@@ -4540,11 +4550,12 @@ jsp_parse_source_element_list (void)
       JERRY_ASSERT (!state_p->is_completed);
 
       vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.breaks_rewrite_chain;
-      vm_instr_counter_t break_tgt_oc = serializer_get_current_instr_counter ();
+      vm_instr_counter_t break_tgt_oc = dumper_get_current_instr_counter ();
 
       while (*rewrite_chain_p != MAX_OPCODES)
       {
-        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, break_tgt_oc);
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                       break_tgt_oc);
       }
 
       state_p->is_completed = true;
@@ -4566,6 +4577,8 @@ skip_case_clause_body (void)
     skip_token ();
   }
 }
+
+
 
 /**
  * Parse program
@@ -4601,12 +4614,11 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
   jsp_mm_init ();
 
-  serializer_set_show_instrs (parser_show_instrs);
-  dumper_init ();
+  dumper_init (parser_show_instrs);
   jsp_early_error_init ();
 
   scopes_tree scope = scopes_tree_init (NULL, scope_type);
-  serializer_set_scope (scope);
+  dumper_set_scope (scope);
   scopes_tree_set_strict_mode (scope, is_strict);
 
   jmp_buf *jsp_early_error_label_p = jsp_early_error_get_early_error_longjmp_label ();
@@ -4624,7 +4636,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_parse_directive_prologue ();
 
-    jsp_parse_source_element_list ();
+    // jsp_parse_source_element_list (PREPARSE);
+    jsp_parse_source_element_list (DUMP);
 
     JERRY_ASSERT (token_is (TOK_EOF));
 
@@ -4643,7 +4656,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_early_error_free ();
 
-    *out_bytecode_data_p = serializer_merge_scopes_into_bytecode ();
+    *out_bytecode_data_p = bc_merge_scopes_into_bytecode (dumper_get_scope (),
+                                                          parser_show_instrs);
 
     dumper_free ();
 
@@ -4652,7 +4666,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
       *out_contains_functions_p = scope->contains_functions;
     }
 
-    serializer_set_scope (NULL);
+    dumper_set_scope (NULL);
     scopes_tree_free (scope);
 
     status = JSP_STATUS_OK;

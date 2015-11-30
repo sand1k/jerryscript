@@ -18,6 +18,8 @@
 
 #include "opcodes.h"
 #include "mem-allocator.h"
+#include "lit-id-hash-table.h"
+#include "scopes-tree.h"
 
 /*
  * All literals are kept in the 'literals' array.
@@ -45,5 +47,43 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
                                   *   See also: lit_id_hash_table_init */
   mem_cpointer_t next_header_cp; /**< pointer to next instructions data header */
 } bytecode_data_header_t;
+
+
+bytecode_data_header_t * bc_get_first_bytecode_data_header ();
+
+void bc_add_bytecode_data (bytecode_data_header_t *,
+                           lit_id_hash_table *,
+                           vm_instr_t *,
+                           vm_instr_counter_t);
+
+void bc_remove_bytecode_data (const bytecode_data_header_t *);
+
+vm_instr_t bc_get_instr (const bytecode_data_header_t *,
+                         vm_instr_counter_t);
+
+void bc_print_instrs (const bytecode_data_header_t *bytecode_data_p);
+
+const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
+
+void bc_finalize ();
+
+lit_cpointer_t
+bc_get_literal_cp_by_uid (uint8_t,
+                          const bytecode_data_header_t *,
+                          vm_instr_counter_t);
+
+
+#ifdef JERRY_ENABLE_SNAPSHOT
+/*
+ * Snapshot-related
+ */
+bool bc_save_bytecode_with_idx_map (uint8_t *, size_t, size_t *, const bytecode_data_header_t *,
+                                    const lit_mem_to_snapshot_id_map_entry_t *, uint32_t,
+                                    uint32_t *, uint32_t *);
+
+const bytecode_data_header_t *
+bc_load_bytecode_with_idx_map (const uint8_t *, uint32_t, uint32_t,
+                               const lit_mem_to_snapshot_id_map_entry_t *, uint32_t, bool);
+#endif /* JERRY_ENABLE_SNAPSHOT */
 
 #endif /* BYTECODE_DATA_H */

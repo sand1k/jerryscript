@@ -20,7 +20,6 @@
 #include "lexer.h"
 #include "opcodes.h"
 #include "scopes-tree.h"
-#include "serializer.h"
 
 /**
  * Operand (descriptor of value or reference in context of parser)
@@ -348,8 +347,13 @@ jsp_operand_t literal_operand (lit_cpointer_t);
 jsp_operand_t tmp_operand (void);
 bool operand_is_empty (jsp_operand_t);
 
-void dumper_init (void);
+void dumper_init (bool);
 void dumper_free (void);
+void dumper_set_generate_bytecode (bool);
+
+scopes_tree dumper_get_scope (void);
+void dumper_set_scope (scopes_tree scope_p);
+vm_instr_counter_t dumper_get_current_instr_counter (void);
 
 void dumper_start_move_of_vars_to_regs ();
 bool dumper_start_move_of_args_to_regs (uint32_t args_num);
