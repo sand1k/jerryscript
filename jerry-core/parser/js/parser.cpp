@@ -806,13 +806,16 @@ typedef struct
           {
             struct loop_for_in
             {
-              locus iterator_expr_loc;
-              locus body_loc;
+              union u
+              {
+                locus iterator_expr_loc;
+                locus body_loc;
+              } u;
 
               jsp_operand_t iterator;
               vm_instr_counter_t header_pos;
             } loop_for_in;
-            static_assert (sizeof (loop_for_in) == 16, "Please, update size if changed");
+            static_assert (sizeof (loop_for_in) == 12, "Please, update size if changed");
 
             struct loop_while
             {
@@ -852,12 +855,12 @@ typedef struct
             } loop_for;
             static_assert (sizeof (loop_for) == 12, "Please, update size if changed");
           } u;
-          static_assert (sizeof (u) == 16, "Please, update size if changed");
+          static_assert (sizeof (u) == 12, "Please, update size if changed");
 
           vm_instr_counter_t continues_rewrite_chain;
           vm_instr_counter_t continue_tgt_oc;
         } iterational;
-        static_assert (sizeof (iterational) == 20, "Please, update size if changed");
+        static_assert (sizeof (iterational) == 16, "Please, update size if changed");
 
         struct if_statement
         {
@@ -891,11 +894,11 @@ typedef struct
         } try_statement;
         static_assert (sizeof (try_statement) == 6, "Please, update size if changed");
       } u;
-      static_assert (sizeof (u) == 20, "Please, update size if changed");
+      static_assert (sizeof (u) == 16, "Please, update size if changed");
 
       vm_instr_counter_t breaks_rewrite_chain;
     } statement;
-    static_assert (sizeof (statement) == 24, "Please, update size if changed");
+    static_assert (sizeof (statement) == 20, "Please, update size if changed");
 
     struct named_label
     {
@@ -913,10 +916,10 @@ typedef struct
     } source_elements;
     static_assert (sizeof (source_elements) == 6, "Please, update size if changed");
   } u;
-  static_assert (sizeof (u) == 24, "Please, update size if changed");
+  static_assert (sizeof (u) == 20, "Please, update size if changed");
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 28, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -3284,12 +3287,10 @@ jsp_parse_source_element_list (void)
           }
           else
           {
-            state_p->u.statement.u.iterational.u.loop_for_in.body_loc = for_body_statement_loc;
-
             current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
 
             // Save Iterator location
-            state_p->u.statement.u.iterational.u.loop_for_in.iterator_expr_loc = tok.loc;
+            state_p->u.statement.u.iterational.u.loop_for_in.u.iterator_expr_loc = tok.loc;
 
             while (lit_utf8_iterator_pos_cmp (tok.loc, for_body_statement_loc) < 0)
             {
@@ -3761,12 +3762,14 @@ jsp_parse_source_element_list (void)
 
       current_token_must_be_check_and_skip_it (TOK_CLOSE_PAREN);
 
+      locus body_loc = tok.loc;
+
       // Dump for-in instruction
       collection = dump_assignment_of_lhs_if_value_based_reference (collection);
       state_p->u.statement.u.iterational.u.loop_for_in.header_pos = dump_for_in_for_rewrite (collection);
 
       // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
-      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.iterator_expr_loc);
+      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.u.iterator_expr_loc);
 
       if (token_is (TOK_KW_VAR))
       {
@@ -3803,6 +3806,9 @@ jsp_parse_source_element_list (void)
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LEFTHANDSIDE, true);
       }
 
+      // Body
+      state_p->u.statement.u.iterational.u.loop_for_in.u.body_loc = body_loc;
+
       state_p->state = JSP_STATE_STAT_FOR_IN_EXPR;
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_IN_EXPR)
@@ -3825,10 +3831,9 @@ jsp_parse_source_element_list (void)
         dump_variable_assignment (iterator, for_in_special_reg);
       }
 
-      // Body
-      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.body_loc);
-
       state_p->is_simply_jumpable_border = true;
+
+      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.u.body_loc);
 
       JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_IN_FINISH);
     }
