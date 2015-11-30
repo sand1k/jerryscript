@@ -18,6 +18,7 @@
 
 #include "opcodes.h"
 #include "mem-allocator.h"
+#include "lit-id-hash-table.h"
 
 /*
  * All literals are kept in the 'literals' array.
@@ -45,5 +46,20 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
                                   *   See also: lit_id_hash_table_init */
   mem_cpointer_t next_header_cp; /**< pointer to next instructions data header */
 } bytecode_data_header_t;
+
+
+
+void jsp_bc_init ();
+
+bytecode_data_header_t * jsp_bc_get_first_bytecode_data_header ();
+
+void jsp_bc_add_bytecode_data (bytecode_data_header_t *,
+                               lit_id_hash_table *,
+                               vm_instr_t *,
+                               vm_instr_counter_t);
+
+void jsp_bc_remove_bytecode_data (const bytecode_data_header_t *);
+
+void jsp_bc_finalize ();
 
 #endif /* BYTECODE_DATA_H */

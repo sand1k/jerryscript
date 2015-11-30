@@ -20,7 +20,6 @@
 #include "array-list.h"
 #include "scopes-tree.h"
 
-static bytecode_data_header_t *first_bytecode_header_p;
 static scopes_tree current_scope;
 static bool print_instrs;
 
@@ -70,15 +69,10 @@ serializer_get_literal_cp_by_uid (uint8_t id, /**< literal idx */
                                   const bytecode_data_header_t *bytecode_data_p, /**< pointer to bytecode */
                                   vm_instr_counter_t oc) /**< position in the bytecode */
 {
+  JERRY_ASSERT (bytecode_data_p);
+
   lit_id_hash_table *lit_id_hash = null_hash;
-  if (bytecode_data_p)
-  {
-    lit_id_hash = MEM_CP_GET_POINTER (lit_id_hash_table, bytecode_data_p->lit_id_hash_cp);
-  }
-  else
-  {
-    lit_id_hash = MEM_CP_GET_POINTER (lit_id_hash_table, first_bytecode_header_p->lit_id_hash_cp);
-  }
+  lit_id_hash = MEM_CP_GET_POINTER (lit_id_hash_table, bytecode_data_p->lit_id_hash_cp);
 
   if (lit_id_hash == null_hash)
   {
@@ -181,12 +175,8 @@ serializer_merge_scopes_into_bytecode (void)
                                                  lit_id_hash);
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
-  MEM_CP_SET_POINTER (header_p->lit_id_hash_cp, lit_id_hash);
-  header_p->instrs_p = bytecode_p;
-  header_p->instrs_count = instrs_count;
-  MEM_CP_SET_POINTER (header_p->next_header_cp, first_bytecode_header_p);
 
-  first_bytecode_header_p = header_p;
+  jsp_bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count);
 
   if (print_instrs)
   {
@@ -282,8 +272,7 @@ serializer_init ()
   current_scope = NULL;
   print_instrs = false;
 
-  first_bytecode_header_p = NULL;
-
+  jsp_bc_init ();
   lit_init ();
 }
 
@@ -292,49 +281,11 @@ void serializer_set_show_instrs (bool show_instrs)
   print_instrs = show_instrs;
 }
 
-/**
- * Deletes bytecode and associated hash table
- */
-void
-serializer_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p) /**< pointer to bytecode data which
-                                                                                 * should be deleted */
-{
-  bytecode_data_header_t *prev_header = NULL;
-  bytecode_data_header_t *cur_header_p = first_bytecode_header_p;
-
-  while (cur_header_p != NULL)
-  {
-    if (cur_header_p == bytecode_data_p)
-    {
-      if (prev_header)
-      {
-        prev_header->next_header_cp = cur_header_p->next_header_cp;
-      }
-      else
-      {
-        first_bytecode_header_p = MEM_CP_GET_POINTER (bytecode_data_header_t, cur_header_p->next_header_cp);
-      }
-      mem_heap_free_block (cur_header_p);
-      break;
-    }
-
-    prev_header = cur_header_p;
-    cur_header_p = MEM_CP_GET_POINTER (bytecode_data_header_t, cur_header_p->next_header_cp);
-  }
-} /* serializer_remove_instructions */
-
 void
 serializer_free (void)
 {
   lit_finalize ();
-
-  while (first_bytecode_header_p != NULL)
-  {
-    bytecode_data_header_t *header_p = first_bytecode_header_p;
-    first_bytecode_header_p = MEM_CP_GET_POINTER (bytecode_data_header_t, header_p->next_header_cp);
-
-    mem_heap_free_block (header_p);
-  }
+  jsp_bc_finalize ();
 }
 
 #ifdef JERRY_ENABLE_SNAPSHOT
@@ -468,12 +419,10 @@ serializer_load_bytecode_with_idx_map (const uint8_t *bytecode_and_idx_map_p, /*
                                             hash_table_size)
       && (vm_instr_counter_t) instructions_number == instructions_number)
   {
-    MEM_CP_SET_NON_NULL_POINTER (header_p->lit_id_hash_cp, lit_id_hash_table_buffer_p);
-    header_p->instrs_p = instrs_p;
-    header_p->instrs_count = (vm_instr_counter_t) instructions_number;
-    MEM_CP_SET_POINTER (header_p->next_header_cp, first_bytecode_header_p);
-
-    first_bytecode_header_p = header_p;
+    jsp_bc_add_bytecode_data (header_p,
+                              (lit_id_hash_table *) lit_id_hash_table_buffer_p,
+                              instrs_p,
+                              (vm_instr_counter_t) instructions_number);
 
     return header_p;
   }
