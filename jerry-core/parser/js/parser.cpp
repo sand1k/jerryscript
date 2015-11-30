@@ -166,6 +166,14 @@ rescan_regexp_token (void)
   tok = lexer_next_token (true);
 } /* rescan_regexp_token */
 
+static void
+seek_token (locus loc)
+{
+  lexer_seek (loc);
+
+  skip_token ();
+}
+
 static bool
 is_keyword (jsp_token_type_t tt)
 {
@@ -288,8 +296,7 @@ jsp_find_next_token_before_the_locus (jsp_token_type_t token_to_find, /**< token
 
         if (lit_utf8_iterator_pos_cmp (tok.loc, end_loc) >= 0)
         {
-          lexer_seek (end_loc);
-          tok = lexer_next_token (false);
+          seek_token (end_loc);
 
           return false;
         }
@@ -519,8 +526,7 @@ jsp_parse_directive_prologue ()
     }
   }
 
-  lexer_seek (start_loc);
-  skip_token ();
+  seek_token (start_loc);
 } /* jsp_parse_directive_prologue */
 
 static jsp_operand_t
@@ -586,8 +592,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
   {
     locus body_loc = tok.loc;
 
-    lexer_seek (formal_parameters_list_loc);
-    skip_token ();
+    seek_token (formal_parameters_list_loc);
 
     /* Check duplication of formal parameters names */
     while (!token_is (TOK_CLOSE_PAREN))
@@ -635,8 +640,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
         }
       }
 
-      lexer_seek (current_parameter_loc);
-      skip_token ();
+      seek_token (current_parameter_loc);
 
       JERRY_ASSERT (lit_utf8_iterator_pos_cmp (tok.loc, current_parameter_loc) == 0);
       skip_token ();
@@ -651,8 +655,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
       }
     }
 
-    lexer_seek (body_loc);
-    skip_token ();
+    seek_token (body_loc);
   }
 
   if (out_formal_parameters_num_p != NULL)
@@ -1892,8 +1895,7 @@ jsp_parse_source_element_list (void)
           expr_type = JSP_STATE_EXPR_ACCESSOR_PROP_DECL;
         }
 
-        lexer_seek (start_pos);
-        skip_token ();
+        seek_token (start_pos);
 
         jsp_push_new_expr_state (expr_type, expr_type, true);
       }
@@ -3230,14 +3232,12 @@ jsp_parse_source_element_list (void)
 
           for_body_statement_loc = tok.loc;
 
-          lexer_seek (for_open_paren_loc);
-          tok = lexer_next_token (false);
+          seek_token (for_open_paren_loc);
 
           bool is_plain_for = jsp_find_next_token_before_the_locus (TOK_SEMICOLON,
                                                                     for_body_statement_loc,
                                                                     true);
-          lexer_seek (for_open_paren_loc);
-          tok = lexer_next_token (false);
+          seek_token (for_open_paren_loc);
 
           if (is_plain_for)
           {
@@ -3322,8 +3322,8 @@ jsp_parse_source_element_list (void)
         }
         else
         {
-          lexer_seek (temp.loc);
-          skip_token ();
+          seek_token (temp.loc);
+
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
 
           state_p->state = JSP_STATE_STAT_EXPRESSION;
@@ -3564,8 +3564,7 @@ jsp_parse_source_element_list (void)
 
       if (token_is (TOK_EQ))
       {
-        lexer_seek (name_loc);
-        skip_token ();
+        seek_token (name_loc);
 
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
       }
@@ -3620,8 +3619,7 @@ jsp_parse_source_element_list (void)
         const jsp_operand_t cond = subexpr_operand;
         dump_continue_iterations_check (state_p->u.statement.u.iterational.u.loop_while.next_iter_tgt_pos, cond);
 
-        lexer_seek (state_p->u.statement.u.iterational.u.loop_while.u.end_loc);
-        skip_token ();
+        seek_token (state_p->u.statement.u.iterational.u.loop_while.u.end_loc);
 
         state_p->state = JSP_STATE_STAT_ITER_FINISH;
       }
@@ -3634,8 +3632,7 @@ jsp_parse_source_element_list (void)
 
         const locus end_loc = tok.loc;
 
-        lexer_seek (state_p->u.statement.u.iterational.u.loop_while.u.cond_expr_start_loc);
-        skip_token ();
+        seek_token (state_p->u.statement.u.iterational.u.loop_while.u.cond_expr_start_loc);
 
         state_p->u.statement.u.iterational.u.loop_while.u.end_loc = end_loc;
 
@@ -3670,8 +3667,7 @@ jsp_parse_source_element_list (void)
       state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc = tok.loc;
 
       // Body
-      lexer_seek (for_body_statement_loc);
-      skip_token ();
+      seek_token (for_body_statement_loc);
 
       JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_FOR_INCREMENT);
     }
@@ -3691,9 +3687,9 @@ jsp_parse_source_element_list (void)
         state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
         // Increment
-        lexer_seek (state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc);
+        seek_token (state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc);
+
         state_p->u.statement.u.iterational.u.loop_for.u2.end_loc = loop_end_loc;
-        skip_token ();
 
         if (!token_is (TOK_CLOSE_PAREN))
         {
@@ -3722,8 +3718,7 @@ jsp_parse_source_element_list (void)
         rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_for.jump_to_end_pos);
 
         // Condition
-        lexer_seek (state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc);
-        skip_token ();
+        seek_token (state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc);
 
         if (token_is (TOK_SEMICOLON))
         {
@@ -3738,8 +3733,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_FINISH)
     {
-      lexer_seek (state_p->u.statement.u.iterational.u.loop_for.u2.end_loc);
-      skip_token ();
+      seek_token (state_p->u.statement.u.iterational.u.loop_for.u2.end_loc);
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
     }
@@ -3754,8 +3748,7 @@ jsp_parse_source_element_list (void)
       state_p->u.statement.u.iterational.u.loop_for_in.header_pos = dump_for_in_for_rewrite (collection);
 
       // Dump assignment VariableDeclarationNoIn / LeftHandSideExpression <- VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME
-      lexer_seek (state_p->u.statement.u.iterational.u.loop_for_in.iterator_expr_loc);
-      tok = lexer_next_token (false);
+      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.iterator_expr_loc);
 
       if (token_is (TOK_KW_VAR))
       {
@@ -3779,8 +3772,7 @@ jsp_parse_source_element_list (void)
 
         if (token_is (TOK_EQ))
         {
-          lexer_seek (name_loc);
-          skip_token ();
+          seek_token (name_loc);
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, false);
         }
@@ -3816,8 +3808,7 @@ jsp_parse_source_element_list (void)
       }
 
       // Body
-      lexer_seek (state_p->u.statement.u.iterational.u.loop_for_in.body_loc);
-      tok = lexer_next_token (false);
+      seek_token (state_p->u.statement.u.iterational.u.loop_for_in.body_loc);
 
       state_p->is_simply_jumpable_border = true;
 
@@ -3838,8 +3829,7 @@ jsp_parse_source_element_list (void)
       // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
       dump_for_in_end ();
 
-      lexer_seek (loop_end_loc);
-      tok = lexer_next_token (false);
+      seek_token (loop_end_loc);
 
       state_p->state = JSP_STATE_STAT_ITER_FINISH;
     }
@@ -3993,8 +3983,7 @@ jsp_parse_source_element_list (void)
           tmp_state_p->u.statement.u.switch_statement.jmp_oc = jmp_oc;
         }
 
-        lexer_seek (start_loc);
-        skip_token ();
+        seek_token (start_loc);
 
         // Second, parse case clauses' bodies and rewrite jumps
         current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
@@ -4002,8 +3991,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_BRANCH)
     {
-      lexer_seek (state_p->u.statement.u.switch_statement.loc);
-      skip_token ();
+      seek_token (state_p->u.statement.u.switch_statement.loc);
 
       if (state_p->is_default_branch)
       {
