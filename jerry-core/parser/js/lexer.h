@@ -264,7 +264,7 @@ typedef struct
 
 void lexer_init (const jerry_api_char_t *, size_t, bool);
 
-token lexer_next_token (bool);
+token lexer_next_token (bool, bool);
 
 void lexer_seek (locus);
 void lexer_locus_to_line_and_column (locus, size_t *, size_t *);
@@ -273,8 +273,6 @@ const char *lexer_token_type_to_string (jsp_token_type_t);
 
 jsp_token_type_t lexer_get_token_type (token);
 bool lexer_is_preceded_by_newlines (token);
-
-void lexer_set_strict_mode (bool);
 
 extern bool lexer_are_tokens_with_same_identifier (token, token);
 

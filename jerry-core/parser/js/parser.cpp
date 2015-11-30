@@ -125,6 +125,12 @@ static void jsp_parse_source_element_list (void);
 static void skip_case_clause_body (void);
 
 static bool
+is_strict_mode (void)
+{
+  return scopes_tree_strict_mode (serializer_get_scope ());
+}
+
+static bool
 token_is (jsp_token_type_t tt)
 {
   return (lexer_get_token_type (tok) == tt);
@@ -153,7 +159,7 @@ token_data_as_lit_cp (void)
 static void
 skip_token (void)
 {
-  tok = lexer_next_token (false);
+  tok = lexer_next_token (false, is_strict_mode ());
 }
 
 /**
@@ -163,7 +169,7 @@ static void
 rescan_regexp_token (void)
 {
   lexer_seek (tok.loc);
-  tok = lexer_next_token (true);
+  tok = lexer_next_token (true, is_strict_mode ());
 } /* rescan_regexp_token */
 
 static void
@@ -208,12 +214,6 @@ current_token_must_be (jsp_token_type_t tt)
   {
     EMIT_ERROR_VARG (JSP_EARLY_ERROR_SYNTAX, "Expected '%s' token", lexer_token_type_to_string (tt));
   }
-}
-
-static bool
-is_strict_mode (void)
-{
-  return scopes_tree_strict_mode (serializer_get_scope ());
 }
 
 /**
@@ -514,7 +514,6 @@ jsp_parse_directive_prologue ()
         && lexer_is_no_escape_sequences_in_token_string (tok))
     {
       scopes_tree_set_strict_mode (serializer_get_scope (), true);
-      lexer_set_strict_mode (scopes_tree_strict_mode (serializer_get_scope ()));
       break;
     }
 
@@ -541,7 +540,6 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   serializer_set_scope (func_scope);
   scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
-  lexer_set_strict_mode (scopes_tree_strict_mode (func_scope));
 
   /* parse formal parameters list */
   size_t formal_parameters_num = 0;
@@ -723,8 +721,6 @@ jsp_finish_parse_function_scope (bool is_function_expression)
     serializer_dump_subscope (func_scope);
     scopes_tree_free (func_scope);
   }
-
-  lexer_set_strict_mode (scopes_tree_strict_mode (parent_scope));
 }
 
 typedef struct
@@ -4270,7 +4266,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
      *      Operations that could raise an early error can be performed only during execution of the block.
      */
     lexer_init (source_p, source_size, parser_show_instrs);
-    lexer_set_strict_mode (scopes_tree_strict_mode (scope));
 
     skip_token ();
 

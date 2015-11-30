@@ -1533,8 +1533,11 @@ lexer_parse_token (bool maybe_regexp, /**< read '/' as regexp? */
 } /* lexer_parse_token */
 
 token
-lexer_next_token (bool maybe_regexp) /**< read '/' as regexp? */
+lexer_next_token (bool maybe_regexp, /**< read '/' as regexp? */
+                  bool is_strict) /**< strict mode is on (true) / off (false) */
 {
+  strict_mode = is_strict;
+
   lit_utf8_iterator_pos_t src_pos = lit_utf8_iterator_get_pos (&src_iter);
   if (src_pos.offset == 0 && !src_pos.is_non_bmp_middle)
   {
@@ -1817,12 +1820,6 @@ lexer_is_preceded_by_newlines (token t)
   return ((t.flags & JSP_TOKEN_FLAG_PRECEDED_BY_NEWLINES) != 0);
 } /* lexer_is_preceded_by_newlines */
 
-void
-lexer_set_strict_mode (bool is_strict)
-{
-  strict_mode = is_strict;
-}
-
 /**
  * Check whether the identifier tokens represent the same identifiers
  *
@@ -1904,8 +1901,6 @@ lexer_init (const jerry_api_char_t *source, /**< script source */
   buffer_size = source_size;
   buffer_start = source;
   is_token_parse_in_progress = false;
-
-  lexer_set_strict_mode (false);
 
 #ifndef JERRY_NDEBUG
   allow_dump_lines = is_print_source_code;
