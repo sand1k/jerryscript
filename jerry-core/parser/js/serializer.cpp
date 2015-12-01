@@ -82,12 +82,6 @@ serializer_get_literal_cp_by_uid (uint8_t id, /**< literal idx */
   return lit_id_hash_table_lookup (lit_id_hash, id, oc);
 } /* serializer_get_literal_cp_by_uid */
 
-scopes_tree
-serializer_get_scope (void)
-{
-  return current_scope;
-}
-
 void
 serializer_set_scope (scopes_tree new_scope)
 {
