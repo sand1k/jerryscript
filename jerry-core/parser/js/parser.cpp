@@ -4612,7 +4612,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
   jsp_mm_init ();
 
   serializer_set_show_instrs (parser_show_instrs);
-  dumper_init ();
+  dumper_init (parser_show_instrs);
   jsp_early_error_init ();
 
   scopes_tree scope = scopes_tree_init (NULL, scope_type);

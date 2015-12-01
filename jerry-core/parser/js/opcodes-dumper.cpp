@@ -16,6 +16,7 @@
 #include "jsp-early-error.h"
 #include "opcodes-dumper.h"
 #include "serializer.h"
+#include "pretty-printer.h"
 
 /**
  * Register allocator's counter
@@ -58,6 +59,8 @@ static vm_idx_t jsp_reg_max_for_local_var;
  */
 static vm_idx_t jsp_reg_max_for_args;
 
+bool is_print_instrs = false;
+
 /**
  * Allocate next register for intermediate value
  *
@@ -87,6 +90,21 @@ jsp_alloc_reg_for_temp (void)
 
   return next_reg;
 } /* jsp_alloc_reg_for_temp */
+
+void
+dumper_rewrite_op_meta (scopes_tree current_scope_p,
+                        const vm_instr_counter_t loc,
+                        op_meta op)
+{
+  scopes_tree_set_op_meta (current_scope_p, loc, op);
+
+#ifdef JERRY_ENABLE_PRETTY_PRINTER
+  if (is_print_instrs)
+  {
+    pp_op_meta (NULL, loc, op, true);
+  }
+#endif
+} /* dumper_rewrite_op_meta */
 
 #ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
 /**
@@ -784,7 +802,7 @@ rewrite_varg_header_set_args_count (scopes_tree current_scope_p,
       }
       om.op.data.func_expr_n.arg_list = (vm_idx_t) args_count;
       om.op.data.func_expr_n.lhs = ret.get_idx ();
-      serializer_rewrite_op_meta (pos, om);
+      dumper_rewrite_op_meta (current_scope_p, pos, om);
       break;
     }
     case VM_OP_FUNC_DECL_N:
@@ -796,7 +814,7 @@ rewrite_varg_header_set_args_count (scopes_tree current_scope_p,
                      LIT_ITERATOR_POS_ZERO);
       }
       om.op.data.func_decl_n.arg_list = (vm_idx_t) args_count;
-      serializer_rewrite_op_meta (pos, om);
+      dumper_rewrite_op_meta (current_scope_p, pos, om);
       JERRY_ASSERT (ret.is_empty_operand ());
       break;
     }
@@ -812,7 +830,7 @@ rewrite_varg_header_set_args_count (scopes_tree current_scope_p,
       om.op.data.obj_decl.list_1 = (vm_idx_t) (args_count >> 8);
       om.op.data.obj_decl.list_2 = (vm_idx_t) (args_count & 0xffu);
       om.op.data.obj_decl.lhs = ret.get_idx ();
-      serializer_rewrite_op_meta (pos, om);
+      dumper_rewrite_op_meta (current_scope_p, pos, om);
       break;
     }
     default:
@@ -946,7 +964,7 @@ rewrite_function_end (scopes_tree current_scope_p,
   function_end_op_meta.op.data.meta.data_1 = id1;
   function_end_op_meta.op.data.meta.data_2 = id2;
 
-  serializer_rewrite_op_meta (pos, function_end_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, pos, function_end_op_meta);
 }
 
 void
@@ -1174,7 +1192,7 @@ rewrite_conditional_check (scopes_tree current_scope_p,
   jmp_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
   jmp_op_meta.op.data.is_false_jmp_down.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (pos, jmp_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, pos, jmp_op_meta);
 }
 
 vm_instr_counter_t
@@ -1202,7 +1220,7 @@ rewrite_jump_to_end (scopes_tree current_scope_p,
   jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
   jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (pos, jmp_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, pos, jmp_op_meta);
 }
 
 vm_instr_counter_t
@@ -1358,7 +1376,7 @@ rewrite_simple_or_nested_jump_and_get_next (scopes_tree current_scope_p,
     jump_op_meta.op.data.jmp_break_continue.oc_idx_2 = id2;
   }
 
-  serializer_rewrite_op_meta (jump_oc, jump_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, jump_oc, jump_op_meta);
 
   return vm_calc_instr_counter_from_idx_idx (id1_prev, id2_prev);
 } /* rewrite_simple_or_nested_jump_get_next */
@@ -1406,7 +1424,7 @@ rewrite_case_clause (scopes_tree current_scope_p,
   jmp_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
   jmp_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (jmp_oc, jmp_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, jmp_oc, jmp_op_meta);
 }
 
 void
@@ -1422,7 +1440,7 @@ rewrite_default_clause (scopes_tree current_scope_p,
   jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
   jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (jmp_oc, jmp_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, jmp_oc, jmp_op_meta);
 }
 
 void
@@ -1468,7 +1486,7 @@ rewrite_with (scopes_tree current_scope_p,
   with_op_meta.op.data.with.oc_idx_1 = id1;
   with_op_meta.op.data.with.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (oc, with_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, oc, with_op_meta);
 } /* rewrite_with */
 
 /**
@@ -1521,7 +1539,7 @@ rewrite_for_in (scopes_tree current_scope_p,
   for_in_op_meta.op.data.for_in.oc_idx_1 = id1;
   for_in_op_meta.op.data.for_in.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (oc, for_in_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, oc, for_in_op_meta);
 } /* rewrite_for_in */
 
 /**
@@ -1561,7 +1579,7 @@ rewrite_try (scopes_tree current_scope_p,
   try_op_meta.op.data.try_block.oc_idx_1 = id1;
   try_op_meta.op.data.try_block.oc_idx_2 = id2;
 
-  serializer_rewrite_op_meta (pos, try_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, pos, try_op_meta);
 }
 
 vm_instr_counter_t
@@ -1598,7 +1616,7 @@ rewrite_catch (scopes_tree current_scope_p,
   catch_op_meta.op.data.meta.data_1 = id1;
   catch_op_meta.op.data.meta.data_2 = id2;
 
-  serializer_rewrite_op_meta (pos, catch_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, pos, catch_op_meta);
 }
 
 vm_instr_counter_t
@@ -1628,7 +1646,7 @@ rewrite_finally (scopes_tree current_scope_p,
   finally_op_meta.op.data.meta.data_1 = id1;
   finally_op_meta.op.data.meta.data_2 = id2;
 
-  serializer_rewrite_op_meta (pos, finally_op_meta);
+  dumper_rewrite_op_meta (current_scope_p, pos, finally_op_meta);
 }
 
 void
@@ -1695,7 +1713,7 @@ rewrite_scope_code_flags (scopes_tree current_scope_p,
   JERRY_ASSERT (opm.op.data.meta.data_2 == VM_IDX_EMPTY);
 
   opm.op.data.meta.data_1 = (vm_idx_t) scope_flags;
-  serializer_rewrite_op_meta (scope_code_flags_oc, opm);
+  dumper_rewrite_op_meta (current_scope_p, scope_code_flags_oc, opm);
 } /* rewrite_scope_code_flags */
 
 void
@@ -1766,7 +1784,7 @@ rewrite_reg_var_decl (scopes_tree current_scope_p,
     opm.op.data.reg_var_decl.arg_regs_num = 0;
   }
 
-  serializer_rewrite_op_meta (reg_var_decl_oc, opm);
+  dumper_rewrite_op_meta (current_scope_p, reg_var_decl_oc, opm);
 } /* rewrite_reg_var_decl */
 
 void
@@ -1776,8 +1794,10 @@ dump_retval (jsp_operand_t op)
 }
 
 void
-dumper_init (void)
+dumper_init (bool show_instrs)
 {
+  is_print_instrs = show_instrs;
+
   jsp_reg_next = VM_REG_GENERAL_FIRST;
   jsp_reg_max_for_temps = VM_REG_GENERAL_FIRST;
   jsp_reg_max_for_local_var = VM_IDX_EMPTY;

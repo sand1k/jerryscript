@@ -348,8 +348,10 @@ jsp_operand_t literal_operand (lit_cpointer_t);
 jsp_operand_t tmp_operand (void);
 bool operand_is_empty (jsp_operand_t);
 
-void dumper_init (void);
+void dumper_init (bool);
 void dumper_free (void);
+
+void dumper_rewrite_op_meta (scopes_tree, vm_instr_counter_t, op_meta);
 
 void dumper_start_move_of_vars_to_regs ();
 bool dumper_start_move_of_args_to_regs (uint32_t args_num);
