@@ -197,19 +197,6 @@ serializer_set_writing_position (vm_instr_counter_t oc)
   scopes_tree_set_instrs_num (current_scope, oc);
 }
 
-void
-serializer_rewrite_op_meta (const vm_instr_counter_t loc, op_meta op)
-{
-  scopes_tree_set_op_meta (current_scope, loc, op);
-
-#ifdef JERRY_ENABLE_PRETTY_PRINTER
-  if (print_instrs)
-  {
-    pp_op_meta (NULL, loc, op, true);
-  }
-#endif
-}
-
 static void
 serializer_print_instrs (const bytecode_data_header_t *bytecode_data_p)
 {

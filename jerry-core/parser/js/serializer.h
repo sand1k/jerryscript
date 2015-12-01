@@ -35,7 +35,6 @@ void serializer_dump_var_decl (op_meta);
 vm_instr_counter_t serializer_get_current_instr_counter (void);
 vm_instr_counter_t serializer_count_instrs_in_subscopes (void);
 void serializer_set_writing_position (vm_instr_counter_t);
-void serializer_rewrite_op_meta (vm_instr_counter_t, op_meta);
 void serializer_remove_bytecode_data (const bytecode_data_header_t *);
 void serializer_free (void);
 
