@@ -1689,7 +1689,12 @@ void
 dump_variable_declaration (lit_cpointer_t lit_id) /**< literal which holds variable's name */
 {
   jsp_operand_t op_var_name = jsp_operand_t::make_lit_operand (lit_id);
-  serializer_dump_var_decl (jsp_dmp_create_op_meta (VM_OP_VAR_DECL, &op_var_name, 1));
+  op_meta op = jsp_dmp_create_op_meta (VM_OP_VAR_DECL, &op_var_name, 1);
+
+  JERRY_ASSERT (scopes_tree_instrs_num (current_scope_p)
+                + linked_list_get_length (current_scope_p->var_decls) < MAX_OPCODES);
+
+  scopes_tree_add_var_decl (current_scope_p, op);
 } /* dump_variable_declaration */
 
 /**

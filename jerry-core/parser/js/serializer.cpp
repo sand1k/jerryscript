@@ -152,18 +152,6 @@ serializer_merge_scopes_into_bytecode (void)
   return header_p;
 } /* serializer_merge_scopes_into_bytecode */
 
-/**
- * Dump variable declaration into the current scope
- */
-void
-serializer_dump_var_decl (op_meta op) /**< variable declaration instruction */
-{
-  JERRY_ASSERT (scopes_tree_instrs_num (current_scope)
-                + linked_list_get_length (current_scope->var_decls) < MAX_OPCODES);
-
-  scopes_tree_add_var_decl (current_scope, op);
-} /* serializer_dump_var_decl */
-
 vm_instr_counter_t
 serializer_get_current_instr_counter (void)
 {
