@@ -812,10 +812,10 @@ typedef struct
                 locus body_loc;
               } u;
 
-              jsp_operand_t iterator;
+              lit_cpointer_t var_name_lit_cp;
               vm_instr_counter_t header_pos;
             } loop_for_in;
-            static_assert (sizeof (loop_for_in) == 12, "Please, update size if changed");
+            static_assert (sizeof (loop_for_in) == 8, "Please, update size if changed");
 
             struct loop_while
             {
@@ -3798,11 +3798,12 @@ jsp_parse_source_element_list (void)
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, false);
         }
         state_p->is_var_decl_no_in = true;
-        state_p->u.statement.u.iterational.u.loop_for_in.iterator = jsp_operand_t::make_identifier_operand (lit_cp);
+        state_p->u.statement.u.iterational.u.loop_for_in.var_name_lit_cp = lit_cp;
       }
       else
       {
         state_p->is_var_decl_no_in = false;
+        state_p->u.statement.u.iterational.u.loop_for_in.var_name_lit_cp = NOT_A_LITERAL;
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_LEFTHANDSIDE, true);
       }
 
@@ -3813,15 +3814,22 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_FOR_IN_EXPR)
     {
-      if (is_subexpr_end
-          && !state_p->is_var_decl_no_in)
+      jsp_operand_t iterator;
+
+      if (!state_p->is_var_decl_no_in)
       {
-        state_p->u.statement.u.iterational.u.loop_for_in.iterator = subexpr_operand;
+        JERRY_ASSERT (is_subexpr_end);
+
+        iterator = subexpr_operand;
+      }
+      else
+      {
+        lit_cpointer_t var_name_lit_cp = state_p->u.statement.u.iterational.u.loop_for_in.var_name_lit_cp;
+        iterator = jsp_operand_t::make_identifier_operand (var_name_lit_cp);
       }
 
       current_token_must_be (TOK_KW_IN);
 
-      jsp_operand_t iterator = state_p->u.statement.u.iterational.u.loop_for_in.iterator;
       jsp_operand_t for_in_special_reg = jsp_create_operand_for_in_special_reg ();
 
       if (iterator.is_value_based_reference_operand ())
