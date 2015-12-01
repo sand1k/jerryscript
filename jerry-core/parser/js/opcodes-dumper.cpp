@@ -721,47 +721,6 @@ dump_null_assignment (jsp_operand_t op)
 }
 
 void
-dump_assignment (jsp_operand_t res,
-                 jsp_operand_t op)
-{
-  JERRY_ASSERT (res.is_reference_operand ());
-
-  if (res.is_value_based_reference_operand ())
-  {
-    dump_prop_setter (res, op);
-  }
-  else
-  {
-    dump_variable_assignment (res, op);
-  }
-}
-
-void
-dump_compound_assignment (vm_op_t opcode,
-                          jsp_operand_t lhs,
-                          jsp_operand_t reg,
-                          jsp_operand_t op)
-{
-  JERRY_ASSERT (lhs.is_reference_operand ());
-  JERRY_ASSERT (reg.is_register_operand ());
-
-  if (lhs.is_value_based_reference_operand ())
-  {
-    JERRY_ASSERT (lhs.is_evaluated_value_based_reference_operand ());
-
-    dump_prop_getter (reg, lhs);
-
-    dump_triple_address (opcode, reg, reg, op);
-  }
-  else
-  {
-    dump_triple_address (opcode, reg, lhs, op);
-  }
-
-  dump_assignment (lhs, reg);
-}
-
-void
 dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
 {
   jsp_operand_t type_operand;
@@ -978,74 +937,14 @@ dump_prop_setter_decl (jsp_operand_t name, jsp_operand_t func)
 }
 
 void
-dump_prop_getter (jsp_operand_t res, jsp_operand_t obj)
+dump_prop_getter (jsp_operand_t obj, jsp_operand_t base, jsp_operand_t prop_name)
 {
-  JERRY_ASSERT (obj.is_reference_operand () && obj.is_value_based_reference_operand ());
-
-  jsp_operand_t base;
-
-  if (obj.is_evaluated_value_based_reference_operand ())
-  {
-    base = obj.get_value_based_ref_base_value ();
-  }
-  else
-  {
-    base = obj.get_value_based_ref_base_identifier ();
-  }
-
-  jsp_operand_t prop_name = obj.get_value_based_ref_prop_name ();
-
-  if (prop_name.is_literal_operand ())
-  {
-    /*
-     * TODO:
-     *      Introduce VM_OP_PROP_GETTER version that accepts
-     *      literal-represented property name directly,
-     *      without moving it to a register first
-     */
-
-    jsp_operand_t tmp = tmp_operand ();
-    dump_string_assignment (tmp, prop_name.get_literal ());
-
-    prop_name = tmp;
-  }
-
-  dump_triple_address (VM_OP_PROP_GETTER, res, base, prop_name);
+  dump_triple_address (VM_OP_PROP_GETTER, obj, base, prop_name);
 }
 
 void
-dump_prop_setter (jsp_operand_t res, jsp_operand_t obj)
+dump_prop_setter (jsp_operand_t base, jsp_operand_t prop_name, jsp_operand_t obj)
 {
-  JERRY_ASSERT (res.is_reference_operand () && res.is_value_based_reference_operand ());
-
-  jsp_operand_t base;
-
-  if (res.is_evaluated_value_based_reference_operand ())
-  {
-    base = res.get_value_based_ref_base_value ();
-  }
-  else
-  {
-    base = res.get_value_based_ref_base_identifier ();
-  }
-
-  jsp_operand_t prop_name = res.get_value_based_ref_prop_name ();
-
-  if (prop_name.is_literal_operand ())
-  {
-    /*
-     * TODO:
-     *      Introduce VM_OP_PROP_SETTER version that accepts
-     *      literal-represented property name directly,
-     *      without moving it to a register first
-     */
-
-    jsp_operand_t tmp = tmp_operand ();
-    dump_string_assignment (tmp, prop_name.get_literal ());
-
-    prop_name = tmp;
-  }
-
   dump_triple_address (VM_OP_PROP_SETTER, base, prop_name, obj);
 }
 
@@ -1088,94 +987,6 @@ this_operand (void)
 }
 
 void
-dump_post_increment (jsp_operand_t reg,
-                     jsp_operand_t op)
-{
-  JERRY_ASSERT (reg.is_register_operand ());
-  JERRY_ASSERT (op.is_reference_operand ());
-
-  if (op.is_value_based_reference_operand ())
-  {
-    const jsp_operand_t val = tmp_operand ();
-
-    dump_prop_getter (val, op);
-
-    dump_double_address (VM_OP_POST_INCR, reg, val);
-
-    dump_prop_setter (op, val);
-  }
-  else
-  {
-    dump_double_address (VM_OP_POST_INCR, reg, op);
-  }
-}
-
-void
-dump_post_decrement (jsp_operand_t reg,
-                     jsp_operand_t op)
-{
-  JERRY_ASSERT (reg.is_register_operand ());
-  JERRY_ASSERT (op.is_reference_operand ());
-
-  if (op.is_value_based_reference_operand ())
-  {
-    const jsp_operand_t val = tmp_operand ();
-
-    dump_prop_getter (val, op);
-
-    dump_double_address (VM_OP_POST_DECR, reg, val);
-
-    dump_prop_setter (op, val);
-  }
-  else
-  {
-    dump_double_address (VM_OP_POST_DECR, reg, op);
-  }
-}
-
-void
-dump_pre_increment (jsp_operand_t reg,
-                    jsp_operand_t op)
-{
-  JERRY_ASSERT (reg.is_register_operand ());
-  JERRY_ASSERT (op.is_reference_operand ());
-
-  if (op.is_value_based_reference_operand ())
-  {
-    dump_prop_getter (reg, op);
-
-    dump_double_address (VM_OP_PRE_INCR, reg, reg);
-
-    dump_prop_setter (op, reg);
-  }
-  else
-  {
-    dump_double_address (VM_OP_PRE_INCR, reg, op);
-  }
-}
-
-void
-dump_pre_decrement (jsp_operand_t reg,
-                    jsp_operand_t op)
-{
-  JERRY_ASSERT (reg.is_register_operand ());
-  JERRY_ASSERT (op.is_reference_operand ());
-
-  if (op.is_value_based_reference_operand ())
-  {
-    dump_prop_getter (reg, op);
-
-    dump_double_address (VM_OP_PRE_DECR, reg, reg);
-
-    dump_prop_setter (op, reg);
-  }
-  else
-  {
-    dump_double_address (VM_OP_PRE_DECR, reg, op);
-  }
-}
-
-void
 dump_unary_plus (jsp_operand_t res, jsp_operand_t obj)
 {
   dump_double_address (VM_OP_UNARY_PLUS, res, obj);
@@ -1200,13 +1011,30 @@ dump_logical_not (jsp_operand_t res, jsp_operand_t obj)
 }
 
 void
+dump_delete_prop (jsp_operand_t res,
+                  jsp_operand_t base,
+                  jsp_operand_t prop_name)
+{
+  if (prop_name.is_literal_operand ())
+  {
+    /*
+     * TODO:
+     *      Introduce delete_prop instruction that accepts property name as a literal-represented string
+     */
+
+    jsp_operand_t tmp = tmp_operand ();
+    dump_string_assignment (tmp, prop_name.get_literal ());
+
+    prop_name = tmp;
+  }
+
+  dump_triple_address (VM_OP_DELETE_PROP, res, base, prop_name);
+}
+
+void
 dump_delete (jsp_operand_t res, jsp_operand_t op)
 {
-  if (!op.is_reference_operand ())
-  {
-    dump_boolean_assignment (res, true);
-  }
-  else if (op.is_identifier_operand ())
+  if (op.is_identifier_operand ())
   {
     literal_t lit = lit_get_literal_by_cp (op.get_identifier_name ());
     JERRY_ASSERT (lit->get_type () == LIT_STR_T
@@ -1217,24 +1045,7 @@ dump_delete (jsp_operand_t res, jsp_operand_t op)
   }
   else
   {
-    JERRY_ASSERT (op.is_value_based_reference_operand ());
-
-    jsp_operand_t prop_name = op.get_value_based_ref_prop_name ();
-
-    if (prop_name.is_literal_operand ())
-    {
-      /*
-       * TODO:
-       *      Introduce delete_prop instruction that accepts property name as a literal-represented string
-       */
-
-      jsp_operand_t tmp = tmp_operand ();
-      dump_string_assignment (tmp, prop_name.get_literal ());
-
-      prop_name = tmp;
-    }
-
-    dump_triple_address (VM_OP_DELETE_PROP, res, op.get_value_based_ref_base (), prop_name);
+    dump_boolean_assignment (res, true);
   }
 }
 
@@ -1242,6 +1053,23 @@ void
 dump_typeof (jsp_operand_t res, jsp_operand_t op)
 {
   dump_double_address (VM_OP_TYPEOF, res, op);
+}
+
+void
+dump_unary_op (vm_op_t opcode,
+               jsp_operand_t res,
+               jsp_operand_t op)
+{
+  dump_double_address (opcode, res, op);
+}
+
+void
+dump_binary_op (vm_op_t opcode,
+                jsp_operand_t res,
+                jsp_operand_t op1,
+                jsp_operand_t op2)
+{
+  dump_triple_address (opcode, res, op1, op2);
 }
 
 void
