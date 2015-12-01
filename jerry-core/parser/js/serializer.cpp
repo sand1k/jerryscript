@@ -152,21 +152,6 @@ serializer_merge_scopes_into_bytecode (void)
   return header_p;
 } /* serializer_merge_scopes_into_bytecode */
 
-void
-serializer_dump_op_meta (op_meta op)
-{
-  JERRY_ASSERT (scopes_tree_instrs_num (current_scope) < MAX_OPCODES);
-
-  scopes_tree_add_op_meta (current_scope, op);
-
-#ifdef JERRY_ENABLE_PRETTY_PRINTER
-  if (print_instrs)
-  {
-    pp_op_meta (NULL, (vm_instr_counter_t) (scopes_tree_instrs_num (current_scope) - 1), op, false);
-  }
-#endif
-}
-
 /**
  * Dump variable declaration into the current scope
  */
