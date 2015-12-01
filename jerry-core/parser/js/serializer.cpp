@@ -26,35 +26,6 @@ static bool print_instrs = false;
 static void
 serializer_print_instrs (const bytecode_data_header_t *);
 
-op_meta
-serializer_get_op_meta (vm_instr_counter_t oc)
-{
-  JERRY_ASSERT (current_scope);
-  return scopes_tree_op_meta (current_scope, oc);
-}
-
-/**
- * Get byte-code instruction from current scope, or specified byte-code array
- *
- * @return byte-code instruction
- */
-vm_instr_t
-serializer_get_instr (const bytecode_data_header_t *bytecode_data_p, /**< pointer to byte-code data (or NULL,
-                                                                      *   if instruction should be taken from
-                                                                      *   instruction list of current scope) */
-                      vm_instr_counter_t oc) /**< position of the intruction */
-{
-  if (bytecode_data_p == NULL)
-  {
-    return serializer_get_op_meta (oc).op;
-  }
-  else
-  {
-    JERRY_ASSERT (oc < bytecode_data_p->instrs_count);
-    return bytecode_data_p->instrs_p[oc];
-  }
-} /* serializer_get_instr */
-
 /**
  * Convert literal id (operand value of instruction) to compressed pointer to literal
  *

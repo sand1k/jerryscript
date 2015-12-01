@@ -375,7 +375,7 @@ void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
-void rewrite_varg_header_set_args_count (jsp_operand_t, size_t, vm_instr_counter_t);
+void rewrite_varg_header_set_args_count (scopes_tree, jsp_operand_t, size_t, vm_instr_counter_t);
 void dump_call_additional_info (opcode_call_flags_t, jsp_operand_t);
 void dump_varg (jsp_operand_t);
 
@@ -386,7 +386,7 @@ void dump_prop_getter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 void dump_function_end_for_rewrite (void);
-void rewrite_function_end (vm_instr_counter_t);
+void rewrite_function_end (scopes_tree, vm_instr_counter_t);
 
 void dump_unary_plus (jsp_operand_t, jsp_operand_t);
 void dump_unary_minus (jsp_operand_t, jsp_operand_t);
@@ -416,20 +416,20 @@ void dump_bitwise_xor (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_conditional_check_for_rewrite (jsp_operand_t);
-void rewrite_conditional_check (vm_instr_counter_t);
+void rewrite_conditional_check (scopes_tree, vm_instr_counter_t);
 vm_instr_counter_t dump_jump_to_end_for_rewrite (void);
-void rewrite_jump_to_end (vm_instr_counter_t);
+void rewrite_jump_to_end (scopes_tree, vm_instr_counter_t);
 
 vm_instr_counter_t dumper_set_next_iteration_target (void);
 vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
-vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
+vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (scopes_tree, vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (vm_instr_counter_t, jsp_operand_t);
 
 void start_dumping_case_clauses (void);
 vm_instr_counter_t dump_case_clause_check_for_rewrite (jsp_operand_t);
 vm_instr_counter_t dump_default_clause_check_for_rewrite (void);
-void rewrite_case_clause (vm_instr_counter_t);
-void rewrite_default_clause (vm_instr_counter_t);
+void rewrite_case_clause (scopes_tree, vm_instr_counter_t);
+void rewrite_default_clause (scopes_tree, vm_instr_counter_t);
 void finish_dumping_case_clauses (void);
 
 void dump_delete (jsp_operand_t, jsp_operand_t);
@@ -441,29 +441,29 @@ void dump_unary_op (vm_op_t, jsp_operand_t, jsp_operand_t);
 void dump_binary_op (vm_op_t, jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_with_for_rewrite (jsp_operand_t);
-void rewrite_with (vm_instr_counter_t);
+void rewrite_with (scopes_tree, vm_instr_counter_t);
 void dump_with_end (void);
 
 vm_instr_counter_t dump_for_in_for_rewrite (jsp_operand_t);
-void rewrite_for_in (vm_instr_counter_t);
+void rewrite_for_in (scopes_tree, vm_instr_counter_t);
 void dump_for_in_end (void);
 
 vm_instr_counter_t dump_try_for_rewrite (void);
 vm_instr_counter_t dump_catch_for_rewrite (jsp_operand_t);
 vm_instr_counter_t dump_finally_for_rewrite (void);
-void rewrite_try (vm_instr_counter_t);
-void rewrite_catch (vm_instr_counter_t);
-void rewrite_finally (vm_instr_counter_t);
+void rewrite_try (scopes_tree, vm_instr_counter_t);
+void rewrite_catch (scopes_tree, vm_instr_counter_t);
+void rewrite_finally (scopes_tree, vm_instr_counter_t);
 void dump_end_try_catch_finally (void);
 void dump_throw (jsp_operand_t);
 
 void dump_variable_declaration (lit_cpointer_t);
 
 vm_instr_counter_t dump_scope_code_flags_for_rewrite (void);
-void rewrite_scope_code_flags (vm_instr_counter_t, opcode_scope_code_flags_t);
+void rewrite_scope_code_flags (scopes_tree, vm_instr_counter_t, opcode_scope_code_flags_t);
 
 vm_instr_counter_t dump_reg_var_decl_for_rewrite (void);
-void rewrite_reg_var_decl (vm_instr_counter_t);
+void rewrite_reg_var_decl (scopes_tree, vm_instr_counter_t);
 
 void dump_ret (void);
 void dump_retval (jsp_operand_t);

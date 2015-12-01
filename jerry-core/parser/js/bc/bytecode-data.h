@@ -57,6 +57,8 @@ void jsp_bc_add_bytecode_data (bytecode_data_header_t *,
 
 void jsp_bc_remove_bytecode_data (const bytecode_data_header_t *);
 
+vm_instr_t bc_get_instr (const bytecode_data_header_t *,
+                         vm_instr_counter_t);
 void jsp_bc_finalize ();
 
 #endif /* BYTECODE_DATA_H */
