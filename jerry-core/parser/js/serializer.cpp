@@ -20,8 +20,8 @@
 #include "array-list.h"
 #include "scopes-tree.h"
 
-static scopes_tree current_scope;
-static bool print_instrs;
+static scopes_tree current_scope = NULL;
+static bool print_instrs = false;
 
 static void
 serializer_print_instrs (const bytecode_data_header_t *);
@@ -258,16 +258,6 @@ serializer_print_instrs (const bytecode_data_header_t *bytecode_data_p)
 #else
   (void) bytecode_data_p;
 #endif
-}
-
-void
-serializer_init ()
-{
-  current_scope = NULL;
-  print_instrs = false;
-
-  jsp_bc_init ();
-  lit_init ();
 }
 
 void serializer_set_show_instrs (bool show_instrs)
