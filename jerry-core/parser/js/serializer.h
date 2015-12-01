@@ -26,8 +26,6 @@
 #define NOT_A_LITERAL (lit_cpointer_t::null_cp ())
 
 void serializer_set_show_instrs (bool);
-op_meta serializer_get_op_meta (vm_instr_counter_t);
-vm_instr_t serializer_get_instr (const bytecode_data_header_t *, vm_instr_counter_t);
 lit_cpointer_t serializer_get_literal_cp_by_uid (uint8_t, const bytecode_data_header_t *, vm_instr_counter_t);
 void serializer_set_scope (scopes_tree);
 void serializer_dump_subscope (scopes_tree);

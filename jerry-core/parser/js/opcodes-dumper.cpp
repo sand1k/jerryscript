@@ -755,7 +755,8 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
 }
 
 void
-rewrite_varg_header_set_args_count (jsp_operand_t ret,
+rewrite_varg_header_set_args_count (scopes_tree current_scope_p,
+                                    jsp_operand_t ret,
                                     size_t args_count,
                                     vm_instr_counter_t pos)
 {
@@ -767,7 +768,7 @@ rewrite_varg_header_set_args_count (jsp_operand_t ret,
    *       argument / formal parameter name to values collection.
    */
 
-  op_meta om = serializer_get_op_meta (pos);
+  op_meta om = scopes_tree_op_meta (current_scope_p, pos);
 
   switch (om.op.op_idx)
   {
@@ -925,7 +926,8 @@ dump_function_end_for_rewrite (void)
 }
 
 void
-rewrite_function_end (vm_instr_counter_t pos)
+rewrite_function_end (scopes_tree current_scope_p,
+                      vm_instr_counter_t pos)
 {
   vm_instr_counter_t oc;
   {
@@ -935,7 +937,7 @@ rewrite_function_end (vm_instr_counter_t pos)
   vm_idx_t id1, id2;
   split_instr_counter (oc, &id1, &id2);
 
-  op_meta function_end_op_meta = serializer_get_op_meta (pos);
+  op_meta function_end_op_meta = scopes_tree_op_meta (current_scope_p, pos);
   JERRY_ASSERT (function_end_op_meta.op.op_idx == VM_OP_META);
   JERRY_ASSERT (function_end_op_meta.op.data.meta.type == OPCODE_META_TYPE_FUNCTION_END);
   JERRY_ASSERT (function_end_op_meta.op.data.meta.data_1 == VM_IDX_REWRITE_GENERAL_CASE);
@@ -1160,12 +1162,13 @@ dump_conditional_check_for_rewrite (jsp_operand_t op)
 }
 
 void
-rewrite_conditional_check (vm_instr_counter_t pos)
+rewrite_conditional_check (scopes_tree current_scope_p,
+                           vm_instr_counter_t pos)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (pos), &id1, &id2);
 
-  op_meta jmp_op_meta = serializer_get_op_meta (pos);
+  op_meta jmp_op_meta = scopes_tree_op_meta (current_scope_p, pos);
   JERRY_ASSERT (jmp_op_meta.op.op_idx == VM_OP_IS_FALSE_JMP_DOWN);
 
   jmp_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
@@ -1187,12 +1190,13 @@ dump_jump_to_end_for_rewrite (void)
 }
 
 void
-rewrite_jump_to_end (vm_instr_counter_t pos)
+rewrite_jump_to_end (scopes_tree current_scope_p,
+                     vm_instr_counter_t pos)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (pos), &id1, &id2);
 
-  op_meta jmp_op_meta = serializer_get_op_meta (pos);
+  op_meta jmp_op_meta = scopes_tree_op_meta (current_scope_p, pos);
   JERRY_ASSERT (jmp_op_meta.op.op_idx == VM_OP_JMP_DOWN);
 
   jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
@@ -1284,10 +1288,11 @@ dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode *
  * @return instr counter value that was encoded in the jump before rewrite
  */
 vm_instr_counter_t
-rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< position of jump to rewrite */
+rewrite_simple_or_nested_jump_and_get_next (scopes_tree current_scope_p,
+                                            vm_instr_counter_t jump_oc, /**< position of jump to rewrite */
                                             vm_instr_counter_t target_oc) /**< the jump's target */
 {
-  op_meta jump_op_meta = serializer_get_op_meta (jump_oc);
+  op_meta jump_op_meta = scopes_tree_op_meta (current_scope_p, jump_oc);
 
   vm_op_t jmp_opcode = (vm_op_t) jump_op_meta.op.op_idx;
 
@@ -1389,12 +1394,13 @@ dump_default_clause_check_for_rewrite (void)
 }
 
 void
-rewrite_case_clause (vm_instr_counter_t jmp_oc)
+rewrite_case_clause (scopes_tree current_scope_p,
+                     vm_instr_counter_t jmp_oc)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
 
-  op_meta jmp_op_meta = serializer_get_op_meta (jmp_oc);
+  op_meta jmp_op_meta = scopes_tree_op_meta (current_scope_p, jmp_oc);
   JERRY_ASSERT (jmp_op_meta.op.op_idx == VM_OP_IS_TRUE_JMP_DOWN);
 
   jmp_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
@@ -1404,12 +1410,13 @@ rewrite_case_clause (vm_instr_counter_t jmp_oc)
 }
 
 void
-rewrite_default_clause (vm_instr_counter_t jmp_oc)
+rewrite_default_clause (scopes_tree current_scope_p,
+                        vm_instr_counter_t jmp_oc)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
 
-  op_meta jmp_op_meta = serializer_get_op_meta (jmp_oc);
+  op_meta jmp_op_meta = scopes_tree_op_meta (current_scope_p, jmp_oc);
   JERRY_ASSERT (jmp_op_meta.op.op_idx == VM_OP_JMP_DOWN);
 
   jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
@@ -1450,12 +1457,13 @@ dump_with_for_rewrite (jsp_operand_t op) /**< jsp_operand_t - result of evaluati
  * dumped earlier (see also: dump_with_for_rewrite).
  */
 void
-rewrite_with (vm_instr_counter_t oc) /**< instr counter of the instruction template */
+rewrite_with (scopes_tree current_scope_p,
+              vm_instr_counter_t oc) /**< instr counter of the instruction template */
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (oc), &id1, &id2);
 
-  op_meta with_op_meta = serializer_get_op_meta (oc);
+  op_meta with_op_meta = scopes_tree_op_meta (current_scope_p, oc);
 
   with_op_meta.op.data.with.oc_idx_1 = id1;
   with_op_meta.op.data.with.oc_idx_2 = id2;
@@ -1502,12 +1510,13 @@ dump_for_in_for_rewrite (jsp_operand_t op) /**< jsp_operand_t - result of evalua
  * dumped earlier (see also: dump_for_in_for_rewrite).
  */
 void
-rewrite_for_in (vm_instr_counter_t oc) /**< instr counter of the instruction template */
+rewrite_for_in (scopes_tree current_scope_p,
+                vm_instr_counter_t oc) /**< instr counter of the instruction template */
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (oc), &id1, &id2);
 
-  op_meta for_in_op_meta = serializer_get_op_meta (oc);
+  op_meta for_in_op_meta = scopes_tree_op_meta (current_scope_p, oc);
 
   for_in_op_meta.op.data.for_in.oc_idx_1 = id1;
   for_in_op_meta.op.data.for_in.oc_idx_2 = id2;
@@ -1540,12 +1549,13 @@ dump_try_for_rewrite (void)
 }
 
 void
-rewrite_try (vm_instr_counter_t pos)
+rewrite_try (scopes_tree current_scope_p,
+             vm_instr_counter_t pos)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (pos), &id1, &id2);
 
-  op_meta try_op_meta = serializer_get_op_meta (pos);
+  op_meta try_op_meta = scopes_tree_op_meta (current_scope_p, pos);
   JERRY_ASSERT (try_op_meta.op.op_idx == VM_OP_TRY_BLOCK);
 
   try_op_meta.op.data.try_block.oc_idx_1 = id1;
@@ -1575,12 +1585,13 @@ dump_catch_for_rewrite (jsp_operand_t op)
 }
 
 void
-rewrite_catch (vm_instr_counter_t pos)
+rewrite_catch (scopes_tree current_scope_p,
+               vm_instr_counter_t pos)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (pos), &id1, &id2);
 
-  op_meta catch_op_meta = serializer_get_op_meta (pos);
+  op_meta catch_op_meta = scopes_tree_op_meta (current_scope_p, pos);
   JERRY_ASSERT (catch_op_meta.op.op_idx == VM_OP_META
                 && catch_op_meta.op.data.meta.type == OPCODE_META_TYPE_CATCH);
 
@@ -1604,12 +1615,13 @@ dump_finally_for_rewrite (void)
 }
 
 void
-rewrite_finally (vm_instr_counter_t pos)
+rewrite_finally (scopes_tree current_scope_p,
+                 vm_instr_counter_t pos)
 {
   vm_idx_t id1, id2;
   split_instr_counter (get_diff_from (pos), &id1, &id2);
 
-  op_meta finally_op_meta = serializer_get_op_meta (pos);
+  op_meta finally_op_meta = scopes_tree_op_meta (current_scope_p, pos);
   JERRY_ASSERT (finally_op_meta.op.op_idx == VM_OP_META
                 && finally_op_meta.op.data.meta.type == OPCODE_META_TYPE_FINALLY);
 
@@ -1670,12 +1682,13 @@ dump_scope_code_flags_for_rewrite (void)
  * dumped earlier (see also: dump_scope_code_flags_for_rewrite).
  */
 void
-rewrite_scope_code_flags (vm_instr_counter_t scope_code_flags_oc, /**< position of instruction to rewrite */
+rewrite_scope_code_flags (scopes_tree current_scope_p,
+                          vm_instr_counter_t scope_code_flags_oc, /**< position of instruction to rewrite */
                           opcode_scope_code_flags_t scope_flags) /**< scope's code properties flags set */
 {
   JERRY_ASSERT ((vm_idx_t) scope_flags == scope_flags);
 
-  op_meta opm = serializer_get_op_meta (scope_code_flags_oc);
+  op_meta opm = scopes_tree_op_meta (current_scope_p, scope_code_flags_oc);
   JERRY_ASSERT (opm.op.op_idx == VM_OP_META);
   JERRY_ASSERT (opm.op.data.meta.type == OPCODE_META_TYPE_SCOPE_CODE_FLAGS);
   JERRY_ASSERT (opm.op.data.meta.data_1 == VM_IDX_REWRITE_GENERAL_CASE);
@@ -1713,9 +1726,10 @@ dump_reg_var_decl_for_rewrite (void)
  * Rewrite 'reg_var_decl' instruction's template with current scope's register counts
  */
 void
-rewrite_reg_var_decl (vm_instr_counter_t reg_var_decl_oc) /**< position of dumped 'reg_var_decl' template */
+rewrite_reg_var_decl (scopes_tree current_scope_p,
+                      vm_instr_counter_t reg_var_decl_oc) /**< position of dumped 'reg_var_decl' template */
 {
-  op_meta opm = serializer_get_op_meta (reg_var_decl_oc);
+  op_meta opm = scopes_tree_op_meta (current_scope_p, reg_var_decl_oc);
   JERRY_ASSERT (opm.op.op_idx == VM_OP_REG_VAR_DECL);
 
   opm.op.data.reg_var_decl.tmp_regs_num = (vm_idx_t) (jsp_reg_max_for_temps - VM_REG_GENERAL_FIRST + 1);

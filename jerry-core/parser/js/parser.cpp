@@ -546,7 +546,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   const jsp_operand_t func = is_function_expression ? tmp_operand () : empty_operand ();
 
-  rewrite_varg_header_set_args_count (func, formal_parameters_num, varg_header_pos);
+  rewrite_varg_header_set_args_count (current_scope_p, func, formal_parameters_num, varg_header_pos);
 
   dump_function_end_for_rewrite ();
 
@@ -682,7 +682,7 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 
   vm_instr_counter_t function_end_pos = jsp_find_function_end ();
 
-  rewrite_function_end (function_end_pos);
+  rewrite_function_end (current_scope_p, function_end_pos);
 
   serializer_set_scope (parent_scope);
   current_scope_p = parent_scope;
@@ -1048,7 +1048,7 @@ jsp_finish_call_dump (uint32_t args_num,
 {
   jsp_operand_t ret = tmp_operand ();
 
-  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
+  rewrite_varg_header_set_args_count (current_scope_p, ret, args_num, header_pos);
 
   return ret;
 } /* jsp_finish_call_dump */
@@ -1078,7 +1078,7 @@ jsp_finish_construct_dump (uint32_t args_num,
 {
   jsp_operand_t ret = tmp_operand ();
 
-  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
+  rewrite_varg_header_set_args_count (current_scope_p, ret, args_num, header_pos);
 
   return ret;
 } /* jsp_finish_construct_dump */
@@ -1593,8 +1593,8 @@ jsp_parse_source_element_list (void)
         scope_flags = jsp_try_move_vars_to_regs (state_p, scope_flags);
 #endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
-        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
-        rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
+        rewrite_scope_code_flags (current_scope_p, state_p->u.source_elements.scope_code_flags_oc, scope_flags);
+        rewrite_reg_var_decl (current_scope_p, state_p->u.source_elements.reg_var_decl_oc);
 
         state_p->is_completed = true;
 
@@ -1914,7 +1914,7 @@ jsp_parse_source_element_list (void)
 
         state_p->u.expression.operand = tmp_operand ();
 
-        rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
+        rewrite_varg_header_set_args_count (current_scope_p, state_p->u.expression.operand, list_len, header_pos);
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
         state_p->is_list_in_process = false;
@@ -1977,7 +1977,7 @@ jsp_parse_source_element_list (void)
           vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
           state_p->u.expression.operand = tmp_operand ();
-          rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
+          rewrite_varg_header_set_args_count (current_scope_p, state_p->u.expression.operand, list_len, header_pos);
 
           state_p->state = JSP_STATE_EXPR_MEMBER;
           state_p->is_list_in_process = false;
@@ -3251,7 +3251,9 @@ jsp_parse_source_element_list (void)
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
             while (*rewrite_chain_p != MAX_OPCODES)
             {
-              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (current_scope_p,
+                                                                             *rewrite_chain_p,
+                                                                             target_oc);
             }
 
             state_p->is_complex_production = false;
@@ -3365,7 +3367,9 @@ jsp_parse_source_element_list (void)
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
             while (*rewrite_chain_p != MAX_OPCODES)
             {
-              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, target_oc);
+              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (current_scope_p,
+                                                                             *rewrite_chain_p,
+                                                                             target_oc);
             }
 
             state_p->is_complex_production = false;
@@ -3410,7 +3414,7 @@ jsp_parse_source_element_list (void)
 
         state_p->u.expression.u.conditional.jump_to_end_pos = dump_jump_to_end_for_rewrite ();
 
-        rewrite_conditional_check (state_p->u.expression.u.conditional.conditional_check_pos);
+        rewrite_conditional_check (current_scope_p, state_p->u.expression.u.conditional.conditional_check_pos);
 
         state_p->u.expression.token_type = TOK_COLON;
 
@@ -3429,7 +3433,7 @@ jsp_parse_source_element_list (void)
                                                              is_subexpr_value_based_reference);
 
         dump_variable_assignment (state_p->u.expression.operand, subexpr_operand);
-        rewrite_jump_to_end (state_p->u.expression.u.conditional.jump_to_end_pos);
+        rewrite_jump_to_end (current_scope_p, state_p->u.expression.u.conditional.jump_to_end_pos);
 
         state_p->u.expression.token_type = TOK_EMPTY;
         state_p->is_fixed_ret_operand = false;
@@ -3837,13 +3841,13 @@ jsp_parse_source_element_list (void)
           skip_token ();
 
           state_p->u.statement.u.if_statement.jump_to_end_pos = dump_jump_to_end_for_rewrite ();
-          rewrite_conditional_check (state_p->u.statement.u.if_statement.conditional_check_pos);
+          rewrite_conditional_check (current_scope_p, state_p->u.statement.u.if_statement.conditional_check_pos);
 
           JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_IF_BRANCH_END);
         }
         else
         {
-          rewrite_conditional_check (state_p->u.statement.u.if_statement.conditional_check_pos);
+          rewrite_conditional_check (current_scope_p, state_p->u.statement.u.if_statement.conditional_check_pos);
 
           JSP_COMPLETE_STATEMENT_PARSE ();
         }
@@ -3851,7 +3855,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_IF_BRANCH_END)
     {
-      rewrite_jump_to_end (state_p->u.statement.u.if_statement.jump_to_end_pos);
+      rewrite_jump_to_end (current_scope_p, state_p->u.statement.u.if_statement.jump_to_end_pos);
 
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
@@ -3958,7 +3962,7 @@ jsp_parse_source_element_list (void)
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
         state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
-        rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_while.jump_to_end_pos);
+        rewrite_jump_to_end (current_scope_p, state_p->u.statement.u.iterational.u.loop_while.jump_to_end_pos);
 
         const locus end_loc = tok.loc;
 
@@ -4045,7 +4049,7 @@ jsp_parse_source_element_list (void)
         current_token_must_be (TOK_CLOSE_PAREN);
 
         // Setup ConditionCheck
-        rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_for.jump_to_end_pos);
+        rewrite_jump_to_end (current_scope_p, state_p->u.statement.u.iterational.u.loop_for.jump_to_end_pos);
 
         // Condition
         seek_token (state_p->u.statement.u.iterational.u.loop_for.u1.condition_expr_loc);
@@ -4165,7 +4169,7 @@ jsp_parse_source_element_list (void)
       state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
 
       // Write position of for-in end to for_in instruction
-      rewrite_for_in (state_p->u.statement.u.iterational.u.loop_for_in.header_pos);
+      rewrite_for_in (current_scope_p, state_p->u.statement.u.iterational.u.loop_for_in.header_pos);
 
       // Dump meta (OPCODE_META_TYPE_END_FOR_IN)
       dump_for_in_end ();
@@ -4183,7 +4187,8 @@ jsp_parse_source_element_list (void)
 
       while (*rewrite_chain_p != MAX_OPCODES)
       {
-        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (current_scope_p,
+                                                                       *rewrite_chain_p,
                                                                        continue_tgt_oc);
       }
     }
@@ -4341,7 +4346,7 @@ jsp_parse_source_element_list (void)
 
       if (state_p->is_default_branch)
       {
-        rewrite_default_clause (state_p->u.statement.u.switch_statement.jmp_oc);
+        rewrite_default_clause (current_scope_p, state_p->u.statement.u.switch_statement.jmp_oc);
 
         if (token_is (TOK_KW_CASE))
         {
@@ -4351,7 +4356,7 @@ jsp_parse_source_element_list (void)
       }
       else
       {
-        rewrite_case_clause (state_p->u.statement.u.switch_statement.jmp_oc);
+        rewrite_case_clause (current_scope_p, state_p->u.statement.u.switch_statement.jmp_oc);
         if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
         {
           JSP_COMPLETE_STATEMENT_PARSE ();
@@ -4365,7 +4370,7 @@ jsp_parse_source_element_list (void)
     {
       if (!state_p->was_default)
       {
-        rewrite_default_clause (state_p->u.statement.u.switch_statement.jmp_oc);
+        rewrite_default_clause (current_scope_p, state_p->u.statement.u.switch_statement.jmp_oc);
       }
 
       current_token_must_be_check_and_skip_it (TOK_CLOSE_BRACE);
@@ -4376,7 +4381,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_TRY)
     {
-      rewrite_try (state_p->u.statement.u.try_statement.try_pos);
+      rewrite_try (current_scope_p, state_p->u.statement.u.try_statement.try_pos);
 
       if (!token_is (TOK_KW_CATCH)
           && !token_is (TOK_KW_FINALLY))
@@ -4429,7 +4434,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_CATCH_FINISH)
     {
-      rewrite_catch (state_p->u.statement.u.try_statement.catch_pos);
+      rewrite_catch (current_scope_p, state_p->u.statement.u.try_statement.catch_pos);
 
       if (token_is (TOK_KW_FINALLY))
       {
@@ -4452,7 +4457,7 @@ jsp_parse_source_element_list (void)
     }
     else if (state_p->state == JSP_STATE_STAT_FINALLY_FINISH)
     {
-      rewrite_finally (state_p->u.statement.u.try_statement.finally_pos);
+      rewrite_finally (current_scope_p, state_p->u.statement.u.try_statement.finally_pos);
 
       state_p->state = JSP_STATE_STAT_TRY_FINISH;
     }
@@ -4479,7 +4484,7 @@ jsp_parse_source_element_list (void)
       }
       else
       {
-        rewrite_with (state_p->u.statement.u.with_statement.header_pos);
+        rewrite_with (current_scope_p, state_p->u.statement.u.with_statement.header_pos);
         dump_with_end ();
 
         JSP_COMPLETE_STATEMENT_PARSE ();
@@ -4547,7 +4552,9 @@ jsp_parse_source_element_list (void)
 
       while (*rewrite_chain_p != MAX_OPCODES)
       {
-        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p, break_tgt_oc);
+        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (current_scope_p,
+                                                                       *rewrite_chain_p,
+                                                                       break_tgt_oc);
       }
 
       state_p->is_completed = true;

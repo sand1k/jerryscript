@@ -68,6 +68,13 @@ jsp_bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
   }
 } /* jsp_bc_remove_bytecode_data */
 
+vm_instr_t bc_get_instr (const bytecode_data_header_t *bytecode_data_p,
+                         vm_instr_counter_t oc)
+{
+  JERRY_ASSERT (oc < bytecode_data_p->instrs_count);
+  return bytecode_data_p->instrs_p[oc];
+}
+
 void
 jsp_bc_finalize ()
 {
