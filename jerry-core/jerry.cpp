@@ -1420,7 +1420,7 @@ jerry_init (jerry_flag_t flags) /**< combination of Jerry flags */
   jerry_make_api_available ();
 
   mem_init ();
-  serializer_init ();
+  lit_init ();
   ecma_init ();
 } /* jerry_init */
 

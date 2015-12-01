@@ -48,9 +48,6 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
 } bytecode_data_header_t;
 
 
-
-void jsp_bc_init ();
-
 bytecode_data_header_t * jsp_bc_get_first_bytecode_data_header ();
 
 void jsp_bc_add_bytecode_data (bytecode_data_header_t *,

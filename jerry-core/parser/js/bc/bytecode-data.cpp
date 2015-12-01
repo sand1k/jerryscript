@@ -16,13 +16,7 @@
 
 #include "bytecode-data.h"
 
-static bytecode_data_header_t *first_bytecode_header_p;
-
-void
-jsp_bc_init ()
-{
-  first_bytecode_header_p = NULL;
-} /* jsp_bc_init */
+static bytecode_data_header_t *first_bytecode_header_p = NULL;
 
 bytecode_data_header_t *
 jsp_bc_get_first_bytecode_data_header ()
