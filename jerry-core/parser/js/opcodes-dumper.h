@@ -345,8 +345,6 @@ typedef enum __attr_packed___
 
 jsp_operand_t empty_operand (void);
 jsp_operand_t literal_operand (lit_cpointer_t);
-jsp_operand_t eval_ret_operand (void);
-jsp_operand_t jsp_create_operand_for_in_special_reg (void);
 jsp_operand_t tmp_operand (void);
 bool operand_is_empty (jsp_operand_t);
 
@@ -377,7 +375,7 @@ void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
-jsp_operand_t rewrite_varg_header_set_args_count (size_t, vm_instr_counter_t);
+void rewrite_varg_header_set_args_count (jsp_operand_t, size_t, vm_instr_counter_t);
 void dump_call_additional_info (opcode_call_flags_t, jsp_operand_t);
 void dump_varg (jsp_operand_t);
 
@@ -389,8 +387,6 @@ void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 
 void dump_function_end_for_rewrite (void);
 void rewrite_function_end (vm_instr_counter_t);
-
-jsp_operand_t this_operand (void);
 
 void dump_unary_plus (jsp_operand_t, jsp_operand_t);
 void dump_unary_minus (jsp_operand_t, jsp_operand_t);
@@ -430,7 +426,7 @@ vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_
 void dump_continue_iterations_check (vm_instr_counter_t, jsp_operand_t);
 
 void start_dumping_case_clauses (void);
-vm_instr_counter_t dump_case_clause_check_for_rewrite (jsp_operand_t, jsp_operand_t);
+vm_instr_counter_t dump_case_clause_check_for_rewrite (jsp_operand_t);
 vm_instr_counter_t dump_default_clause_check_for_rewrite (void);
 void rewrite_case_clause (vm_instr_counter_t);
 void rewrite_default_clause (vm_instr_counter_t);
