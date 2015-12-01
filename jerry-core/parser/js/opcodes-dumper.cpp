@@ -513,29 +513,6 @@ literal_operand (lit_cpointer_t lit_cp)
   return jsp_operand_t::make_lit_operand (lit_cp);
 }
 
-/**
- * Creates operand for eval's return value
- *
- * @return constructed operand
- */
-jsp_operand_t
-eval_ret_operand (void)
-{
-  return jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET);
-} /* eval_ret_operand */
-
-/**
- * Creates operand for taking iterator value (next property name)
- * from for-in instr handler.
- *
- * @return constructed operand
- */
-jsp_operand_t
-jsp_create_operand_for_in_special_reg (void)
-{
-  return jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME);
-} /* jsp_create_operand_for_in_special_reg */
-
 bool
 operand_is_empty (jsp_operand_t op)
 {
@@ -787,8 +764,9 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
   return pos;
 }
 
-jsp_operand_t
-rewrite_varg_header_set_args_count (size_t args_count,
+void
+rewrite_varg_header_set_args_count (jsp_operand_t ret,
+                                    size_t args_count,
                                     vm_instr_counter_t pos)
 {
   /*
@@ -813,11 +791,10 @@ rewrite_varg_header_set_args_count (size_t args_count,
                      "No more than 255 formal parameters / arguments are currently supported",
                      LIT_ITERATOR_POS_ZERO);
       }
-      const jsp_operand_t res = tmp_operand ();
       om.op.data.func_expr_n.arg_list = (vm_idx_t) args_count;
-      om.op.data.func_expr_n.lhs = res.get_idx ();
+      om.op.data.func_expr_n.lhs = ret.get_idx ();
       serializer_rewrite_op_meta (pos, om);
-      return res;
+      break;
     }
     case VM_OP_FUNC_DECL_N:
     {
@@ -829,7 +806,8 @@ rewrite_varg_header_set_args_count (size_t args_count,
       }
       om.op.data.func_decl_n.arg_list = (vm_idx_t) args_count;
       serializer_rewrite_op_meta (pos, om);
-      return empty_operand ();
+      JERRY_ASSERT (ret.is_empty_operand ());
+      break;
     }
     case VM_OP_ARRAY_DECL:
     case VM_OP_OBJ_DECL:
@@ -840,12 +818,11 @@ rewrite_varg_header_set_args_count (size_t args_count,
                      "No more than 65535 formal parameters are currently supported",
                      LIT_ITERATOR_POS_ZERO);
       }
-      const jsp_operand_t res = tmp_operand ();
       om.op.data.obj_decl.list_1 = (vm_idx_t) (args_count >> 8);
       om.op.data.obj_decl.list_2 = (vm_idx_t) (args_count & 0xffu);
-      om.op.data.obj_decl.lhs = res.get_idx ();
+      om.op.data.obj_decl.lhs = ret.get_idx ();
       serializer_rewrite_op_meta (pos, om);
-      return res;
+      break;
     }
     default:
     {
@@ -980,12 +957,6 @@ rewrite_function_end (vm_instr_counter_t pos)
   serializer_rewrite_op_meta (pos, function_end_op_meta);
 }
 
-jsp_operand_t
-this_operand (void)
-{
-  return jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
-}
-
 void
 dump_unary_plus (jsp_operand_t res, jsp_operand_t obj)
 {
@@ -1015,19 +986,6 @@ dump_delete_prop (jsp_operand_t res,
                   jsp_operand_t base,
                   jsp_operand_t prop_name)
 {
-  if (prop_name.is_literal_operand ())
-  {
-    /*
-     * TODO:
-     *      Introduce delete_prop instruction that accepts property name as a literal-represented string
-     */
-
-    jsp_operand_t tmp = tmp_operand ();
-    dump_string_assignment (tmp, prop_name.get_literal ());
-
-    prop_name = tmp;
-  }
-
   dump_triple_address (VM_OP_DELETE_PROP, res, base, prop_name);
 }
 
@@ -1416,15 +1374,12 @@ start_dumping_case_clauses (void)
 }
 
 vm_instr_counter_t
-dump_case_clause_check_for_rewrite (jsp_operand_t switch_expr, jsp_operand_t case_expr)
+dump_case_clause_check_for_rewrite (jsp_operand_t cond)
 {
-  const jsp_operand_t res = tmp_operand ();
-  dump_triple_address (VM_OP_EQUAL_VALUE_TYPE, res, switch_expr, case_expr);
-
   vm_instr_counter_t jmp_oc = serializer_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_IS_TRUE_JMP_DOWN,
-                       res,
+                       cond,
                        jsp_operand_t::make_unknown_operand (),
                        jsp_operand_t::make_unknown_operand ());
 

@@ -542,7 +542,9 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   skip_token ();
 
-  const jsp_operand_t func = rewrite_varg_header_set_args_count (formal_parameters_num, varg_header_pos);
+  const jsp_operand_t func = is_function_expression ? tmp_operand () : empty_operand ();
+
+  rewrite_varg_header_set_args_count (func, formal_parameters_num, varg_header_pos);
 
   dump_function_end_for_rewrite ();
 
@@ -1041,7 +1043,11 @@ static jsp_operand_t
 jsp_finish_call_dump (uint32_t args_num,
                       vm_instr_counter_t header_pos)
 {
-  return rewrite_varg_header_set_args_count (args_num, header_pos);
+  jsp_operand_t ret = tmp_operand ();
+
+  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
+
+  return ret;
 } /* jsp_finish_call_dump */
 
 /*
@@ -1067,7 +1073,11 @@ static jsp_operand_t __attr_unused___
 jsp_finish_construct_dump (uint32_t args_num,
                            vm_instr_counter_t header_pos)
 {
-  return rewrite_varg_header_set_args_count (args_num, header_pos);
+  jsp_operand_t ret = tmp_operand ();
+
+  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
+
+  return ret;
 } /* jsp_finish_construct_dump */
 
 static lit_cpointer_t
@@ -1545,7 +1555,7 @@ jsp_parse_source_element_list (void)
 
       if (scope_type == SCOPE_TYPE_EVAL)
       {
-        dump_undefined_assignment (eval_ret_operand ());
+        dump_undefined_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET));
       }
 
       state_p->state = JSP_STATE_SOURCE_ELEMENTS;
@@ -1661,7 +1671,7 @@ jsp_parse_source_element_list (void)
           }
           case TOK_KW_THIS:
           {
-            state_p->u.expression.operand = this_operand ();
+            state_p->u.expression.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
             break;
           }
           case TOK_KW_NEW:
@@ -1899,7 +1909,9 @@ jsp_parse_source_element_list (void)
         uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
         vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
-        state_p->u.expression.operand = rewrite_varg_header_set_args_count (list_len, header_pos);
+        state_p->u.expression.operand = tmp_operand ();
+
+        rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
         state_p->is_list_in_process = false;
@@ -1961,7 +1973,8 @@ jsp_parse_source_element_list (void)
           uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
           vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
-          state_p->u.expression.operand = rewrite_varg_header_set_args_count (list_len, header_pos);
+          state_p->u.expression.operand = tmp_operand ();
+          rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
 
           state_p->state = JSP_STATE_EXPR_MEMBER;
           state_p->is_list_in_process = false;
@@ -2637,6 +2650,15 @@ jsp_parse_source_element_list (void)
           }
           else
           {
+            if (subexpr_operand.is_literal_operand ())
+            {
+              jsp_operand_t reg = tmp_operand ();
+
+              dump_string_assignment (reg, subexpr_operand.get_literal ());
+
+              subexpr_operand = reg;
+            }
+
             dump_delete_prop (state_p->u.expression.operand,
                               subexpr_operand,
                               subexpr_prop_name_operand);
@@ -4096,7 +4118,7 @@ jsp_parse_source_element_list (void)
 
       seek_token (state_p->u.statement.u.iterational.u.loop_for_in.u.body_loc);
 
-      jsp_operand_t for_in_special_reg = jsp_create_operand_for_in_special_reg ();
+      jsp_operand_t for_in_special_reg = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_FOR_IN_PROPERTY_NAME);
 
       if (!state_p->is_var_decl_no_in)
       {
@@ -4188,7 +4210,11 @@ jsp_parse_source_element_list (void)
         current_token_must_be (TOK_COLON);
 
         jsp_operand_t switch_expr = state_p->u.statement.u.switch_statement.expr;
-        vm_instr_counter_t jmp_oc = dump_case_clause_check_for_rewrite (switch_expr, case_expr);
+
+        const jsp_operand_t cond = tmp_operand ();
+        dump_equal_value_type (cond, switch_expr, case_expr);
+
+        vm_instr_counter_t jmp_oc = dump_case_clause_check_for_rewrite (cond);
         skip_token ();
 
         jsp_state_t tmp_state = *state_p;
@@ -4468,7 +4494,8 @@ jsp_parse_source_element_list (void)
 
       if (serializer_get_scope ()->type == SCOPE_TYPE_EVAL)
       {
-        dump_variable_assignment (eval_ret_operand (), expr);
+        dump_variable_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET),
+                                  expr);
       }
 
       JSP_COMPLETE_STATEMENT_PARSE ();
@@ -4595,7 +4622,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     if (scope_type == SCOPE_TYPE_EVAL)
     {
-      dump_retval (eval_ret_operand ());
+      dump_retval (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET));
     }
     else
     {
