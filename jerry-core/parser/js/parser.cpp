@@ -2140,9 +2140,13 @@ jsp_parse_source_element_list (void)
 
             current_token_must_be_check_and_skip_it (TOK_CLOSE_SQUARE);
 
-            subexpr_operand = dump_get_value_if_ref (subexpr_operand,
-                                                     subexpr_prop_name_operand,
-                                                     is_subexpr_value_based_reference);
+            /*
+             * FIXME:
+             *       evaluation order - change to dump_get_value_if_ref
+             */
+            subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                                 subexpr_prop_name_operand,
+                                                                 is_subexpr_value_based_reference);
 
             state_p->u.expression.prop_name_operand = subexpr_operand;
             state_p->is_value_based_reference = true;
@@ -2233,9 +2237,13 @@ jsp_parse_source_element_list (void)
 
           current_token_must_be (TOK_CLOSE_SQUARE);
 
-          subexpr_operand = dump_get_value_if_ref (subexpr_operand,
-                                                   subexpr_prop_name_operand,
-                                                   is_subexpr_value_based_reference);
+          /*
+           * FIXME:
+           *       evaluation order - change to dump_get_value_if_ref
+           */
+          subexpr_operand = dump_get_value_if_value_based_ref (subexpr_operand,
+                                                               subexpr_prop_name_operand,
+                                                               is_subexpr_value_based_reference);
           state_p->u.expression.prop_name_operand = subexpr_operand;
           state_p->is_value_based_reference = true;
         }
