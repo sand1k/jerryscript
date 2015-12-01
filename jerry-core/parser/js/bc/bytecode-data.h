@@ -19,6 +19,7 @@
 #include "opcodes.h"
 #include "mem-allocator.h"
 #include "lit-id-hash-table.h"
+#include "scopes-tree.h"
 
 /*
  * All literals are kept in the 'literals' array.
@@ -59,6 +60,11 @@ void jsp_bc_remove_bytecode_data (const bytecode_data_header_t *);
 
 vm_instr_t bc_get_instr (const bytecode_data_header_t *,
                          vm_instr_counter_t);
+
+void bc_print_instrs (const bytecode_data_header_t *bytecode_data_p);
+
+const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
+
 void jsp_bc_finalize ();
 
 #endif /* BYTECODE_DATA_H */

@@ -4572,6 +4572,8 @@ skip_case_clause_body (void)
   }
 }
 
+
+
 /**
  * Parse program
  *
@@ -4606,7 +4608,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
   jsp_mm_init ();
 
-  serializer_set_show_instrs (parser_show_instrs);
   dumper_init (parser_show_instrs);
   jsp_early_error_init ();
 
@@ -4649,7 +4650,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_early_error_free ();
 
-    *out_bytecode_data_p = serializer_merge_scopes_into_bytecode ();
+    *out_bytecode_data_p = bc_merge_scopes_into_bytecode (dumper_get_scope (),
+                                                          parser_show_instrs);
 
     dumper_free ();
 
