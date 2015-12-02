@@ -412,7 +412,7 @@ jsp_dmp_gen_instr (vm_op_t opcode, /**< operation code */
     {
       instr.data.raw_args[i] = ops[i].get_idx_const ();
     }
-    else if (ops[i].is_register_operand ())
+    else if (ops[i].is_register_operand () || ops[i].is_this_operand ())
     {
       instr.data.raw_args[i] = ops[i].get_idx ();
     }
@@ -1009,7 +1009,7 @@ dump_call_additional_info (opcode_call_flags_t flags, /**< call flags */
 {
   if (flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
   {
-    JERRY_ASSERT (this_arg.is_register_operand ());
+    JERRY_ASSERT (this_arg.is_register_operand () || this_arg.is_this_operand ());
     JERRY_ASSERT (!operand_is_empty (this_arg));
   }
   else

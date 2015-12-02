@@ -973,8 +973,7 @@ dump_get_value_if_ref (jsp_state_t *state_p)
 
     val = reg;
   }
-  else if (obj.is_register_operand ()
-           && !(obj.get_idx () >= VM_REG_GENERAL_FIRST && obj.get_idx () <= VM_REG_GENERAL_LAST))
+  else if (obj.is_this_operand ())
   {
     jsp_operand_t general_reg = tmp_operand ();
 
@@ -1686,7 +1685,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           }
           case TOK_KW_THIS:
           {
-            state_p->u.expression.operand = jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_THIS_BINDING);
+            state_p->u.expression.operand = jsp_operand_t::make_this_operand ();
             break;
           }
           case TOK_KW_NEW:

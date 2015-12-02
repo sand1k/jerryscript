@@ -32,6 +32,7 @@ public:
     EMPTY, /**< empty operand */
     LITERAL, /**< operand contains literal value */
     IDENTIFIER, /**< Identifier reference */
+    THIS_BINDING, /**< ThisBinding operand */
     TMP, /**< operand contains byte-code register index */
     IDX_CONST, /**< operand contains an integer constant that fits vm_idx_t */
     UNKNOWN, /**< operand, representing unknown value that would be rewritten later */
@@ -66,6 +67,21 @@ public:
 
     return ret;
   } /* make_empty_operand */
+
+  /**
+   * Construct ThisBinding operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_this_operand (void)
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::THIS_BINDING;
+
+    return ret;
+  } /* make_this_operand */
 
   /**
    * Construct unknown operand
@@ -176,6 +192,19 @@ public:
   } /* is_empty_operand */
 
   /**
+   * Is it ThisBinding operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_this_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::THIS_BINDING);
+  } /* is_this_operand */
+
+  /**
    * Is it unknown operand?
    *
    * @return true / false
@@ -269,6 +298,10 @@ public:
     else if (_type == jsp_operand_t::LITERAL)
     {
       return VM_IDX_REWRITE_LITERAL_UID;
+    }
+    else if (_type == jsp_operand_t::THIS_BINDING)
+    {
+      return VM_REG_SPECIAL_THIS_BINDING;
     }
     else
     {
