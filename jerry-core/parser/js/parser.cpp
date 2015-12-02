@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "bytecode-data.h"
 #include "ecma-helpers.h"
 #include "hash-table.h"
 #include "jrt-libc-includes.h"
@@ -23,7 +24,6 @@
 #include "parser.h"
 #include "re-parser.h"
 #include "scopes-tree.h"
-#include "serializer.h"
 #include "stack.h"
 #include "jsp-early-error.h"
 #include "vm.h"
@@ -504,7 +504,6 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   scopes_tree func_scope = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
 
-  serializer_set_scope (func_scope);
   dumper_set_scope (func_scope);
   scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
 
@@ -683,7 +682,6 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 
   rewrite_function_end (function_end_pos);
 
-  serializer_set_scope (parent_scope);
   dumper_set_scope (parent_scope);
 
   if (is_function_expression)
@@ -3245,7 +3243,7 @@ jsp_parse_source_element_list (void)
             /* end of LogicalAndExpression */
             JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
-            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
+            vm_instr_counter_t target_oc = dumper_get_current_instr_counter ();
 
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
             while (*rewrite_chain_p != MAX_OPCODES)
@@ -3360,7 +3358,7 @@ jsp_parse_source_element_list (void)
             /* end of LogicalOrExpression */
             JERRY_ASSERT (state_p->u.expression.token_type == TOK_EMPTY);
 
-            vm_instr_counter_t target_oc = serializer_get_current_instr_counter ();
+            vm_instr_counter_t target_oc = dumper_get_current_instr_counter ();
 
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
             while (*rewrite_chain_p != MAX_OPCODES)
@@ -3935,7 +3933,7 @@ jsp_parse_source_element_list (void)
         skip_token ();
 
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+        state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
         parse_expression_inside_parens_begin ();
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
@@ -3957,7 +3955,7 @@ jsp_parse_source_element_list (void)
       else
       {
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+        state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
         rewrite_jump_to_end (state_p->u.statement.u.iterational.u.loop_while.jump_to_end_pos);
 
@@ -4015,7 +4013,7 @@ jsp_parse_source_element_list (void)
 
         // Setup ContinueTarget
         JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-        state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+        state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
         // Increment
         seek_token (state_p->u.statement.u.iterational.u.loop_for.u2.increment_expr_loc);
@@ -4163,7 +4161,7 @@ jsp_parse_source_element_list (void)
 
       // Setup ContinueTarget
       JERRY_ASSERT (state_p->u.statement.u.iterational.continue_tgt_oc == MAX_OPCODES);
-      state_p->u.statement.u.iterational.continue_tgt_oc = serializer_get_current_instr_counter ();
+      state_p->u.statement.u.iterational.continue_tgt_oc = dumper_get_current_instr_counter ();
 
       // Write position of for-in end to for_in instruction
       rewrite_for_in (state_p->u.statement.u.iterational.u.loop_for_in.header_pos);
@@ -4544,7 +4542,7 @@ jsp_parse_source_element_list (void)
       JERRY_ASSERT (!state_p->is_completed);
 
       vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.breaks_rewrite_chain;
-      vm_instr_counter_t break_tgt_oc = serializer_get_current_instr_counter ();
+      vm_instr_counter_t break_tgt_oc = dumper_get_current_instr_counter ();
 
       while (*rewrite_chain_p != MAX_OPCODES)
       {
@@ -4612,7 +4610,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
   jsp_early_error_init ();
 
   scopes_tree scope = scopes_tree_init (NULL, scope_type);
-  serializer_set_scope (scope);
   dumper_set_scope (scope);
   scopes_tree_set_strict_mode (scope, is_strict);
 
@@ -4660,7 +4657,6 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
       *out_contains_functions_p = scope->contains_functions;
     }
 
-    serializer_set_scope (NULL);
     dumper_set_scope (NULL);
     scopes_tree_free (scope);
 
