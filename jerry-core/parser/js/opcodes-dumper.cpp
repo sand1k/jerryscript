@@ -15,7 +15,6 @@
 
 #include "jsp-early-error.h"
 #include "opcodes-dumper.h"
-#include "serializer.h"
 #include "pretty-printer.h"
 
 /**
@@ -106,6 +105,12 @@ dumper_set_scope (scopes_tree scope_p)
 {
   current_scope_p = scope_p;
 } /* dumper_set_scope */
+
+vm_instr_counter_t
+dumper_get_current_instr_counter (void)
+{
+  return scopes_tree_instrs_num (current_scope_p);
+}
 
 void
 dumper_dump_op_meta (op_meta op)
@@ -546,7 +551,7 @@ dump_triple_address (vm_op_t opcode,
 static vm_instr_counter_t
 get_diff_from (vm_instr_counter_t oc)
 {
-  return (vm_instr_counter_t) (serializer_get_current_instr_counter () - oc);
+  return (vm_instr_counter_t) (dumper_get_current_instr_counter () - oc);
 }
 
 jsp_operand_t
@@ -758,7 +763,7 @@ dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
 vm_instr_counter_t
 dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
 {
-  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+  vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
   switch (vlt)
   {
@@ -987,7 +992,9 @@ rewrite_function_end (vm_instr_counter_t pos)
 {
   vm_instr_counter_t oc;
   {
-    oc = (vm_instr_counter_t) (get_diff_from (pos) + serializer_count_instrs_in_subscopes ());
+    vm_instr_counter_t instrs_in_subscopes = (vm_instr_counter_t) (scopes_tree_count_instructions (current_scope_p)
+                                                                   - scopes_tree_instrs_num (current_scope_p));
+    oc = (vm_instr_counter_t) (get_diff_from (pos) + instrs_in_subscopes);
   }
 
   vm_idx_t id1, id2;
@@ -1207,7 +1214,7 @@ dump_bitwise_or (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
 vm_instr_counter_t
 dump_conditional_check_for_rewrite (jsp_operand_t op)
 {
-  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+  vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_IS_FALSE_JMP_DOWN,
                        op,
@@ -1235,7 +1242,7 @@ rewrite_conditional_check (vm_instr_counter_t pos)
 vm_instr_counter_t
 dump_jump_to_end_for_rewrite (void)
 {
-  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+  vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
   dump_double_address (VM_OP_JMP_DOWN,
                        jsp_operand_t::make_unknown_operand (),
@@ -1262,14 +1269,14 @@ rewrite_jump_to_end (vm_instr_counter_t pos)
 vm_instr_counter_t
 dumper_set_next_iteration_target (void)
 {
-  return serializer_get_current_instr_counter ();
+  return dumper_get_current_instr_counter ();
 }
 
 void
 dump_continue_iterations_check (vm_instr_counter_t pos,
                                 jsp_operand_t op)
 {
-  const vm_instr_counter_t diff = (vm_instr_counter_t) (serializer_get_current_instr_counter () - pos);
+  const vm_instr_counter_t diff = (vm_instr_counter_t) (dumper_get_current_instr_counter () - pos);
   vm_idx_t id1, id2;
   split_instr_counter (diff, &id1, &id2);
 
@@ -1308,7 +1315,7 @@ dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode *
   vm_idx_t id1, id2;
   split_instr_counter (next_jump_for_tgt_oc, &id1, &id2);
 
-  vm_instr_counter_t ret = serializer_get_current_instr_counter ();
+  vm_instr_counter_t ret = dumper_get_current_instr_counter ();
 
   if (jmp_opcode == VM_OP_JMP_DOWN
       || jmp_opcode == VM_OP_JMP_UP
@@ -1424,7 +1431,7 @@ start_dumping_case_clauses (void)
 vm_instr_counter_t
 dump_case_clause_check_for_rewrite (jsp_operand_t cond)
 {
-  vm_instr_counter_t jmp_oc = serializer_get_current_instr_counter ();
+  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_IS_TRUE_JMP_DOWN,
                        cond,
@@ -1437,7 +1444,7 @@ dump_case_clause_check_for_rewrite (jsp_operand_t cond)
 vm_instr_counter_t
 dump_default_clause_check_for_rewrite (void)
 {
-  vm_instr_counter_t jmp_oc = serializer_get_current_instr_counter ();
+  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
 
   dump_double_address (VM_OP_JMP_DOWN,
                        jsp_operand_t::make_unknown_operand (),
@@ -1493,7 +1500,7 @@ vm_instr_counter_t
 dump_with_for_rewrite (jsp_operand_t op) /**< jsp_operand_t - result of evaluating Expression
                                           *   in WithStatement */
 {
-  vm_instr_counter_t oc = serializer_get_current_instr_counter ();
+  vm_instr_counter_t oc = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_WITH,
                        op,
@@ -1545,7 +1552,7 @@ vm_instr_counter_t
 dump_for_in_for_rewrite (jsp_operand_t op) /**< jsp_operand_t - result of evaluating Expression
                                             *   in for-in statement */
 {
-  vm_instr_counter_t oc = serializer_get_current_instr_counter ();
+  vm_instr_counter_t oc = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_FOR_IN,
                        op,
@@ -1588,7 +1595,7 @@ dump_for_in_end (void)
 vm_instr_counter_t
 dump_try_for_rewrite (void)
 {
-  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+  vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
   dump_double_address (VM_OP_TRY_BLOCK,
                        jsp_operand_t::make_unknown_operand (),
@@ -1615,7 +1622,7 @@ rewrite_try (vm_instr_counter_t pos)
 vm_instr_counter_t
 dump_catch_for_rewrite (jsp_operand_t op)
 {
-  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+  vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
   JERRY_ASSERT (op.is_literal_operand ());
 
@@ -1651,7 +1658,7 @@ rewrite_catch (vm_instr_counter_t pos)
 vm_instr_counter_t
 dump_finally_for_rewrite (void)
 {
-  vm_instr_counter_t pos = serializer_get_current_instr_counter ();
+  vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_FINALLY),
@@ -1718,7 +1725,7 @@ dump_variable_declaration (lit_cpointer_t lit_id) /**< literal which holds varia
 vm_instr_counter_t
 dump_scope_code_flags_for_rewrite (void)
 {
-  vm_instr_counter_t oc = serializer_get_current_instr_counter ();
+  vm_instr_counter_t oc = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_SCOPE_CODE_FLAGS),
@@ -1762,7 +1769,7 @@ dump_ret (void)
 vm_instr_counter_t
 dump_reg_var_decl_for_rewrite (void)
 {
-  vm_instr_counter_t oc = serializer_get_current_instr_counter ();
+  vm_instr_counter_t oc = dumper_get_current_instr_counter ();
 
   dump_triple_address (VM_OP_REG_VAR_DECL,
                        jsp_operand_t::make_unknown_operand (),

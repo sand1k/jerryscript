@@ -32,7 +32,6 @@
 #include "ecma-reference.h"
 #include "ecma-regexp-object.h"
 #include "ecma-try-catch-macro.h"
-#include "serializer.h"
 
 bool vm_is_reg_variable (vm_idx_t);
 ecma_completion_value_t get_variable_value (vm_frame_ctx_t *, vm_idx_t, bool);

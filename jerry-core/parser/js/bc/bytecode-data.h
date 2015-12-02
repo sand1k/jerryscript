@@ -67,4 +67,23 @@ const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
 
 void jsp_bc_finalize ();
 
+lit_cpointer_t
+bc_get_literal_cp_by_uid (uint8_t,
+                          const bytecode_data_header_t *,
+                          vm_instr_counter_t);
+
+
+#ifdef JERRY_ENABLE_SNAPSHOT
+/*
+ * Snapshot-related
+ */
+bool bc_save_bytecode_with_idx_map (uint8_t *, size_t, size_t *, const bytecode_data_header_t *,
+                                    const lit_mem_to_snapshot_id_map_entry_t *, uint32_t,
+                                    uint32_t *, uint32_t *);
+
+const bytecode_data_header_t *
+bc_load_bytecode_with_idx_map (const uint8_t *, uint32_t, uint32_t,
+                               const lit_mem_to_snapshot_id_map_entry_t *, uint32_t, bool);
+#endif /* JERRY_ENABLE_SNAPSHOT */
+
 #endif /* BYTECODE_DATA_H */

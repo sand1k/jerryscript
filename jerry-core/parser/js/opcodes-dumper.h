@@ -20,7 +20,6 @@
 #include "lexer.h"
 #include "opcodes.h"
 #include "scopes-tree.h"
-#include "serializer.h"
 
 /**
  * Operand (descriptor of value or reference in context of parser)
@@ -353,6 +352,7 @@ void dumper_free (void);
 
 scopes_tree dumper_get_scope (void);
 void dumper_set_scope (scopes_tree scope_p);
+vm_instr_counter_t dumper_get_current_instr_counter (void);
 
 void dumper_start_move_of_vars_to_regs ();
 bool dumper_start_move_of_args_to_regs (uint32_t args_num);
