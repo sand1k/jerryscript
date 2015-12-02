@@ -26,7 +26,7 @@ static vm_idx_t jsp_reg_next;
  * Maximum identifier of a register, allocated for intermediate value storage
  *
  * See also:
- *          dumper_new_scope, dumper_finish_scope
+ *          dumper_save_reg_alloc_ctx, dumper_restore_reg_alloc_ctx
  */
 static vm_idx_t jsp_reg_max_for_temps;
 
@@ -412,13 +412,24 @@ jsp_dmp_gen_instr (vm_op_t opcode, /**< operation code */
     {
       instr.data.raw_args[i] = ops[i].get_idx_const ();
     }
-    else if (ops[i].is_register_operand ())
+    else if (ops[i].is_smallint_operand ())
+    {
+      instr.data.raw_args[i] = ops[i].get_smallint_value ();
+    }
+    else if (ops[i].is_simple_value_operand ())
+    {
+      instr.data.raw_args[i] = ops[i].get_simple_value ();
+    }
+    else if (ops[i].is_register_operand () || ops[i].is_this_operand ())
     {
       instr.data.raw_args[i] = ops[i].get_idx ();
     }
     else
     {
-      JERRY_ASSERT (ops[i].is_literal_operand () || ops[i].is_identifier_operand ());
+      JERRY_ASSERT (ops[i].is_number_lit_operand ()
+                    || ops[i].is_string_lit_operand ()
+                    || ops[i].is_regexp_lit_operand ()
+                    || ops[i].is_identifier_operand ());
 
       instr.data.raw_args[i] = VM_IDX_REWRITE_LITERAL_UID;
     }
@@ -449,7 +460,9 @@ jsp_dmp_create_op_meta (vm_op_t opcode, /**< opcode */
 
   for (size_t i = 0; i < ops_num; i++)
   {
-    if (ops[i].is_literal_operand ())
+    if (ops[i].is_number_lit_operand ()
+        || ops[i].is_string_lit_operand ()
+        || ops[i].is_regexp_lit_operand ())
     {
       ret.lit_id[i] = ops[i].get_literal ();
     }
@@ -587,12 +600,6 @@ empty_operand (void)
   return jsp_operand_t::make_empty_operand ();
 }
 
-jsp_operand_t
-literal_operand (lit_cpointer_t lit_cp)
-{
-  return jsp_operand_t::make_lit_operand (lit_cp);
-}
-
 bool
 operand_is_empty (jsp_operand_t op)
 {
@@ -606,8 +613,8 @@ dumper_new_statement (void)
 }
 
 void
-dumper_new_scope (vm_idx_t *out_saved_reg_next_p,
-                  vm_idx_t *out_saved_reg_max_for_temps_p)
+dumper_save_reg_alloc_ctx (vm_idx_t *out_saved_reg_next_p,
+                           vm_idx_t *out_saved_reg_max_for_temps_p)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
@@ -620,13 +627,22 @@ dumper_new_scope (vm_idx_t *out_saved_reg_next_p,
 }
 
 void
-dumper_finish_scope (vm_idx_t saved_reg_next,
-                     vm_idx_t saved_reg_max_for_temps)
+dumper_restore_reg_alloc_ctx (vm_idx_t saved_reg_next,
+                              vm_idx_t saved_reg_max_for_temps,
+                              bool is_overwrite_max)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
 
-  jsp_reg_max_for_temps = saved_reg_max_for_temps;
+  if (is_overwrite_max)
+  {
+    jsp_reg_max_for_temps = saved_reg_max_for_temps;
+  }
+  else
+  {
+    jsp_reg_max_for_temps = JERRY_MAX (jsp_reg_max_for_temps, saved_reg_max_for_temps);
+  }
+
   jsp_reg_next = saved_reg_next;
 }
 
@@ -686,103 +702,39 @@ dumper_is_eval_literal (jsp_operand_t obj) /**< byte-code operand */
   return is_eval_lit;
 } /* dumper_is_eval_literal */
 
-/**
- * Dump assignment of an array-hole simple value
- */
-void
-dump_array_hole_assignment (jsp_operand_t op)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_ARRAY_HOLE);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-} /* dump_array_hole_assignment */
-
-void
-dump_boolean_assignment (jsp_operand_t op, bool is_true)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (is_true ? ECMA_SIMPLE_VALUE_TRUE : ECMA_SIMPLE_VALUE_FALSE);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_string_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_STRING);
-  value_operand = jsp_operand_t::make_lit_operand (lit_id);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_number_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_NUMBER);
-  value_operand = jsp_operand_t::make_lit_operand (lit_id);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_regexp_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_REGEXP);
-  value_operand = jsp_operand_t::make_lit_operand (lit_id);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_smallint_assignment (jsp_operand_t op, vm_idx_t uid)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SMALLINT);
-  value_operand = jsp_operand_t::make_idx_const_operand (uid);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_undefined_assignment (jsp_operand_t op)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_UNDEFINED);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_null_assignment (jsp_operand_t op)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_NULL);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
 void
 dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
 {
   jsp_operand_t type_operand;
 
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_VARIABLE);
+  if (var.is_string_lit_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_STRING);
+  }
+  else if (var.is_number_lit_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_NUMBER);
+  }
+  else if (var.is_regexp_lit_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_REGEXP);
+  }
+  else if (var.is_smallint_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SMALLINT);
+  }
+  else if (var.is_simple_value_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
+  }
+  else
+  {
+    JERRY_ASSERT (var.is_identifier_operand ()
+                  || var.is_register_operand ()
+                  || var.is_this_operand ());
+
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_VARIABLE);
+  }
 
   dump_triple_address (VM_OP_ASSIGNMENT, res, type_operand, var);
 }
@@ -1009,7 +961,7 @@ dump_call_additional_info (opcode_call_flags_t flags, /**< call flags */
 {
   if (flags & OPCODE_CALL_FLAGS_HAVE_THIS_ARG)
   {
-    JERRY_ASSERT (this_arg.is_register_operand ());
+    JERRY_ASSERT (this_arg.is_register_operand () || this_arg.is_this_operand ());
     JERRY_ASSERT (!operand_is_empty (this_arg));
   }
   else
@@ -1035,11 +987,7 @@ dump_varg (jsp_operand_t op)
 void
 dump_prop_name_and_value (jsp_operand_t name, jsp_operand_t value)
 {
-  JERRY_ASSERT (name.is_literal_operand ());
-  literal_t lit = lit_get_literal_by_cp (name.get_literal ());
-  JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_EX_T);
+  JERRY_ASSERT (name.is_string_lit_operand ());
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_VARG_PROP_DATA),
@@ -1050,12 +998,8 @@ dump_prop_name_and_value (jsp_operand_t name, jsp_operand_t value)
 void
 dump_prop_getter_decl (jsp_operand_t name, jsp_operand_t func)
 {
-  JERRY_ASSERT (name.is_literal_operand ());
+  JERRY_ASSERT (name.is_string_lit_operand ());
   JERRY_ASSERT (func.is_register_operand ());
-  literal_t lit = lit_get_literal_by_cp (name.get_literal ());
-  JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_EX_T);
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_VARG_PROP_GETTER),
@@ -1066,12 +1010,8 @@ dump_prop_getter_decl (jsp_operand_t name, jsp_operand_t func)
 void
 dump_prop_setter_decl (jsp_operand_t name, jsp_operand_t func)
 {
-  JERRY_ASSERT (name.is_literal_operand ());
+  JERRY_ASSERT (name.is_string_lit_operand ());
   JERRY_ASSERT (func.is_register_operand ());
-  literal_t lit = lit_get_literal_by_cp (name.get_literal ());
-  JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_EX_T);
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_VARG_PROP_SETTER),
@@ -1123,59 +1063,11 @@ rewrite_function_end (vm_instr_counter_t pos)
 }
 
 void
-dump_unary_plus (jsp_operand_t res, jsp_operand_t obj)
-{
-  dump_double_address (VM_OP_UNARY_PLUS, res, obj);
-}
-
-void
-dump_unary_minus (jsp_operand_t res, jsp_operand_t obj)
-{
-  dump_double_address (VM_OP_UNARY_MINUS, res, obj);
-}
-
-void
-dump_bitwise_not (jsp_operand_t res, jsp_operand_t obj)
-{
-  dump_double_address (VM_OP_B_NOT, res, obj);
-}
-
-void
-dump_logical_not (jsp_operand_t res, jsp_operand_t obj)
-{
-  dump_double_address (VM_OP_LOGICAL_NOT, res, obj);
-}
-
-void
 dump_delete_prop (jsp_operand_t res,
                   jsp_operand_t base,
                   jsp_operand_t prop_name)
 {
   dump_triple_address (VM_OP_DELETE_PROP, res, base, prop_name);
-}
-
-void
-dump_delete (jsp_operand_t res, jsp_operand_t op)
-{
-  if (op.is_identifier_operand ())
-  {
-    literal_t lit = lit_get_literal_by_cp (op.get_identifier_name ());
-    JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                  || lit->get_type () == LIT_MAGIC_STR_T
-                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
-
-    dump_double_address (VM_OP_DELETE_VAR, res, op);
-  }
-  else
-  {
-    dump_boolean_assignment (res, true);
-  }
-}
-
-void
-dump_typeof (jsp_operand_t res, jsp_operand_t op)
-{
-  dump_double_address (VM_OP_TYPEOF, res, op);
 }
 
 void
@@ -1193,132 +1085,6 @@ dump_binary_op (vm_op_t opcode,
                 jsp_operand_t op2)
 {
   dump_triple_address (opcode, res, op1, op2);
-}
-
-void
-dump_multiplication (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_MULTIPLICATION, res, lhs, rhs);
-}
-
-void
-dump_division (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_DIVISION, res, lhs, rhs);
-}
-
-void
-dump_remainder (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_REMAINDER, res, lhs, rhs);
-}
-
-void
-dump_addition (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_ADDITION, res, lhs, rhs);
-}
-
-void
-dump_substraction (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_SUBSTRACTION, res, lhs, rhs);
-}
-
-void
-dump_left_shift (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_B_SHIFT_LEFT, res, lhs, rhs);
-}
-
-void
-dump_right_shift (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_B_SHIFT_RIGHT, res, lhs, rhs);
-}
-
-void
-dump_right_shift_ex (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_B_SHIFT_URIGHT, res, lhs, rhs);
-}
-
-void
-dump_less_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_LESS_THAN, res, lhs, rhs);
-}
-
-void
-dump_greater_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_GREATER_THAN, res, lhs, rhs);
-}
-
-void
-dump_less_or_equal_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_LESS_OR_EQUAL_THAN, res, lhs, rhs);
-}
-
-void
-dump_greater_or_equal_than (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_GREATER_OR_EQUAL_THAN, res, lhs, rhs);
-}
-
-void
-dump_instanceof (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_INSTANCEOF, res, lhs, rhs);
-}
-
-void
-dump_in (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_IN, res, lhs, rhs);
-}
-
-void
-dump_equal_value (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_EQUAL_VALUE, res, lhs, rhs);
-}
-
-void
-dump_not_equal_value (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_NOT_EQUAL_VALUE, res, lhs, rhs);
-}
-
-void
-dump_equal_value_type (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_EQUAL_VALUE_TYPE, res, lhs, rhs);
-}
-
-void
-dump_not_equal_value_type (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_NOT_EQUAL_VALUE_TYPE, res, lhs, rhs);
-}
-
-void
-dump_bitwise_and (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_B_AND, res, lhs, rhs);
-}
-
-void
-dump_bitwise_xor (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_B_XOR, res, lhs, rhs);
-}
-
-void
-dump_bitwise_or (jsp_operand_t res, jsp_operand_t lhs, jsp_operand_t rhs)
-{
-  dump_triple_address (VM_OP_B_OR, res, lhs, rhs);
 }
 
 vm_instr_counter_t
@@ -1414,7 +1180,12 @@ dump_continue_iterations_check (vm_instr_counter_t pos,
  * @return position of dumped instruction
  */
 vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode */
+dump_simple_or_nested_jump_for_rewrite (bool is_nested, /**< flag, indicating whether nested (true)
+                                                         *   or simple (false) jump should be dumped */
+                                        bool is_conditional, /**< flag, indicating whether conditional (true)
+                                                              *   or unconditional jump should be dumped */
+                                        bool is_inverted_condition, /**< if is_conditional is set, this flag
+                                                                     *   indicates whether to invert the condition */
                                         jsp_operand_t cond, /**< condition (for conditional jumps),
                                                              *   empty operand - for non-conditional */
                                         vm_instr_counter_t next_jump_for_tgt_oc) /**< instr counter of next
@@ -1427,8 +1198,29 @@ dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode *
 
   vm_instr_counter_t ret = dumper_get_current_instr_counter ();
 
+  vm_op_t jmp_opcode;
+
+  if (is_nested)
+  {
+    jmp_opcode = VM_OP_JMP_BREAK_CONTINUE;
+  }
+  else if (is_conditional)
+  {
+    if (is_inverted_condition)
+    {
+      jmp_opcode = VM_OP_IS_FALSE_JMP_DOWN;
+    }
+    else
+    {
+      jmp_opcode = VM_OP_IS_TRUE_JMP_DOWN;
+    }
+  }
+  else
+  {
+    jmp_opcode = VM_OP_JMP_DOWN;
+  }
+
   if (jmp_opcode == VM_OP_JMP_DOWN
-      || jmp_opcode == VM_OP_JMP_UP
       || jmp_opcode == VM_OP_JMP_BREAK_CONTINUE)
   {
     JERRY_ASSERT (cond.is_empty_operand ());
@@ -1439,9 +1231,9 @@ dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode *
   }
   else
   {
+    JERRY_ASSERT (!cond.is_empty_operand ());
+
     JERRY_ASSERT (jmp_opcode == VM_OP_IS_FALSE_JMP_DOWN
-                  || jmp_opcode == VM_OP_IS_TRUE_JMP_UP
-                  || jmp_opcode == VM_OP_IS_FALSE_JMP_UP
                   || jmp_opcode == VM_OP_IS_TRUE_JMP_DOWN);
 
     dump_triple_address (jmp_opcode,
@@ -1467,59 +1259,83 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
   vm_op_t jmp_opcode = (vm_op_t) jump_op_meta.op.op_idx;
 
   vm_idx_t id1, id2, id1_prev, id2_prev;
-  split_instr_counter ((vm_instr_counter_t) (target_oc - jump_oc), &id1, &id2);
+  if (target_oc < jump_oc)
+  {
+    split_instr_counter ((vm_instr_counter_t) (jump_oc - target_oc), &id1, &id2);
+  }
+  else
+  {
+    split_instr_counter ((vm_instr_counter_t) (target_oc - jump_oc), &id1, &id2);
+  }
 
   if (jmp_opcode == VM_OP_JMP_DOWN)
   {
-    id1_prev = jump_op_meta.op.data.jmp_down.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.jmp_down.oc_idx_2;
+    if (target_oc < jump_oc)
+    {
+      jump_op_meta.op.op_idx = VM_OP_JMP_UP;
 
-    jump_op_meta.op.data.jmp_down.oc_idx_1 = id1;
-    jump_op_meta.op.data.jmp_down.oc_idx_2 = id2;
-  }
-  else if (jmp_opcode == VM_OP_JMP_UP)
-  {
-    id1_prev = jump_op_meta.op.data.jmp_up.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.jmp_up.oc_idx_2;
+      id1_prev = jump_op_meta.op.data.jmp_up.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.jmp_up.oc_idx_2;
 
-    jump_op_meta.op.data.jmp_up.oc_idx_1 = id1;
-    jump_op_meta.op.data.jmp_up.oc_idx_2 = id2;
+      jump_op_meta.op.data.jmp_up.oc_idx_1 = id1;
+      jump_op_meta.op.data.jmp_up.oc_idx_2 = id2;
+    }
+    else
+    {
+      id1_prev = jump_op_meta.op.data.jmp_down.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.jmp_down.oc_idx_2;
+
+      jump_op_meta.op.data.jmp_down.oc_idx_1 = id1;
+      jump_op_meta.op.data.jmp_down.oc_idx_2 = id2;
+    }
   }
   else if (jmp_opcode == VM_OP_IS_TRUE_JMP_DOWN)
   {
-    id1_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_2;
+    if (target_oc < jump_oc)
+    {
+      jump_op_meta.op.op_idx = VM_OP_IS_TRUE_JMP_UP;
 
-    jump_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
-  }
-  else if (jmp_opcode == VM_OP_IS_TRUE_JMP_UP)
-  {
-    id1_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_2;
+      id1_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_2;
 
-    jump_op_meta.op.data.is_true_jmp_up.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_true_jmp_up.oc_idx_2 = id2;
+      jump_op_meta.op.data.is_true_jmp_up.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_true_jmp_up.oc_idx_2 = id2;
+    }
+    else
+    {
+      id1_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_2;
+
+      jump_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
+    }
   }
   else if (jmp_opcode == VM_OP_IS_FALSE_JMP_DOWN)
   {
-    id1_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_2;
+    if (target_oc < jump_oc)
+    {
+      jump_op_meta.op.op_idx = VM_OP_IS_FALSE_JMP_UP;
 
-    jump_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_false_jmp_down.oc_idx_2 = id2;
-  }
-  else if (jmp_opcode == VM_OP_IS_FALSE_JMP_UP)
-  {
-    id1_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_2;
+      id1_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_2;
 
-    jump_op_meta.op.data.is_false_jmp_up.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_false_jmp_up.oc_idx_2 = id2;
+      jump_op_meta.op.data.is_false_jmp_up.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_false_jmp_up.oc_idx_2 = id2;
+    }
+    else
+    {
+      id1_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_2;
+
+      jump_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_false_jmp_down.oc_idx_2 = id2;
+    }
   }
   else
   {
     JERRY_ASSERT (!is_generate_bytecode || (jmp_opcode == VM_OP_JMP_BREAK_CONTINUE));
+
+    JERRY_ASSERT (target_oc > jump_oc);
 
     id1_prev = jump_op_meta.op.data.jmp_break_continue.oc_idx_1;
     id2_prev = jump_op_meta.op.data.jmp_break_continue.oc_idx_2;
@@ -1532,71 +1348,6 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
 
   return vm_calc_instr_counter_from_idx_idx (id1_prev, id2_prev);
 } /* rewrite_simple_or_nested_jump_get_next */
-
-void
-start_dumping_case_clauses (void)
-{
-}
-
-vm_instr_counter_t
-dump_case_clause_check_for_rewrite (jsp_operand_t cond)
-{
-  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
-
-  dump_triple_address (VM_OP_IS_TRUE_JMP_DOWN,
-                       cond,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-
-  return jmp_oc;
-}
-
-vm_instr_counter_t
-dump_default_clause_check_for_rewrite (void)
-{
-  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
-
-  dump_double_address (VM_OP_JMP_DOWN,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-
-  return jmp_oc;
-}
-
-void
-rewrite_case_clause (vm_instr_counter_t jmp_oc)
-{
-  vm_idx_t id1, id2;
-  split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
-
-  op_meta jmp_op_meta = dumper_get_op_meta (jmp_oc);
-  dumper_assert_op_fields (REWRITE_CASE_CLAUSE, jmp_op_meta);
-
-  jmp_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
-  jmp_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
-
-  dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
-void
-rewrite_default_clause (vm_instr_counter_t jmp_oc)
-{
-  vm_idx_t id1, id2;
-  split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
-
-  op_meta jmp_op_meta = dumper_get_op_meta (jmp_oc);
-  dumper_assert_op_fields (REWRITE_DEFAULT_CLAUSE, jmp_op_meta);
-
-  jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
-  jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
-
-  dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
-void
-finish_dumping_case_clauses (void)
-{
-}
 
 /**
  * Dump template of 'with' instruction.
@@ -1734,7 +1485,7 @@ dump_catch_for_rewrite (jsp_operand_t op)
 {
   vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
-  JERRY_ASSERT (op.is_literal_operand ());
+  JERRY_ASSERT (op.is_string_lit_operand ());
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_CATCH),
@@ -1813,7 +1564,7 @@ dump_throw (jsp_operand_t op)
 void
 dump_variable_declaration (lit_cpointer_t lit_id) /**< literal which holds variable's name */
 {
-  jsp_operand_t op_var_name = jsp_operand_t::make_lit_operand (lit_id);
+  jsp_operand_t op_var_name = jsp_operand_t::make_string_lit_operand (lit_id);
   op_meta op = jsp_dmp_create_op_meta (VM_OP_VAR_DECL, &op_var_name, 1);
 
   JERRY_ASSERT (scopes_tree_instrs_num (current_scope_p)

@@ -18,6 +18,7 @@
 
 #include "ecma-globals.h"
 #include "lexer.h"
+#include "lit-literal.h"
 #include "opcodes.h"
 #include "scopes-tree.h"
 
@@ -30,8 +31,13 @@ public:
   enum type_t : uint8_t
   {
     EMPTY, /**< empty operand */
-    LITERAL, /**< operand contains literal value */
+    STRING_LITERAL, /**< operand contains string literal value */
+    NUMBER_LITERAL, /**< operand contains number literal value */
+    REGEXP_LITERAL, /**< operand contains regexp literal value */
+    SIMPLE_VALUE, /**< operand contains a simple ecma value */
+    SMALLINT, /**< operand contains small integer value (less than 256) */
     IDENTIFIER, /**< Identifier reference */
+    THIS_BINDING, /**< ThisBinding operand */
     TMP, /**< operand contains byte-code register index */
     IDX_CONST, /**< operand contains an integer constant that fits vm_idx_t */
     UNKNOWN, /**< operand, representing unknown value that would be rewritten later */
@@ -68,6 +74,21 @@ public:
   } /* make_empty_operand */
 
   /**
+   * Construct ThisBinding operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_this_operand (void)
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::THIS_BINDING;
+
+    return ret;
+  } /* make_this_operand */
+
+  /**
    * Construct unknown operand
    *
    * @return constructed operand
@@ -99,22 +120,112 @@ public:
   } /* make_idx_const_operand */
 
   /**
-   * Construct literal operand
+   * Construct small integer operand
    *
    * @return constructed operand
    */
   static jsp_operand_t
-  make_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  make_smallint_operand (uint8_t integer_value) /**< small integer value */
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::SMALLINT;
+    ret._data.smallint_value = integer_value;
+
+    return ret;
+  } /* make_smallint_operand */
+
+  /**
+   * Construct simple ecma value operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_simple_value_operand (ecma_simple_value_t simple_value) /**< simple ecma value */
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::SIMPLE_VALUE;
+    ret._data.simple_value = simple_value;
+
+    return ret;
+  } /* make_simple_value_operand */
+
+  /**
+   * Construct string literal operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_string_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
   {
     JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
 
+#ifndef JERRY_NDEBUG
+    literal_t lit = lit_get_literal_by_cp (lit_id);
+
+    JERRY_ASSERT (lit->get_type () == LIT_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
+#endif /* !JERRY_NDEBUG */
+
     jsp_operand_t ret;
 
-    ret._type = jsp_operand_t::LITERAL;
+    ret._type = jsp_operand_t::STRING_LITERAL;
     ret._data.lit_id = lit_id;
 
     return ret;
-  } /* make_lit_operand */
+  } /* make_string_lit_operand */
+
+  /**
+   * Construct RegExp literal operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_regexp_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+#ifndef JERRY_NDEBUG
+    literal_t lit = lit_get_literal_by_cp (lit_id);
+
+    JERRY_ASSERT (lit->get_type () == LIT_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
+#endif /* !JERRY_NDEBUG */
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::REGEXP_LITERAL;
+    ret._data.lit_id = lit_id;
+
+    return ret;
+  } /* make_regexp_lit_operand */
+
+  /**
+   * Construct number literal operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_number_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+#ifndef JERRY_NDEBUG
+    literal_t lit = lit_get_literal_by_cp (lit_id);
+
+    JERRY_ASSERT (lit->get_type () == LIT_NUMBER_T);
+#endif /* !JERRY_NDEBUG */
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::NUMBER_LITERAL;
+    ret._data.lit_id = lit_id;
+
+    return ret;
+  } /* make_number_lit_operand */
 
   /**
    * Construct identifier reference operand
@@ -176,6 +287,19 @@ public:
   } /* is_empty_operand */
 
   /**
+   * Is it ThisBinding operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_this_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::THIS_BINDING);
+  } /* is_this_operand */
+
+  /**
    * Is it unknown operand?
    *
    * @return true / false
@@ -215,17 +339,69 @@ public:
   } /* is_register_operand */
 
   /**
-   * Is it literal operand?
+   * Is it simple ecma value operand?
    *
    * @return true / false
    */
   bool
-  is_literal_operand (void) const
+  is_simple_value_operand (void) const
   {
     JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
 
-    return (_type == jsp_operand_t::LITERAL);
-  } /* is_literal_operand */
+    return (_type == jsp_operand_t::SIMPLE_VALUE);
+  } /* is_simple_value_operand */
+
+  /**
+   * Is it small integer operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_smallint_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::SMALLINT);
+  } /* is_smallint_operand */
+
+  /**
+   * Is it number literal operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_number_lit_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::NUMBER_LITERAL);
+  } /* is_number_lit_operand */
+
+  /**
+   * Is it string literal operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_string_lit_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::STRING_LITERAL);
+  } /* is_string_lit_operand */
+
+  /**
+   * Is it RegExp literal operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_regexp_lit_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::REGEXP_LITERAL);
+  } /* is_regexp_lit_operand */
 
   /**
    * Is it identifier reference operand?
@@ -266,9 +442,14 @@ public:
     {
       return _data.uid;
     }
-    else if (_type == jsp_operand_t::LITERAL)
+    else if (_type == jsp_operand_t::STRING_LITERAL
+             || _type == jsp_operand_t::NUMBER_LITERAL)
     {
       return VM_IDX_REWRITE_LITERAL_UID;
+    }
+    else if (_type == jsp_operand_t::THIS_BINDING)
+    {
+      return VM_REG_SPECIAL_THIS_BINDING;
     }
     else
     {
@@ -293,7 +474,9 @@ public:
     {
       return NOT_A_LITERAL;
     }
-    else if (_type == jsp_operand_t::LITERAL)
+    else if (_type == jsp_operand_t::STRING_LITERAL
+             || _type == jsp_operand_t::NUMBER_LITERAL
+             || _type == jsp_operand_t::REGEXP_LITERAL)
     {
       return _data.lit_id;
     }
@@ -318,6 +501,31 @@ public:
     return _data.idx_const;
   } /* get_idx_const */
 
+  /**
+   * Get small integer constant from operand
+   *
+   * @return an integer
+   */
+  uint8_t
+  get_smallint_value (void) const
+  {
+    JERRY_ASSERT (is_smallint_operand ());
+
+    return _data.smallint_value;
+  } /* get_smallint_value */
+
+  /**
+   * Get simple value from operand
+   *
+   * @return a simple ecma value
+   */
+  ecma_simple_value_t
+  get_simple_value (void) const
+  {
+    JERRY_ASSERT (is_simple_value_operand ());
+
+    return (ecma_simple_value_t) _data.simple_value;
+  } /* get_simple_value */
 private:
   union
   {
@@ -325,6 +533,8 @@ private:
     vm_idx_t uid; /**< register index (for jsp_operand_t::TMP) */
     lit_cpointer_t lit_id; /**< literal (for jsp_operand_t::LITERAL) */
     lit_cpointer_t identifier; /**< Identifier reference (is_value_based_ref flag not set) */
+    uint8_t smallint_value; /**< small integer value */
+    uint8_t simple_value; /**< simple ecma value */
   } _data;
 
   type_t _type; /**< type of operand */
@@ -343,7 +553,6 @@ typedef enum __attr_packed___
 } varg_list_type;
 
 jsp_operand_t empty_operand (void);
-jsp_operand_t literal_operand (lit_cpointer_t);
 jsp_operand_t tmp_operand (void);
 bool operand_is_empty (jsp_operand_t);
 
@@ -361,21 +570,13 @@ bool dumper_try_replace_identifier_name_with_reg (scopes_tree, op_meta *);
 void dumper_alloc_reg_for_unused_arg (void);
 
 void dumper_new_statement (void);
-void dumper_new_scope (vm_idx_t *, vm_idx_t *);
-void dumper_finish_scope (vm_idx_t, vm_idx_t);
+void dumper_save_reg_alloc_ctx (vm_idx_t *, vm_idx_t *);
+void dumper_restore_reg_alloc_ctx (vm_idx_t, vm_idx_t, bool);
 vm_idx_t dumper_start_varg_code_sequence (void);
 void dumper_finish_varg_code_sequence (vm_idx_t);
 
 extern bool dumper_is_eval_literal (jsp_operand_t);
 
-void dump_array_hole_assignment (jsp_operand_t);
-void dump_boolean_assignment (jsp_operand_t, bool);
-void dump_string_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_number_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_regexp_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_smallint_assignment (jsp_operand_t, vm_idx_t);
-void dump_undefined_assignment (jsp_operand_t);
-void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
@@ -392,49 +593,15 @@ void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 void dump_function_end_for_rewrite (void);
 void rewrite_function_end (vm_instr_counter_t);
 
-void dump_unary_plus (jsp_operand_t, jsp_operand_t);
-void dump_unary_minus (jsp_operand_t, jsp_operand_t);
-void dump_bitwise_not (jsp_operand_t, jsp_operand_t);
-void dump_logical_not (jsp_operand_t, jsp_operand_t);
-
-void dump_multiplication (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_division (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_remainder (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_addition (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_substraction (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_left_shift (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_right_shift (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_right_shift_ex (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_less_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_greater_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_less_or_equal_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_greater_or_equal_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_instanceof (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_in (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_equal_value (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_not_equal_value (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_equal_value_type (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_not_equal_value_type (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_bitwise_and (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_bitwise_xor (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-
 vm_instr_counter_t dump_conditional_check_for_rewrite (jsp_operand_t);
 void rewrite_conditional_check (vm_instr_counter_t);
 vm_instr_counter_t dump_jump_to_end_for_rewrite (void);
 void rewrite_jump_to_end (vm_instr_counter_t);
 
 vm_instr_counter_t dumper_set_next_iteration_target (void);
-vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
+vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (bool, bool, bool, jsp_operand_t, vm_instr_counter_t);
 vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (vm_instr_counter_t, jsp_operand_t);
-
-void start_dumping_case_clauses (void);
-vm_instr_counter_t dump_case_clause_check_for_rewrite (jsp_operand_t);
-vm_instr_counter_t dump_default_clause_check_for_rewrite (void);
-void rewrite_case_clause (vm_instr_counter_t);
-void rewrite_default_clause (vm_instr_counter_t);
-void finish_dumping_case_clauses (void);
 
 void dump_delete (jsp_operand_t, jsp_operand_t);
 void dump_delete_prop (jsp_operand_t, jsp_operand_t, jsp_operand_t);
