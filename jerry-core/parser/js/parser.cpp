@@ -4341,24 +4341,13 @@ jsp_parse_source_element_list (void)
       if (state_p->is_default_branch)
       {
         rewrite_default_clause (state_p->u.statement.u.switch_statement.jmp_oc);
-
-        if (token_is (TOK_KW_CASE))
-        {
-          JSP_COMPLETE_STATEMENT_PARSE ();
-          continue;
-        }
       }
       else
       {
         rewrite_case_clause (state_p->u.statement.u.switch_statement.jmp_oc);
-        if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
-        {
-          JSP_COMPLETE_STATEMENT_PARSE ();
-          continue;
-        }
       }
 
-      JSP_PUSH_STATE_AND_STATEMENT_PARSE (JSP_STATE_STAT_STATEMENT_LIST);
+      state_p->state = JSP_STATE_STAT_STATEMENT_LIST;
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH_FINISH)
     {
