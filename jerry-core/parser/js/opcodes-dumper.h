@@ -349,6 +349,7 @@ bool operand_is_empty (jsp_operand_t);
 
 void dumper_init (bool);
 void dumper_free (void);
+void dumper_set_generate_bytecode (bool);
 
 scopes_tree dumper_get_scope (void);
 void dumper_set_scope (scopes_tree scope_p);
