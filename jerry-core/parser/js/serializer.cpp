@@ -55,55 +55,7 @@ serializer_set_scope (scopes_tree new_scope)
   current_scope = new_scope;
 }
 
-/**
- * Dump scope to current scope
- *
- * NOTE:
- *   This function is used for processing of function expressions as they should not be hoisted.
- *   After parsing a function expression, it is immediately dumped to current scope via call of this function.
- */
-void
-serializer_dump_subscope (scopes_tree tree) /**< scope to dump */
-{
-  JERRY_ASSERT (tree != NULL);
-  vm_instr_counter_t instr_pos;
-  bool header = true;
-  for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (tree->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_VAR_DECL
-        && om_p->op.op_idx != VM_OP_META && !header)
-    {
-      break;
-    }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
-    {
-      header = false;
-    }
-    scopes_tree_add_op_meta (current_scope, *om_p);
-  }
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (tree->var_decls);
-       var_decl_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (tree->var_decls, var_decl_pos);
-    scopes_tree_add_op_meta (current_scope, *om_p);
-  }
 
-  if (tree->t.children != null_list)
-  {
-    for (uint8_t child_id = 0; child_id < linked_list_get_length (tree->t.children); child_id++)
-    {
-      serializer_dump_subscope (*(scopes_tree *) linked_list_element (tree->t.children, child_id));
-    }
-  }
-
-  for (; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (tree->instrs, instr_pos);
-    scopes_tree_add_op_meta (current_scope, *om_p);
-  }
-} /* serializer_dump_subscope */
 
 vm_instr_counter_t
 serializer_get_current_instr_counter (void)
@@ -115,12 +67,6 @@ vm_instr_counter_t
 serializer_count_instrs_in_subscopes (void)
 {
   return (vm_instr_counter_t) (scopes_tree_count_instructions (current_scope) - scopes_tree_instrs_num (current_scope));
-}
-
-void
-serializer_set_writing_position (vm_instr_counter_t oc)
-{
-  scopes_tree_set_instrs_num (current_scope, oc);
 }
 
 void
