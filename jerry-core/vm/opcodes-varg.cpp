@@ -18,6 +18,7 @@
 #include "jrt.h"
 #include "vm.h"
 #include "opcodes.h"
+#include "bytecode-data.h"
 
 /**
  * Fill arguments' list
@@ -84,9 +85,9 @@ vm_fill_params_list (vm_frame_ctx_t *frame_ctx_p, /**< interpreter context */
     JERRY_ASSERT (next_instr.op_idx == VM_OP_META);
     JERRY_ASSERT (next_instr.data.meta.type == OPCODE_META_TYPE_VARG);
 
-    const lit_cpointer_t param_name_lit_idx = serializer_get_literal_cp_by_uid (next_instr.data.meta.data_1,
-                                                                                frame_ctx_p->bytecode_header_p,
-                                                                                frame_ctx_p->pos);
+    const lit_cpointer_t param_name_lit_idx = bc_get_literal_cp_by_uid (next_instr.data.meta.data_1,
+                                              frame_ctx_p->bytecode_header_p,
+                                              frame_ctx_p->pos);
 
 
     ecma_string_t *param_name_str_p = ecma_new_ecma_string_from_lit_cp (param_name_lit_idx);

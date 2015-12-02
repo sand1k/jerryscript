@@ -109,7 +109,7 @@ main (int __attr_unused___ argc,
   // #1
   char program1[] = "a=1;var a;";
 
-  serializer_init ();
+  lit_init ();
   parser_set_show_instrs (true);
   parse_status = parser_parse_script ((jerry_api_char_t *) program1, strlen (program1), &bytecode_data_p);
 
@@ -130,18 +130,20 @@ main (int __attr_unused___ argc,
 
   JERRY_ASSERT (instrs_equal (bytecode_data_p->instrs_p, instrs, 5));
 
-  serializer_free ();
+  lit_finalize ();
+  bc_finalize ();
 
   // #2
   char program2[] = "var var;";
 
-  serializer_init ();
+  lit_init ();
   parser_set_show_instrs (true);
   parse_status = parser_parse_script ((jerry_api_char_t *) program2, strlen (program2), &bytecode_data_p);
 
   JERRY_ASSERT (parse_status == JSP_STATUS_SYNTAX_ERROR && bytecode_data_p == NULL);
 
-  serializer_free ();
+  lit_finalize ();
+  bc_finalize ();
 
   mem_finalize (false);
 
