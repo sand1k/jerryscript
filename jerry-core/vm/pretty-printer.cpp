@@ -110,7 +110,7 @@ var_to_str (vm_instr_t instr, lit_cpointer_t lit_ids[], vm_instr_counter_t oc, u
   else
   {
     return lit_cp_to_str (bc_get_literal_cp_by_uid (instr.data.raw_args[current_arg - 1],
-                                                    jsp_bc_get_first_bytecode_data_header (),
+                                                    bc_get_first_bytecode_data_header (),
                                                     oc));
   }
 }

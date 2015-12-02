@@ -49,14 +49,14 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
 } bytecode_data_header_t;
 
 
-bytecode_data_header_t * jsp_bc_get_first_bytecode_data_header ();
+bytecode_data_header_t * bc_get_first_bytecode_data_header ();
 
-void jsp_bc_add_bytecode_data (bytecode_data_header_t *,
-                               lit_id_hash_table *,
-                               vm_instr_t *,
-                               vm_instr_counter_t);
+void bc_add_bytecode_data (bytecode_data_header_t *,
+                           lit_id_hash_table *,
+                           vm_instr_t *,
+                           vm_instr_counter_t);
 
-void jsp_bc_remove_bytecode_data (const bytecode_data_header_t *);
+void bc_remove_bytecode_data (const bytecode_data_header_t *);
 
 vm_instr_t bc_get_instr (const bytecode_data_header_t *,
                          vm_instr_counter_t);
@@ -65,7 +65,7 @@ void bc_print_instrs (const bytecode_data_header_t *bytecode_data_p);
 
 const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
 
-void jsp_bc_finalize ();
+void bc_finalize ();
 
 lit_cpointer_t
 bc_get_literal_cp_by_uid (uint8_t,

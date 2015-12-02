@@ -131,7 +131,7 @@ main (int __attr_unused___ argc,
   JERRY_ASSERT (instrs_equal (bytecode_data_p->instrs_p, instrs, 5));
 
   lit_finalize ();
-  jsp_bc_finalize ();
+  bc_finalize ();
 
   // #2
   char program2[] = "var var;";
@@ -143,7 +143,7 @@ main (int __attr_unused___ argc,
   JERRY_ASSERT (parse_status == JSP_STATUS_SYNTAX_ERROR && bytecode_data_p == NULL);
 
   lit_finalize ();
-  jsp_bc_finalize ();
+  bc_finalize ();
 
   mem_finalize (false);
 
