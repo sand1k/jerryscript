@@ -20,13 +20,13 @@
 static bytecode_data_header_t *first_bytecode_header_p = NULL;
 
 bytecode_data_header_t *
-jsp_bc_get_first_bytecode_data_header ()
+bc_get_first_bytecode_data_header ()
 {
   return first_bytecode_header_p;
-} /* jsp_bc_get_first_bytecode_header */
+} /* bc_get_first_bytecode_header */
 
 void
-jsp_bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
+bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
                           lit_id_hash_table *lit_id_hash_table_p,
                           vm_instr_t *bytecode_p,
                           vm_instr_counter_t instrs_count)
@@ -37,13 +37,13 @@ jsp_bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
   MEM_CP_SET_POINTER (bc_header_p->next_header_cp, first_bytecode_header_p);
 
   first_bytecode_header_p = bc_header_p;
-} /* jsp_bc_add_bytecode */
+} /* bc_add_bytecode */
 
 /**
  * Deletes bytecode and associated hash table
  */
 void
-jsp_bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
+bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
 {
   bytecode_data_header_t *prev_header = NULL;
   bytecode_data_header_t *cur_header_p = first_bytecode_header_p;
@@ -67,7 +67,7 @@ jsp_bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
     prev_header = cur_header_p;
     cur_header_p = MEM_CP_GET_POINTER (bytecode_data_header_t, cur_header_p->next_header_cp);
   }
-} /* jsp_bc_remove_bytecode_data */
+} /* bc_remove_bytecode_data */
 
 vm_instr_t bc_get_instr (const bytecode_data_header_t *bytecode_data_p,
                          vm_instr_counter_t oc)
@@ -129,7 +129,7 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
-  jsp_bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count);
+  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count);
 
   if (is_show_instrs)
   {
@@ -141,7 +141,7 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
 } /* bc_merge_scopes_into_bytecode */
 
 void
-jsp_bc_finalize ()
+bc_finalize ()
 {
   while (first_bytecode_header_p != NULL)
   {
@@ -150,7 +150,7 @@ jsp_bc_finalize ()
 
     mem_heap_free_block (header_p);
   }
-} /* jsp_bc_finalize */
+} /* bc_finalize */
 
 /**
  * Convert literal id (operand value of instruction) to compressed pointer to literal
@@ -310,10 +310,10 @@ bc_load_bytecode_with_idx_map (const uint8_t *bytecode_and_idx_map_p, /**< buffe
                                             hash_table_size)
       && (vm_instr_counter_t) instructions_number == instructions_number)
   {
-    jsp_bc_add_bytecode_data (header_p,
-                              (lit_id_hash_table *) lit_id_hash_table_buffer_p,
-                              instrs_p,
-                              (vm_instr_counter_t) instructions_number);
+    bc_add_bytecode_data (header_p,
+                          (lit_id_hash_table *) lit_id_hash_table_buffer_p,
+                          instrs_p,
+                          (vm_instr_counter_t) instructions_number);
 
     return header_p;
   }

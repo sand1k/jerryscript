@@ -114,7 +114,7 @@ ecma_op_eval_chars_buffer (const jerry_api_char_t *code_p, /**< code characters 
 
     if (!code_contains_functions)
     {
-      jsp_bc_remove_bytecode_data (bytecode_data_p);
+      bc_remove_bytecode_data (bytecode_data_p);
     }
   }
 

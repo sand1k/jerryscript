@@ -1437,7 +1437,7 @@ jerry_cleanup (void)
 
   ecma_finalize ();
   lit_finalize ();
-  jsp_bc_finalize ();
+  bc_finalize ();
   mem_finalize (is_show_mem_stats);
   vm_finalize ();
 } /* jerry_cleanup */
