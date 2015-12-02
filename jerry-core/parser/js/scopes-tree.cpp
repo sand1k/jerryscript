@@ -918,3 +918,56 @@ scopes_tree_free (scopes_tree tree)
 
   jsp_mm_free (tree);
 }
+
+/**
+ * Dump scope to current scope
+ *
+ * NOTE:
+ *   This function is used for processing of function expressions as they should not be hoisted.
+ *   After parsing a function expression, it is immediately dumped to current scope via call of this function.
+ */
+void
+scopes_tree_merge_subscope (scopes_tree parent_tree_p,
+                            scopes_tree child_scope_p) /**< scope to dump */
+{
+  JERRY_ASSERT (child_scope_p != NULL);
+  vm_instr_counter_t instr_pos;
+  bool header = true;
+  for (instr_pos = 0; instr_pos < child_scope_p->instrs_count; instr_pos++)
+  {
+    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
+    if (om_p->op.op_idx != VM_OP_VAR_DECL
+        && om_p->op.op_idx != VM_OP_META && !header)
+    {
+      break;
+    }
+    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
+    {
+      header = false;
+    }
+    scopes_tree_add_op_meta (parent_tree_p, *om_p);
+  }
+  for (vm_instr_counter_t var_decl_pos = 0;
+       var_decl_pos < linked_list_get_length (child_scope_p->var_decls);
+       var_decl_pos++)
+  {
+    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->var_decls, var_decl_pos);
+    scopes_tree_add_op_meta (parent_tree_p, *om_p);
+  }
+
+  if (child_scope_p->t.children != null_list)
+  {
+    for (uint8_t child_id = 0; child_id < linked_list_get_length (child_scope_p->t.children); child_id++)
+    {
+      scopes_tree_merge_subscope (parent_tree_p,
+                                  *(scopes_tree *) linked_list_element (child_scope_p->t.children, child_id));
+    }
+  }
+
+  for (; instr_pos < child_scope_p->instrs_count; instr_pos++)
+  {
+    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
+    scopes_tree_add_op_meta (parent_tree_p, *om_p);
+  }
+} /* scopes_tree_merge_subscope */
+

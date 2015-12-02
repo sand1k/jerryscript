@@ -688,7 +688,7 @@ jsp_finish_parse_function_scope (bool is_function_expression)
 
   if (is_function_expression)
   {
-    serializer_dump_subscope (func_scope);
+    scopes_tree_merge_subscope (dumper_get_scope (), func_scope);
     scopes_tree_free (func_scope);
   }
 }

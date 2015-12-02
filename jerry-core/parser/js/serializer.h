@@ -28,8 +28,6 @@ void serializer_set_scope (scopes_tree);
 void serializer_dump_subscope (scopes_tree);
 vm_instr_counter_t serializer_get_current_instr_counter (void);
 vm_instr_counter_t serializer_count_instrs_in_subscopes (void);
-void serializer_set_writing_position (vm_instr_counter_t);
-void serializer_remove_bytecode_data (const bytecode_data_header_t *);
 void serializer_free (void);
 
 #ifdef JERRY_ENABLE_SNAPSHOT

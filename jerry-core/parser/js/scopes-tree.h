@@ -102,5 +102,5 @@ void scopes_tree_set_contains_try (scopes_tree);
 void scopes_tree_set_contains_delete (scopes_tree);
 void scopes_tree_set_contains_functions (scopes_tree);
 bool scopes_tree_strict_mode (scopes_tree);
-
+void scopes_tree_merge_subscope (scopes_tree, scopes_tree);
 #endif /* SCOPES_TREE_H */
