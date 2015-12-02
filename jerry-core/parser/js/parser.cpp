@@ -2160,10 +2160,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
             current_token_must_be_check_and_skip_it (TOK_CLOSE_SQUARE);
 
-            /*
-             * FIXME:
-             *       evaluation order - change to dump_get_value_if_ref
-             */
             dump_get_value_if_value_based_ref (substate_p);
 
             state_p->u.expression.prop_name_operand = substate_p->u.expression.operand;
@@ -2249,11 +2245,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
           current_token_must_be (TOK_CLOSE_SQUARE);
 
-          /*
-           * FIXME:
-           *       evaluation order - change to dump_get_value_if_ref
-           */
-
           dump_get_value_if_value_based_ref (substate_p);
           state_p->u.expression.prop_name_operand = substate_p->u.expression.operand;
           state_p->is_value_based_reference = true;
@@ -2295,8 +2286,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
           state_p->u.expression.token_type = TOK_OPEN_SQUARE;
           dump_get_value_if_ref (state_p);
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
         }
@@ -2308,8 +2297,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           skip_token ();
 
           dump_get_value_if_ref (state_p);
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
 
           state_p->u.expression.prop_name_operand = tmp_operand ();
           dump_string_assignment (state_p->u.expression.prop_name_operand, prop_name);
@@ -2346,6 +2333,9 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             dump_prop_setter (state_p->u.expression.operand,
                               state_p->u.expression.prop_name_operand,
                               substate_p->u.expression.operand);
+
+            state_p->u.expression.prop_name_operand = empty_operand ();
+            state_p->is_value_based_reference = false;
           }
           else
           {
@@ -2353,8 +2343,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           }
 
           state_p->u.expression.operand = substate_p->u.expression.operand;
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
         }
         else
         {
@@ -2739,8 +2727,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__MULTIPLICATIVE_END)
         {
           dump_get_value_if_ref (state_p);
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
 
           state_p->u.expression.token_type = lexer_get_token_type (tok);
 
@@ -2788,8 +2774,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__ADDITIVE_END)
         {
           dump_get_value_if_ref (state_p);
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
 
           state_p->u.expression.token_type = lexer_get_token_type (tok);
 
@@ -2841,8 +2825,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__SHIFT_END)
         {
           dump_get_value_if_ref (state_p);
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
 
           state_p->u.expression.token_type = lexer_get_token_type (tok);
 
