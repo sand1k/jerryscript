@@ -63,7 +63,7 @@ scopes_tree current_scope_p = NULL;
 /**
  * Flag, indicating if bytecode should be generated
  */
-bool is_generate_bytecode = false;
+bool is_generate_bytecode = true;
 
 void dumper_dump_op_meta (op_meta);
 void dumper_rewrite_op_meta (vm_instr_counter_t, op_meta);
