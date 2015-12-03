@@ -125,7 +125,14 @@ typedef enum __attr_packed___
   JSP_STATE_STAT_NAMED_LABEL
 } jsp_state_expr_t;
 
-static void jsp_parse_source_element_list (void);
+
+typedef enum
+{
+  PREPARSE,
+  DUMP
+} jsp_parse_mode_t;
+
+static void jsp_parse_source_element_list (jsp_parse_mode_t);
 static void skip_case_clause_body (void);
 
 static bool
@@ -1487,9 +1494,10 @@ while (0)
  * Parse source element list
  */
 static void __attr_noinline___
-jsp_parse_source_element_list (void)
+jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 {
   jsp_stack_init ();
+  dumper_set_generate_bytecode (parse_mode == DUMP);
 
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
   jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
@@ -4575,7 +4583,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_parse_directive_prologue ();
 
-    jsp_parse_source_element_list ();
+    // jsp_parse_source_element_list (PREPARSE);
+    jsp_parse_source_element_list (DUMP);
 
     JERRY_ASSERT (token_is (TOK_EOF));
 
