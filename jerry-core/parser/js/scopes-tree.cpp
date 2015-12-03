@@ -952,28 +952,32 @@ scopes_tree_merge_subscope (scopes_tree parent_tree_p,
                             scopes_tree child_scope_p) /**< scope to dump */
 {
   JERRY_ASSERT (child_scope_p != NULL);
-  vm_instr_counter_t instr_pos;
+  vm_instr_counter_t instr_pos = 0;
   bool header = true;
-  for (instr_pos = 0; instr_pos < child_scope_p->instrs_count; instr_pos++)
+  
+  if (is_generate_bytecode)
   {
-    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_VAR_DECL
-        && om_p->op.op_idx != VM_OP_META && !header)
+    for (instr_pos = 0; instr_pos < child_scope_p->instrs_count; instr_pos++)
     {
-      break;
+      op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
+      if (om_p->op.op_idx != VM_OP_VAR_DECL
+          && om_p->op.op_idx != VM_OP_META && !header)
+      {
+        break;
+      }
+      if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
+      {
+        header = false;
+      }
+      scopes_tree_add_op_meta (parent_tree_p, *om_p);
     }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
+    for (vm_instr_counter_t var_decl_pos = 0;
+         var_decl_pos < linked_list_get_length (child_scope_p->var_decls);
+         var_decl_pos++)
     {
-      header = false;
+      op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->var_decls, var_decl_pos);
+      scopes_tree_add_op_meta (parent_tree_p, *om_p);
     }
-    scopes_tree_add_op_meta (parent_tree_p, *om_p);
-  }
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (child_scope_p->var_decls);
-       var_decl_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->var_decls, var_decl_pos);
-    scopes_tree_add_op_meta (parent_tree_p, *om_p);
   }
 
   if (child_scope_p->t.children != null_list)
@@ -985,10 +989,17 @@ scopes_tree_merge_subscope (scopes_tree parent_tree_p,
     }
   }
 
-  for (; instr_pos < child_scope_p->instrs_count; instr_pos++)
+  if (is_generate_bytecode)
   {
-    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
-    scopes_tree_add_op_meta (parent_tree_p, *om_p);
+    for (; instr_pos < child_scope_p->instrs_count; instr_pos++)
+    {
+      op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
+      scopes_tree_add_op_meta (parent_tree_p, *om_p);
+    }
+  }
+  else
+  {
+    parent_tree_p->instrs_count = (vm_instr_counter_t) (parent_tree_p->instrs_count + child_scope_p->instrs_count);
   }
 } /* scopes_tree_merge_subscope */
 
