@@ -1429,7 +1429,10 @@ jerry_parse (const jerry_api_char_t* source_p, /**< script source */
 
   parse_status = parser_parse_script (source_p,
                                       source_size,
-                                      &bytecode_data_p);
+                                      &bytecode_data_p,
+                                      ((jerry_flags & JERRY_FLAG_PARSE_ONLY) != 0)
+                                      ? PARSE_MODE_PREPARSE
+                                      : PARSE_MODE_DUMP);
 
   if (parse_status != JSP_STATUS_OK)
   {
@@ -1583,7 +1586,7 @@ jerry_parse_and_save_snapshot (const jerry_api_char_t* source_p, /**< script sou
 
   if (is_for_global)
   {
-    parse_status = parser_parse_script (source_p, source_size, &bytecode_data_p);
+    parse_status = parser_parse_script (source_p, source_size, &bytecode_data_p, PARSE_MODE_DUMP);
   }
   else
   {

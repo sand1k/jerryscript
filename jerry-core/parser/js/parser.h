@@ -28,8 +28,18 @@ typedef enum
   JSP_STATUS_REFERENCE_ERROR /**< ReferenceError early error occured */
 } jsp_status_t;
 
+typedef enum
+{
+  PARSE_MODE_PREPARSE,
+  PARSE_MODE_DUMP
+} jsp_parse_mode_t;
+
 void parser_set_show_instrs (bool);
-jsp_status_t parser_parse_script (const jerry_api_char_t *, size_t, const bytecode_data_header_t **);
+jsp_status_t parser_parse_script (const jerry_api_char_t *,
+                                  size_t,
+                                  const bytecode_data_header_t **,
+                                  jsp_parse_mode_t parse_mode);
+
 jsp_status_t parser_parse_eval (const jerry_api_char_t *, size_t, bool, const bytecode_data_header_t **, bool *);
 
 #endif /* PARSER_H */
