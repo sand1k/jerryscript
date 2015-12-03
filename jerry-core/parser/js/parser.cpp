@@ -860,12 +860,14 @@ jsp_state_push (jsp_state_t state)
 } /* jsp_state_push */
 
 static jsp_state_t *
-jsp_state_under_top (void)
+jsp_get_prev_state (jsp_state_t *state_p)
 {
-  JERRY_ASSERT (jsp_state_stack_pos > 1);
+  uint32_t pos = (uint32_t) (state_p - jsp_state_stack);
 
-  return &jsp_state_stack[jsp_state_stack_pos - 2u];
-} /* jsp_state_under_top */
+  JERRY_ASSERT (pos > 0u);
+
+  return &jsp_state_stack[pos - 1u];
+} /* jsp_get_prev_state */
 
 static jsp_state_t *
 jsp_state_top (void)
@@ -1526,7 +1528,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         if (is_subexpr_end)
         {
           substate_p = state_p;
-          state_p = jsp_state_under_top ();
+          state_p = jsp_get_prev_state (state_p);
         }
         else
         {
