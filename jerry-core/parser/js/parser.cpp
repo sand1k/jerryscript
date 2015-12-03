@@ -3251,11 +3251,14 @@ jsp_parse_source_element_list ()
 
             vm_instr_counter_t target_oc = dumper_get_current_instr_counter ();
 
-            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
-            while (*rewrite_chain_p != MAX_OPCODES)
+            if (is_generate_bytecode)
             {
-              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
-                                                                             target_oc);
+              vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
+              while (*rewrite_chain_p != MAX_OPCODES)
+              {
+                *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                               target_oc);
+              }
             }
 
             state_p->is_complex_production = false;
@@ -3366,11 +3369,14 @@ jsp_parse_source_element_list ()
 
             vm_instr_counter_t target_oc = dumper_get_current_instr_counter ();
 
-            vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
-            while (*rewrite_chain_p != MAX_OPCODES)
+            if (is_generate_bytecode)
             {
-              *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
-                                                                             target_oc);
+              vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
+              while (*rewrite_chain_p != MAX_OPCODES)
+              {
+                *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                               target_oc);
+              }
             }
 
             state_p->is_complex_production = false;
@@ -4186,10 +4192,13 @@ jsp_parse_source_element_list ()
       vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.u.iterational.continues_rewrite_chain;
       vm_instr_counter_t continue_tgt_oc = state_p->u.statement.u.iterational.continue_tgt_oc;
 
-      while (*rewrite_chain_p != MAX_OPCODES)
+      if (is_generate_bytecode)
       {
-        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
-                                                                       continue_tgt_oc);
+        while (*rewrite_chain_p != MAX_OPCODES)
+        {
+          *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                         continue_tgt_oc);
+        }
       }
     }
     else if (state_p->state == JSP_STATE_STAT_SWITCH)
@@ -4549,11 +4558,13 @@ jsp_parse_source_element_list ()
 
       vm_instr_counter_t *rewrite_chain_p = &state_p->u.statement.breaks_rewrite_chain;
       vm_instr_counter_t break_tgt_oc = dumper_get_current_instr_counter ();
-
-      while (*rewrite_chain_p != MAX_OPCODES)
+      if (is_generate_bytecode)
       {
-        *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
-                                                                       break_tgt_oc);
+        while (*rewrite_chain_p != MAX_OPCODES)
+        {
+          *rewrite_chain_p = rewrite_simple_or_nested_jump_and_get_next (*rewrite_chain_p,
+                                                                         break_tgt_oc);
+        }
       }
 
       state_p->is_completed = true;
