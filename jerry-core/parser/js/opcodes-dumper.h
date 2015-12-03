@@ -354,6 +354,7 @@ void dumper_set_generate_bytecode (bool);
 scopes_tree dumper_get_scope (void);
 void dumper_set_scope (scopes_tree scope_p);
 vm_instr_counter_t dumper_get_current_instr_counter (void);
+op_meta dumper_get_op_meta (vm_instr_counter_t pos);
 
 void dumper_start_move_of_vars_to_regs ();
 bool dumper_start_move_of_args_to_regs (uint32_t args_num);

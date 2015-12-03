@@ -16,6 +16,7 @@
 
 #include "bytecode-data.h"
 #include "pretty-printer.h"
+#include "parser.h"
 
 static bytecode_data_header_t *first_bytecode_header_p = NULL;
 
@@ -104,7 +105,8 @@ bc_print_instrs (const bytecode_data_header_t *bytecode_data_p)
  */
 const bytecode_data_header_t *
 bc_merge_scopes_into_bytecode (scopes_tree scope_p,
-                               bool is_show_instrs)
+                               bool is_show_instrs,
+                               bool is_perform_merge)
 {
   const size_t buckets_count = scopes_tree_count_literals_in_blocks (scope_p);
   const vm_instr_counter_t instrs_count = scopes_tree_count_instructions (scope_p);
@@ -122,10 +124,14 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
                                                            hash_table_size,
                                                            buckets_count, blocks_count);
 
-  vm_instr_t *bytecode_p = scopes_tree_raw_data (scope_p,
-                                                 buffer_p + header_and_hash_table_size,
-                                                 bytecode_size,
-                                                 lit_id_hash);
+  vm_instr_t *bytecode_p = NULL;;
+  if (is_perform_merge)
+  {
+    bytecode_p = scopes_tree_raw_data (scope_p,
+                                       buffer_p + header_and_hash_table_size,
+                                       bytecode_size,
+                                       lit_id_hash);
+  }
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 

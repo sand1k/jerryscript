@@ -22,6 +22,12 @@
 static hash_table lit_id_to_uid = null_hash;
 static vm_instr_counter_t global_oc;
 static vm_idx_t next_uid;
+static bool is_generate_bytecode = true;
+
+void scopes_tree_set_generate_bytecode (bool generate_bytecode)
+{
+  is_generate_bytecode = generate_bytecode;
+} /* scopes_tree_set_generate_bytecode */
 
 static void
 assert_tree (scopes_tree t)
@@ -607,6 +613,11 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
 size_t
 scopes_tree_count_literals_in_blocks (scopes_tree tree) /**< scope */
 {
+  if (!is_generate_bytecode)
+  {
+    return 0;
+  }
+
   assert_tree (tree);
   size_t result = 0;
 

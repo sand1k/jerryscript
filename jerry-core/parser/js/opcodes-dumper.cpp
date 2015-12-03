@@ -121,7 +121,7 @@ dumper_get_current_instr_counter (void)
   return scopes_tree_instrs_num (current_scope_p);
 }
 
-static op_meta
+op_meta
 dumper_get_op_meta (vm_instr_counter_t pos)
 {
   op_meta opm;

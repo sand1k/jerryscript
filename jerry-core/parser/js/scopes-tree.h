@@ -81,6 +81,7 @@ typedef scopes_tree_int *scopes_tree;
 
 scopes_tree scopes_tree_init (scopes_tree, scope_type_t);
 void scopes_tree_free (scopes_tree);
+void scopes_tree_set_generate_bytecode (bool);
 vm_instr_counter_t scopes_tree_instrs_num (scopes_tree);
 vm_instr_counter_t scopes_tree_var_decls_num (scopes_tree);
 void scopes_tree_add_op_meta (scopes_tree, op_meta);
