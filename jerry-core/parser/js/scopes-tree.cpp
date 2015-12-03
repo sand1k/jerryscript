@@ -71,8 +71,15 @@ scopes_tree_var_decls_num (scopes_tree t) /**< scope */
 void
 scopes_tree_add_op_meta (scopes_tree tree, op_meta op)
 {
-  assert_tree (tree);
-  linked_list_set_element (tree->instrs, tree->instrs_count++, &op);
+  if (is_generate_bytecode)
+  {
+    assert_tree (tree);
+    linked_list_set_element (tree->instrs, tree->instrs_count++, &op);
+  }
+  else
+  {
+    tree->instrs_count++;
+  }
 }
 
 /**
@@ -82,8 +89,11 @@ void
 scopes_tree_add_var_decl (scopes_tree tree, /**< scope, to which variable declaration is added */
                           op_meta op) /**< variable declaration instruction */
 {
-  assert_tree (tree);
-  linked_list_set_element (tree->var_decls, linked_list_get_length (tree->var_decls), &op);
+  if (is_generate_bytecode)
+  {
+    assert_tree (tree);
+    linked_list_set_element (tree->var_decls, linked_list_get_length (tree->var_decls), &op);
+  }
 } /* scopes_tree_add_var_decl */
 
 void

@@ -137,11 +137,10 @@ void
 dumper_dump_op_meta (op_meta op)
 {
   JERRY_ASSERT (scopes_tree_instrs_num (current_scope_p) < MAX_OPCODES);
+  scopes_tree_add_op_meta (current_scope_p, op);
 
   if (is_generate_bytecode)
   {
-    scopes_tree_add_op_meta (current_scope_p, op);
-
 #ifdef JERRY_ENABLE_PRETTY_PRINTER
     if (is_print_instrs)
     {
