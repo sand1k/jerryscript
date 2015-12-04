@@ -3772,6 +3772,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
               if (!token_is (TOK_SEMICOLON))
               {
                 jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, false);
+
+                jsp_state_top ()->is_need_retval = false;
               }
               else
               {
@@ -4093,6 +4095,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         seek_token (name_loc);
 
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+
+        jsp_state_top ()->is_need_retval = false;
       }
 
       state_p->state = JSP_STATE_STAT_VAR_DECL_FINISH;
@@ -4238,6 +4242,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         if (!token_is (TOK_CLOSE_PAREN))
         {
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+
+          jsp_state_top ()->is_need_retval = false;
         }
         else
         {
