@@ -645,10 +645,10 @@ typedef struct
   uint8_t is_no_in_mode             : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
   uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
                                           *   put to register, specified by operand, specified in state */
-  int is_value_based_reference; /**< flag, indicating whether current state represents evaluated expression
-                                          *   that evaluated to a value-based reference */
-  int is_get_value_dumped_for_main_operand;
-  int is_get_value_dumped_for_prop_operand;
+  uint8_t is_value_based_reference : 1; /**< flag, indicating whether current state represents evaluated expression
+                                         *   that evaluated to a value-based reference */
+  uint8_t is_get_value_dumped_for_main_operand : 1;
+  uint8_t is_get_value_dumped_for_prop_operand : 1;
   uint8_t is_need_retval            : 1; /**< flag, indicating whether result of the expression's
                                           *   evaluation, if it is value, is used */
   uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
@@ -837,7 +837,7 @@ typedef struct
   static_assert (sizeof (u) == 20, "Please, update size if changed");
 } jsp_state_t;
 
-//static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
