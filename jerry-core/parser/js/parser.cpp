@@ -645,19 +645,21 @@ typedef struct
   uint8_t is_no_in_mode             : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
   uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
                                           *   put to register, specified by operand, specified in state */
-  uint8_t is_value_based_reference  : 1; /**< flag, indicating whether current state represents evaluated expression
+  int is_value_based_reference; /**< flag, indicating whether current state represents evaluated expression
                                           *   that evaluated to a value-based reference */
+  int is_get_value_dumped_for_main_operand;
+  int is_get_value_dumped_for_prop_operand;
   uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
   uint8_t var_decl                  : 1; /**< this flag tells that we are parsing VariableStatement, not
-                                            VariableDeclarationList or VariableDeclaration inside
-                                            IterationStatement */
-  uint8_t is_var_decl_no_in       : 1; /**< this flag tells that we are parsing VariableDeclrationNoIn inside
-                                            ForIn iteration statement */
-  uint8_t was_default             : 1; /**< was default branch seen */
+                                              VariableDeclarationList or VariableDeclaration inside
+                                              IterationStatement */
+  uint8_t is_var_decl_no_in         : 1; /**< this flag tells that we are parsing VariableDeclrationNoIn inside
+                                              ForIn iteration statement */
+  uint8_t was_default               : 1; /**< was default branch seen */
   uint8_t is_default_branch         : 1; /**< marks default branch of switch statement */
   uint8_t is_simply_jumpable_border : 1; /**< flag, indicating whether simple jump could be performed
                                           *   from current statement outside of the statement */
-  uint8_t is_dump_eval_ret_store  : 1; /**< expression's result should be stored to eval's return register */
+  uint8_t is_dump_eval_ret_store    : 1; /**< expression's result should be stored to eval's return register */
 
   union u
   {
@@ -833,7 +835,7 @@ typedef struct
   static_assert (sizeof (u) == 20, "Please, update size if changed");
 } jsp_state_t;
 
-static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
+//static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -922,6 +924,8 @@ jsp_push_new_expr_state (jsp_state_expr_t expr_type,
   new_state.is_complex_production = false;
   new_state.var_decl = false;
   new_state.is_var_decl_no_in = false;
+  new_state.is_get_value_dumped_for_main_operand = false;
+  new_state.is_get_value_dumped_for_prop_operand = false;
 
   new_state.is_no_in_mode = !in_allowed;
 
@@ -939,16 +943,75 @@ dump_get_value_for_state_if_ref (jsp_state_t *state_p,
 
   jsp_operand_t val;
 
-  bool is_dumped = false;
+  bool is_dump = false;
 
   if (state_p->state == JSP_STATE_EXPR_LEFTHANDSIDE)
   {
     if (is_value_based_reference)
     {
-      /* FIXME:
-      if (obj.is_identifier_operand ())
+      if (!state_p->is_get_value_dumped_for_main_operand)
       {
-        is_dumped = true;
+        JERRY_ASSERT (!state_p->is_get_value_dumped_for_prop_operand);
+        /* FIXME:
+             if (obj.is_identifier_operand ())
+             {
+             is_dump = true;
+
+             if (!is_check_only)
+             {
+             jsp_operand_t general_reg = tmp_operand ();
+
+             dump_variable_assignment (general_reg, obj);
+
+             state_p->u.expression.operand = general_reg;
+             state_p->is_get_value_dumped_for_main_operand = true;
+             }
+             }
+
+             if (prop_name.is_identifier_operand ())
+             {
+             is_dump = true;
+
+             if (!is_check_only)
+             {
+             jsp_operand_t general_reg = tmp_operand ();
+
+             dump_variable_assignment (general_reg, prop_name);
+
+             state_p->u.expression.prop_name_operand = general_reg;
+             state_p->is_get_value_dumped_for_prop_operand = true;
+             }
+             }
+         */
+      }
+    }
+  }
+  else
+  {
+    if (is_value_based_reference)
+    {
+        is_dump = true;
+
+        JERRY_ASSERT (!prop_name.is_empty_operand ());
+
+        if (!is_check_only)
+        {
+          jsp_operand_t reg = tmp_operand ();
+
+          dump_prop_getter (reg, obj, prop_name);
+
+          val = reg;
+
+          state_p->is_get_value_dumped_for_main_operand = true;
+          state_p->is_get_value_dumped_for_prop_operand = true;
+        }
+    }
+    else if (!is_dump_for_value_based_refs_only
+             && (obj.is_identifier_operand () || obj.is_this_operand ()))
+    {
+      if (!state_p->is_get_value_dumped_for_main_operand)
+      {
+        is_dump = true;
 
         if (!is_check_only)
         {
@@ -956,71 +1019,25 @@ dump_get_value_for_state_if_ref (jsp_state_t *state_p,
 
           dump_variable_assignment (general_reg, obj);
 
-          state_p->u.expression.operand = general_reg;
+          val = general_reg;
+
+          state_p->is_get_value_dumped_for_main_operand = true;
         }
       }
-
-      if (prop_name.is_identifier_operand ())
-      {
-        is_dumped = true;
-
-        if (!is_check_only)
-        {
-          jsp_operand_t general_reg = tmp_operand ();
-
-          dump_variable_assignment (general_reg, prop_name);
-
-          state_p->u.expression.prop_name_operand = general_reg;
-        }
-      }
-      */
-    }
-  }
-  else
-  {
-    if (is_value_based_reference)
-    {
-      is_dumped = true;
-
-      JERRY_ASSERT (!prop_name.is_empty_operand ());
-
-      if (!is_check_only)
-      {
-        jsp_operand_t reg = tmp_operand ();
-
-        dump_prop_getter (reg, obj, prop_name);
-
-        val = reg;
-      }
-    }
-    else if (!is_dump_for_value_based_refs_only
-             && (obj.is_identifier_operand () || obj.is_this_operand ()))
-    {
-      is_dumped = true;
-
-      if (!is_check_only)
-      {
-        jsp_operand_t general_reg = tmp_operand ();
-
-        dump_variable_assignment (general_reg, obj);
-
-        val = general_reg;
-      }
-    }
-    else
-    {
-      val = obj;
     }
 
-    if (!is_check_only)
+    if (!is_check_only && is_dump)
     {
+      JERRY_ASSERT (state_p->is_get_value_dumped_for_main_operand);
+      JERRY_ASSERT (!state_p->is_value_based_reference || state_p->is_get_value_dumped_for_prop_operand);
+
       state_p->u.expression.operand = val;
       state_p->u.expression.prop_name_operand = empty_operand ();
       state_p->is_value_based_reference = false;
     }
   }
 
-  return is_dumped;
+  return is_dump;
 }
 
 static void
@@ -1032,7 +1049,9 @@ dump_get_value_for_prev_states (jsp_state_t *state_p)
   while (dump_state_border_for_p != NULL)
   {
     JERRY_STATIC_ASSERT (JSP_STATE_EXPR__BEGIN == 0);
-    if (dump_state_border_for_p->req_state <= JSP_STATE_EXPR__END)
+    if (dump_state_border_for_p->req_state <= JSP_STATE_EXPR__END
+        && (!dump_state_border_for_p->is_get_value_dumped_for_main_operand
+            || !dump_state_border_for_p->is_get_value_dumped_for_prop_operand))
     {
       first_state_to_dump_for_p = dump_state_border_for_p;
       dump_state_border_for_p = jsp_get_prev_state (dump_state_border_for_p);
@@ -1080,17 +1099,22 @@ jsp_start_call_dump (jsp_state_t *state_p)
 
   if (is_value_based_reference)
   {
-    if (obj.is_identifier_operand ())
+    if (obj.is_identifier_operand ()
+        && !state_p->is_get_value_dumped_for_main_operand)
     {
       jsp_operand_t reg = tmp_operand ();
 
       dump_variable_assignment (reg, obj);
 
       obj = reg;
+
+      state_p->is_get_value_dumped_for_main_operand = true;
     }
 
     val = tmp_operand ();
     dump_prop_getter (val, obj, prop_name);
+
+    state_p->is_get_value_dumped_for_prop_operand = true;
 
     call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_HAVE_THIS_ARG);
 
@@ -1101,14 +1125,13 @@ jsp_start_call_dump (jsp_state_t *state_p)
      *          ECMA-262 v5, 15.2.2.1
      */
   }
-  else if (dumper_is_eval_literal (obj))
-  {
-    call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
-
-    val = obj;
-  }
   else
   {
+    if (dumper_is_eval_literal (obj))
+    {
+      call_flags = (opcode_call_flags_t) (call_flags | OPCODE_CALL_FLAGS_DIRECT_CALL_TO_EVAL_FORM);
+    }
+
     /*
      * Note:
      *      If function is called through Identifier, then the obj should be an Identifier reference,
@@ -1120,6 +1143,8 @@ jsp_start_call_dump (jsp_state_t *state_p)
      *          vm_helper_call_get_call_flags_and_this_arg
      */
     val = obj;
+
+    state_p->is_get_value_dumped_for_main_operand = true;
   }
 
   vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
@@ -1158,6 +1183,8 @@ static vm_instr_counter_t __attr_unused___
 jsp_start_construct_dump (jsp_state_t *state_p)
 {
   dump_get_value_if_ref (state_p, true);
+
+  state_p->is_get_value_dumped_for_main_operand = true;
 
   return dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, state_p->u.expression.operand);
 } /* jsp_start_construct_dump */
@@ -1298,6 +1325,12 @@ jsp_dump_binary_op (jsp_state_t *state_p,
   if (!state_p->is_value_based_reference
       && !substate_p->is_value_based_reference)
   {
+    if (dump_get_value_for_state_if_ref (state_p, false, true)
+        || dump_get_value_for_state_if_ref (substate_p, false, true))
+    {
+      dump_get_value_for_prev_states (state_p);
+    }
+
     op1 = state_p->u.expression.operand;
     op2 = substate_p->u.expression.operand;
 
@@ -3296,6 +3329,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
           /* ECMA-262 v5, 11.12 */
           skip_token ();
+
+          dump_get_value_if_ref (state_p, true);
 
           vm_instr_counter_t conditional_check_pos = dump_conditional_check_for_rewrite (state_p->u.expression.operand);
           state_p->u.expression.u.conditional.conditional_check_pos = conditional_check_pos;
