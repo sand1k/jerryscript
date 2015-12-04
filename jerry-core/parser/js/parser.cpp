@@ -645,10 +645,12 @@ typedef struct
   uint8_t is_no_in_mode             : 1; /**< expression is being parsed in NoIn mode (see also: ECMA-262 v5, 11.8) */
   uint8_t is_fixed_ret_operand      : 1; /**< the expression's evaluation should produce value that should be
                                           *   put to register, specified by operand, specified in state */
-  int is_value_based_reference; /**< flag, indicating whether current state represents evaluated expression
-                                          *   that evaluated to a value-based reference */
-  int is_get_value_dumped_for_main_operand;
-  int is_get_value_dumped_for_prop_operand;
+  uint8_t is_value_based_reference : 1; /**< flag, indicating whether current state represents evaluated expression
+                                         *   that evaluated to a value-based reference */
+  uint8_t is_get_value_dumped_for_main_operand : 1;
+  uint8_t is_get_value_dumped_for_prop_operand : 1;
+  uint8_t is_need_retval            : 1; /**< flag, indicating whether result of the expression's
+                                          *   evaluation, if it is value, is used */
   uint8_t is_complex_production     : 1; /**< the expression is being parsed in complex production mode */
   uint8_t var_decl                  : 1; /**< this flag tells that we are parsing VariableStatement, not
                                               VariableDeclarationList or VariableDeclaration inside
@@ -835,7 +837,7 @@ typedef struct
   static_assert (sizeof (u) == 20, "Please, update size if changed");
 } jsp_state_t;
 
-//static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
+static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
@@ -926,6 +928,7 @@ jsp_push_new_expr_state (jsp_state_expr_t expr_type,
   new_state.is_var_decl_no_in = false;
   new_state.is_get_value_dumped_for_main_operand = false;
   new_state.is_get_value_dumped_for_prop_operand = false;
+  new_state.is_need_retval = true;
 
   new_state.is_no_in_mode = !in_allowed;
 
@@ -1200,11 +1203,58 @@ jsp_finish_construct_dump (uint32_t args_num,
   return ret;
 } /* jsp_finish_construct_dump */
 
-static void
+static bool
+jsp_is_assignment_expression_end (jsp_state_t *current_state_p)
+{
+  jsp_token_type_t tt = lexer_get_token_type (tok);
+
+  JERRY_ASSERT (current_state_p->state == JSP_STATE_EXPR_MULTIPLICATIVE
+                || current_state_p->state == JSP_STATE_EXPR_ADDITIVE
+                || current_state_p->state == JSP_STATE_EXPR_SHIFT
+                || current_state_p->state == JSP_STATE_EXPR_RELATIONAL
+                || current_state_p->state == JSP_STATE_EXPR_EQUALITY
+                || current_state_p->state == JSP_STATE_EXPR_BITWISE_AND
+                || current_state_p->state == JSP_STATE_EXPR_BITWISE_XOR
+                || current_state_p->state == JSP_STATE_EXPR_BITWISE_OR);
+
+  if ((tt >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN
+       && tt <= TOKEN_TYPE__MULTIPLICATIVE_END)
+      || (tt >= TOKEN_TYPE__ADDITIVE_BEGIN
+          && tt <= TOKEN_TYPE__ADDITIVE_END)
+      || (tt >= TOKEN_TYPE__SHIFT_BEGIN
+          && tt <= TOKEN_TYPE__SHIFT_END)
+      || (tt >= TOKEN_TYPE__RELATIONAL_BEGIN
+          && tt <= TOKEN_TYPE__RELATIONAL_END)
+      || (tt >= TOKEN_TYPE__EQUALITY_BEGIN
+          && tt <= TOKEN_TYPE__EQUALITY_END)
+      || (tt == TOK_AND)
+      || (tt == TOK_XOR)
+      || (tt == TOK_OR)
+      || (tt == TOK_DOUBLE_AND)
+      || (tt == TOK_DOUBLE_OR)
+      || (tt == TOK_QUERY))
+  {
+    return false;
+  }
+
+  return true;
+}
+
+static bool
 jsp_dump_binary_op (jsp_state_t *state_p,
                     jsp_state_t *substate_p)
 {
   vm_op_t opcode;
+
+  bool is_combined_with_assignment = false;
+
+  jsp_state_t *prev_state_p = jsp_get_prev_state (state_p);
+
+  bool is_try_combine_with_assignment = (prev_state_p->state == JSP_STATE_EXPR_LEFTHANDSIDE
+                                         && prev_state_p->u.expression.token_type == TOK_EQ
+                                         && !prev_state_p->is_value_based_reference
+                                         && !prev_state_p->is_need_retval
+                                         && jsp_is_assignment_expression_end (state_p));
 
   jsp_token_type_t tt = state_p->u.expression.token_type;
   state_p->u.expression.token_type = TOK_EMPTY;
@@ -1338,6 +1388,14 @@ jsp_dump_binary_op (jsp_state_t *state_p,
     {
       dst = op1;
     }
+    else if (is_try_combine_with_assignment)
+    {
+      jsp_state_t *prev_state_p = jsp_get_prev_state (state_p);
+
+      dst = prev_state_p->u.expression.operand;
+
+      is_combined_with_assignment = true;
+    }
     else
     {
       dst = tmp_operand ();
@@ -1357,6 +1415,8 @@ jsp_dump_binary_op (jsp_state_t *state_p,
   state_p->u.expression.operand = dst;
 
   dump_binary_op (opcode, dst, op1, op2);
+
+  return is_combined_with_assignment;
 }
 
 static lit_cpointer_t
@@ -1755,6 +1815,16 @@ while (0)
   jsp_state_pop (); \
   JERRY_ASSERT (state_p == jsp_state_top ());
 
+#define JSP_ASSIGNMENT_EXPR_COMBINE() \
+  jsp_state_pop (); \
+  state_p = jsp_state_top (); \
+  JERRY_ASSERT (state_p->state == JSP_STATE_EXPR_LEFTHANDSIDE); \
+  JERRY_ASSERT (!state_p->is_need_retval); \
+  state_p->state = JSP_STATE_EXPR_ASSIGNMENT; \
+  state_p->u.expression.operand = empty_operand (); \
+  state_p->u.expression.token_type = TOK_EMPTY; \
+  state_p->is_completed = true;
+
 /**
  * Parse source element list
  */
@@ -1951,6 +2021,9 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             state_p->u.expression.token_type = TOK_OPEN_PAREN;
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+
+            jsp_state_top ()->is_need_retval = state_p->is_need_retval;
+
             break;
           }
           case TOK_KW_THIS:
@@ -2599,6 +2672,11 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         if (tt == TOK_EQ)
         {
+          if (state_p->is_need_retval)
+          {
+            dump_get_value_if_ref (substate_p, false);
+          }
+
           if (state_p->is_value_based_reference)
           {
             dump_prop_setter (state_p->u.expression.operand,
@@ -2614,6 +2692,11 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           }
 
           state_p->u.expression.operand = substate_p->u.expression.operand;
+
+          if (state_p->is_need_retval)
+          {
+            JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
+          }
         }
         else
         {
@@ -2682,9 +2765,22 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             state_p->u.expression.prop_name_operand = empty_operand ();
             state_p->is_value_based_reference = false;
           }
+          else if (state_p->is_need_retval)
+          {
+            jsp_operand_t reg = tmp_operand ();
+
+            dump_binary_op (opcode, reg, state_p->u.expression.operand, substate_p->u.expression.operand);
+            dump_variable_assignment (state_p->u.expression.operand, reg);
+
+            state_p->u.expression.operand = reg;
+          }
           else
           {
-            dump_binary_op (opcode, state_p->u.expression.operand, state_p->u.expression.operand, substate_p->u.expression.operand);
+            dump_binary_op (opcode, state_p->u.expression.operand,
+                            state_p->u.expression.operand,
+                            substate_p->u.expression.operand);
+
+            state_p->u.expression.operand = empty_operand ();
           }
         }
 
@@ -2976,9 +3072,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__MULTIPLICATIVE_END)
@@ -3007,9 +3108,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__ADDITIVE_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__ADDITIVE_END)
@@ -3038,9 +3144,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__SHIFT_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__SHIFT_END)
@@ -3069,9 +3180,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if ((lexer_get_token_type (tok) >= TOKEN_TYPE__RELATIONAL_BEGIN
                   && lexer_get_token_type (tok) <= TOKEN_TYPE__RELATIONAL_END)
@@ -3102,9 +3218,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (lexer_get_token_type (tok) >= TOKEN_TYPE__EQUALITY_BEGIN
                  && lexer_get_token_type (tok) <= TOKEN_TYPE__EQUALITY_END)
@@ -3138,9 +3259,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (token_is (TOK_AND))
         {
@@ -3170,9 +3296,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (token_is (TOK_XOR))
         {
@@ -3205,9 +3336,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         if (is_subexpr_end)
         {
-          jsp_dump_binary_op (state_p, substate_p);
+          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
 
           JSP_FINISH_SUBEXPR ();
+
+          if (is_combined_with_assignment)
+          {
+            JSP_ASSIGNMENT_EXPR_COMBINE ();
+          }
         }
         else if (token_is (TOK_OR))
         {
@@ -3636,6 +3772,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
               if (!token_is (TOK_SEMICOLON))
               {
                 jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, false);
+
+                jsp_state_top ()->is_need_retval = false;
               }
               else
               {
@@ -3672,39 +3810,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
             state_p->state = JSP_STATE_STAT_FOR_IN;
           }
-        }
-      }
-      else if (token_is (TOK_NAME))  // LabelledStatement or ExpressionStatement
-      {
-        const token temp = tok;
-        skip_token ();
-        if (token_is (TOK_COLON))
-        {
-          skip_token ();
-
-          lit_cpointer_t name_cp;
-          name_cp.packed_value = temp.uid;
-
-          bool is_simply_jumpable;
-          jsp_state_t *named_label_state_p = jsp_find_named_label (name_cp, &is_simply_jumpable);
-
-          if (named_label_state_p != NULL)
-          {
-            EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
-          }
-
-          state_p->state = JSP_STATE_STAT_NAMED_LABEL;
-          state_p->u.named_label.name_cp = name_cp;
-
-          jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
-        }
-        else
-        {
-          seek_token (temp.loc);
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
-
-          state_p->state = JSP_STATE_STAT_EXPRESSION;
         }
       }
       else if (token_is (TOK_KW_SWITCH))
@@ -3854,9 +3959,51 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       }
       else
       {
-        jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+        bool is_expression = true;
 
-        state_p->state = JSP_STATE_STAT_EXPRESSION;
+        if (token_is (TOK_NAME))  // LabelledStatement or ExpressionStatement
+        {
+          const token temp = tok;
+          skip_token ();
+          if (token_is (TOK_COLON))
+          {
+            skip_token ();
+
+            lit_cpointer_t name_cp;
+            name_cp.packed_value = temp.uid;
+
+            bool is_simply_jumpable;
+            jsp_state_t *named_label_state_p = jsp_find_named_label (name_cp, &is_simply_jumpable);
+
+            if (named_label_state_p != NULL)
+            {
+              EMIT_ERROR (JSP_EARLY_ERROR_SYNTAX, "Label is duplicated");
+            }
+
+            state_p->state = JSP_STATE_STAT_NAMED_LABEL;
+            state_p->u.named_label.name_cp = name_cp;
+
+            jsp_start_statement_parse (JSP_STATE_STAT_EMPTY);
+
+            is_expression = false;
+          }
+          else
+          {
+            seek_token (temp.loc);
+          }
+        }
+
+        if (is_expression)
+        {
+          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+
+          if (dumper_get_scope ()->type != SCOPE_TYPE_EVAL)
+          {
+            jsp_state_top ()->is_need_retval = false;
+          }
+
+          state_p->state = JSP_STATE_STAT_EXPRESSION;
+        }
       }
     }
     else if (state_p->state == JSP_STATE_STAT_BLOCK)
@@ -3948,6 +4095,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         seek_token (name_loc);
 
         jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
+
+        jsp_state_top ()->is_need_retval = false;
       }
 
       state_p->state = JSP_STATE_STAT_VAR_DECL_FINISH;
@@ -4093,6 +4242,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         if (!token_is (TOK_CLOSE_PAREN))
         {
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
+
+          jsp_state_top ()->is_need_retval = false;
         }
         else
         {
@@ -4579,6 +4730,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (dumper_get_scope ()->type == SCOPE_TYPE_EVAL)
       {
+        JERRY_ASSERT (substate_p->is_need_retval);
+
         dump_variable_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET),
                                   substate_p->u.expression.operand);
       }
