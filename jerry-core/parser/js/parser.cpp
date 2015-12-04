@@ -841,14 +841,22 @@ static_assert (sizeof (jsp_state_t) == 24, "Please, update if size is changed");
 
 /* FIXME: change to dynamic */
 #define JSP_STATE_STACK_MAX 256
-jsp_state_t jsp_state_stack[JSP_STATE_STACK_MAX];
+jsp_state_t* jsp_state_stack_p;
 uint32_t jsp_state_stack_pos;
 
 static void
 jsp_stack_init (void)
 {
+  jsp_state_stack_p = (jsp_state_t *) jsp_mm_alloc (sizeof (jsp_state_t) * JSP_STATE_STACK_MAX);
+
   jsp_state_stack_pos = 0;
 } /* jsp_stack_init */
+
+static void
+jsp_stack_finalize (void)
+{
+  jsp_mm_free (jsp_state_stack_p);
+} /* jsp_stack_finalize */
 
 static void
 jsp_state_push (jsp_state_t state)
@@ -859,28 +867,28 @@ jsp_state_push (jsp_state_t state)
   }
   else
   {
-    jsp_state_stack[jsp_state_stack_pos++] = state;
+    jsp_state_stack_p[jsp_state_stack_pos++] = state;
   }
 } /* jsp_state_push */
 
 static jsp_state_t *
 jsp_get_prev_state (jsp_state_t *state_p)
 {
-  uint32_t pos = (uint32_t) (state_p - jsp_state_stack);
+  uint32_t pos = (uint32_t) (state_p - jsp_state_stack_p);
 
   JERRY_ASSERT (pos > 0u);
 
-  return &jsp_state_stack[pos - 1u];
+  return &jsp_state_stack_p[pos - 1u];
 } /* jsp_get_prev_state */
 
 static jsp_state_t *
 jsp_get_next_state (jsp_state_t *state_p)
 {
-  uint32_t pos = (uint32_t) (state_p - jsp_state_stack);
+  uint32_t pos = (uint32_t) (state_p - jsp_state_stack_p);
 
   JERRY_ASSERT (pos + 1 < jsp_state_stack_pos);
 
-  return &jsp_state_stack[pos + 1u];
+  return &jsp_state_stack_p[pos + 1u];
 } /* jsp_get_next_state */
 
 
@@ -889,7 +897,7 @@ jsp_state_top (void)
 {
   JERRY_ASSERT (jsp_state_stack_pos > 0);
 
-  return &jsp_state_stack[jsp_state_stack_pos - 1u];
+  return &jsp_state_stack_p[jsp_state_stack_pos - 1u];
 } /* jsp_state_top */
 
 static bool
@@ -1697,7 +1705,7 @@ jsp_find_unnamed_label (bool is_label_for_break,
 
   while (stack_pos != 0)
   {
-    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+    jsp_state_t *state_p = &jsp_state_stack_p [--stack_pos];
 
     if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
     {
@@ -1736,7 +1744,7 @@ jsp_find_named_label (lit_cpointer_t name_cp,
 
   while (stack_pos != 0)
   {
-    jsp_state_t *state_p = &jsp_state_stack [--stack_pos];
+    jsp_state_t *state_p = &jsp_state_stack_p [--stack_pos];
 
     if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
     {
@@ -1753,7 +1761,7 @@ jsp_find_named_label (lit_cpointer_t name_cp,
     {
       while (++stack_pos < jsp_state_stack_pos)
       {
-        state_p = &jsp_state_stack [stack_pos];
+        state_p = &jsp_state_stack_p [stack_pos];
 
         if (state_p->state != JSP_STATE_STAT_NAMED_LABEL)
         {
@@ -1831,7 +1839,6 @@ while (0)
 static void __attr_noinline___
 jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 {
-  jsp_stack_init ();
   dumper_set_generate_bytecode (parse_mode == DUMP);
 
   jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
@@ -4525,10 +4532,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         JERRY_ASSERT (jsp_state_stack_pos >= case_clause_count);
         for (uint16_t i = 0; i < case_clause_count / 2; ++i)
         {
-          jsp_state_t *tmp_state1_p = &jsp_state_stack [jsp_state_stack_pos - case_clause_count + i];
+          jsp_state_t *tmp_state1_p = &jsp_state_stack_p [jsp_state_stack_pos - case_clause_count + i];
           JERRY_ASSERT (tmp_state1_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
 
-          jsp_state_t *tmp_state2_p = &jsp_state_stack [jsp_state_stack_pos - 1 - i];
+          jsp_state_t *tmp_state2_p = &jsp_state_stack_p [jsp_state_stack_pos - 1 - i];
           JERRY_ASSERT (tmp_state2_p->state == JSP_STATE_STAT_SWITCH_BRANCH);
 
           locus loc = tmp_state1_p->u.statement.u.switch_statement.loc;
@@ -4546,17 +4553,17 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         for (uint16_t i = 0; i < case_clause_count; i++)
         {
-          if (jsp_state_stack [jsp_state_stack_pos - case_clause_count + i].is_default_branch)
+          if (jsp_state_stack_p [jsp_state_stack_pos - case_clause_count + i].is_default_branch)
           {
-            JERRY_ASSERT (jsp_state_stack [jsp_state_stack_pos - case_clause_count + i].u.statement.u.switch_statement.jmp_oc == MAX_OPCODES);
-            jsp_state_stack [jsp_state_stack_pos - case_clause_count + i].u.statement.u.switch_statement.jmp_oc = jmp_oc;
+            JERRY_ASSERT (jsp_state_stack_p [jsp_state_stack_pos - case_clause_count + i].u.statement.u.switch_statement.jmp_oc == MAX_OPCODES);
+            jsp_state_stack_p [jsp_state_stack_pos - case_clause_count + i].u.statement.u.switch_statement.jmp_oc = jmp_oc;
           }
         }
 
         /**
          * Mark final state if default branch was seen
          */
-        jsp_state_t *tmp_state_p = &jsp_state_stack [jsp_state_stack_pos - case_clause_count - 1];
+        jsp_state_t *tmp_state_p = &jsp_state_stack_p [jsp_state_stack_pos - case_clause_count - 1];
         JERRY_ASSERT (tmp_state_p->state == JSP_STATE_STAT_SWITCH_FINISH);
         tmp_state_p->was_default = was_default;
 
@@ -4844,6 +4851,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
   jsp_mm_init ();
 
+  jsp_stack_init ();
+
   dumper_init (parser_show_instrs);
   jsp_early_error_init ();
 
@@ -4898,6 +4907,8 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     dumper_set_scope (NULL);
     scopes_tree_free (scope);
+
+    jsp_stack_finalize ();
 
     status = JSP_STATUS_OK;
   }
