@@ -1298,10 +1298,17 @@ jsp_dump_binary_op (jsp_state_t *state_p,
   if (!state_p->is_value_based_reference
       && !substate_p->is_value_based_reference)
   {
-    dst = tmp_operand ();
-
     op1 = state_p->u.expression.operand;
     op2 = substate_p->u.expression.operand;
+
+    if (op1.is_register_operand ())
+    {
+      dst = op1;
+    }
+    else
+    {
+      dst = tmp_operand ();
+    }
   }
   else
   {
