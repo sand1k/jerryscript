@@ -3378,10 +3378,11 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
           state_p->u.expression.token_type = TOK_QUERY;
 
-          JERRY_ASSERT (!state_p->is_fixed_ret_operand);
-
-          state_p->is_fixed_ret_operand = true;
-          state_p->u.expression.operand = tmp_operand ();
+          if (!state_p->is_fixed_ret_operand)
+          {
+            state_p->is_fixed_ret_operand = true;
+            state_p->u.expression.operand = tmp_operand ();
+          }
 
           jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ASSIGNMENT, true);
         }
@@ -3427,16 +3428,26 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
               state_p->u.expression.u.logical_or.rewrite_chain = MAX_OPCODES;
 
-              jsp_operand_t ret = tmp_operand ();
+              jsp_operand_t ret;
 
-              dump_get_value_if_ref (state_p, true);
+              if (state_p->is_fixed_ret_operand)
+              {
+                JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
 
-              dump_variable_assignment (ret, state_p->u.expression.operand);
+                ret = state_p->u.expression.operand;
+              }
+              else
+              {
+                ret = tmp_operand ();
 
-              JERRY_ASSERT (!state_p->is_fixed_ret_operand);
-              state_p->is_fixed_ret_operand = true;
+                dump_get_value_if_ref (state_p, true);
 
-              state_p->u.expression.operand = ret;
+                dump_variable_assignment (ret, state_p->u.expression.operand);
+
+                state_p->is_fixed_ret_operand = true;
+
+                state_p->u.expression.operand = ret;
+              }
             }
 
             JERRY_ASSERT (state_p->is_complex_production);
