@@ -1216,7 +1216,8 @@ jsp_is_assignment_expression_end (jsp_state_t *current_state_p)
 {
   jsp_token_type_t tt = lexer_get_token_type (tok);
 
-  JERRY_ASSERT (current_state_p->state == JSP_STATE_EXPR_MULTIPLICATIVE
+  JERRY_ASSERT (current_state_p->state == JSP_STATE_EXPR_UNARY
+                || current_state_p->state == JSP_STATE_EXPR_MULTIPLICATIVE
                 || current_state_p->state == JSP_STATE_EXPR_ADDITIVE
                 || current_state_p->state == JSP_STATE_EXPR_SHIFT
                 || current_state_p->state == JSP_STATE_EXPR_RELATIONAL
@@ -1249,6 +1250,193 @@ jsp_is_assignment_expression_end (jsp_state_t *current_state_p)
 }
 
 static bool
+jsp_dump_unary_op (jsp_state_t *state_p,
+                   jsp_state_t *substate_p)
+{
+  vm_op_t opcode;
+
+  bool is_combined_with_assignment = false;
+
+  jsp_state_t *prev_state_p = jsp_get_prev_state (state_p);
+  JERRY_ASSERT (prev_state_p != NULL);
+
+  bool is_try_combine_with_assignment = (prev_state_p->state == JSP_STATE_EXPR_LEFTHANDSIDE
+                                         && prev_state_p->u.expression.token_type == TOK_EQ
+                                         && !prev_state_p->is_value_based_reference
+                                         && !prev_state_p->is_need_retval
+                                         && jsp_is_assignment_expression_end (state_p));
+
+  jsp_token_type_t tt = state_p->u.expression.token_type;
+  state_p->u.expression.token_type = TOK_EMPTY;
+
+  bool is_dump_simple_assignment = false;
+  bool is_dump_undefined_or_boolean_true = true; /* the value is not valid until is_dump_simple_assignment is set */
+
+  switch (tt)
+  {
+    case TOK_DOUBLE_PLUS:
+    case TOK_DOUBLE_MINUS:
+    {
+      if (!substate_p->is_value_based_reference)
+      {
+        if (substate_p->u.expression.operand.is_identifier_operand ())
+        {
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (substate_p->u.expression.operand,
+                                                                       is_strict_mode (),
+                                                                       tok.loc);
+        }
+        else
+        {
+          PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+        }
+      }
+
+      opcode = (tt == TOK_DOUBLE_PLUS ? VM_OP_PRE_INCR : VM_OP_PRE_DECR);
+      break;
+    }
+    case TOK_PLUS:
+    {
+      dump_get_value_if_ref (substate_p, true);
+
+      opcode = VM_OP_UNARY_PLUS;
+      break;
+    }
+    case TOK_MINUS:
+    {
+      dump_get_value_if_ref (substate_p, true);
+
+      opcode = VM_OP_UNARY_MINUS;
+      break;
+    }
+    case TOK_COMPL:
+    {
+      dump_get_value_if_ref (substate_p, true);
+
+      opcode = VM_OP_B_NOT;
+      break;
+    }
+    case TOK_NOT:
+    {
+      dump_get_value_if_ref (substate_p, true);
+
+      opcode = VM_OP_LOGICAL_NOT;
+      break;
+    }
+    case TOK_KW_DELETE:
+    {
+      if (substate_p->is_value_based_reference)
+      {
+        opcode = VM_OP_DELETE_PROP;
+      }
+      else if (substate_p->u.expression.operand.is_identifier_operand ())
+      {
+        jsp_early_error_check_delete (is_strict_mode (), tok.loc);
+
+        opcode = VM_OP_DELETE_VAR;
+      }
+      else
+      {
+        opcode = VM_OP__COUNT /* invalid opcode as it will not be used */;
+
+        is_dump_simple_assignment = true;
+        is_dump_undefined_or_boolean_true = false; /* dump boolean true value */
+      }
+      break;
+    }
+    case TOK_KW_VOID:
+    {
+      dump_get_value_if_ref (substate_p, false);
+
+      opcode = VM_OP__COUNT /* invalid opcode as it will not be used */;
+
+      is_dump_simple_assignment = true;
+      is_dump_undefined_or_boolean_true = true; /* dump undefined value */
+      break;
+    }
+    default:
+    {
+      dump_get_value_if_ref (substate_p, true);
+
+      JERRY_ASSERT (tt == TOK_KW_TYPEOF);
+
+      opcode = VM_OP_TYPEOF;
+      break;
+    }
+  }
+
+  jsp_operand_t dst;
+
+  if (dump_get_value_for_state_if_ref (substate_p, false, true))
+  {
+    dump_get_value_for_prev_states (substate_p);
+  }
+
+  if (is_try_combine_with_assignment
+      && (is_dump_simple_assignment
+          || !substate_p->is_value_based_reference
+          || opcode == VM_OP_DELETE_PROP))
+  {
+    dst = prev_state_p->u.expression.operand;
+
+    is_combined_with_assignment = true;
+  }
+  else
+  {
+    dst = tmp_operand ();
+  }
+
+  if (is_dump_simple_assignment)
+  {
+    if (is_dump_undefined_or_boolean_true)
+    {
+      dump_undefined_assignment (dst);
+    }
+    else
+    {
+      dump_boolean_assignment (dst, true);
+    }
+  }
+  else
+  {
+    if (substate_p->is_value_based_reference)
+    {
+      if (opcode == VM_OP_DELETE_PROP)
+      {
+        dump_binary_op (VM_OP_DELETE_PROP,
+                        dst,
+                        substate_p->u.expression.operand,
+                        substate_p->u.expression.prop_name_operand);
+      }
+      else
+      {
+        JERRY_ASSERT (opcode == VM_OP_PRE_INCR || opcode == VM_OP_PRE_DECR);
+
+        jsp_operand_t reg = tmp_operand ();
+
+        dump_prop_getter (reg, substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand);
+
+        dump_unary_op (opcode, reg, reg);
+
+        dump_prop_setter (substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand, reg);
+
+        dst = reg;
+      }
+    }
+    else
+    {
+      JERRY_ASSERT (!substate_p->is_value_based_reference);
+
+      dump_unary_op (opcode, dst, substate_p->u.expression.operand);
+    }
+  }
+
+  JERRY_ASSERT (!state_p->is_value_based_reference);
+  state_p->u.expression.operand = dst;
+
+  return is_combined_with_assignment;
+}
+
+static bool
 jsp_dump_binary_op (jsp_state_t *state_p,
                     jsp_state_t *substate_p)
 {
@@ -1257,6 +1445,7 @@ jsp_dump_binary_op (jsp_state_t *state_p,
   bool is_combined_with_assignment = false;
 
   jsp_state_t *prev_state_p = jsp_get_prev_state (state_p);
+  JERRY_ASSERT (prev_state_p != NULL);
 
   bool is_try_combine_with_assignment = (prev_state_p->state == JSP_STATE_EXPR_LEFTHANDSIDE
                                          && prev_state_p->u.expression.token_type == TOK_EQ
@@ -2777,6 +2966,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             jsp_operand_t reg = tmp_operand ();
 
             dump_binary_op (opcode, reg, state_p->u.expression.operand, substate_p->u.expression.operand);
+
             dump_variable_assignment (state_p->u.expression.operand, reg);
 
             state_p->u.expression.operand = reg;
@@ -2924,154 +3114,18 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       {
         JERRY_ASSERT (is_subexpr_end);
 
-        if (state_p->u.expression.token_type == TOK_DOUBLE_PLUS)
-        {
-          jsp_operand_t reg = tmp_operand ();
-
-          if (substate_p->is_value_based_reference)
-          {
-            dump_prop_getter (reg, substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand);
-
-            dump_unary_op (VM_OP_PRE_INCR, reg, reg);
-
-            dump_prop_setter (substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand, reg);
-          }
-          else if (substate_p->u.expression.operand.is_identifier_operand ())
-          {
-            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (substate_p->u.expression.operand, is_strict_mode (), tok.loc);
-
-            dump_unary_op (VM_OP_PRE_INCR, reg, substate_p->u.expression.operand);
-          }
-          else
-          {
-            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
-          }
-
-          state_p->u.expression.operand = reg;
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
-        }
-        else if (state_p->u.expression.token_type == TOK_DOUBLE_MINUS)
-        {
-          jsp_operand_t reg = tmp_operand ();
-
-          if (substate_p->is_value_based_reference)
-          {
-            dump_prop_getter (reg, substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand);
-
-            dump_unary_op (VM_OP_PRE_DECR, reg, reg);
-
-            dump_prop_setter (substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand, reg);
-          }
-          else if (substate_p->u.expression.operand.is_identifier_operand ())
-          {
-            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (substate_p->u.expression.operand, is_strict_mode (), tok.loc);
-
-            dump_unary_op (VM_OP_PRE_DECR, reg, substate_p->u.expression.operand);
-          }
-          else
-          {
-            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
-          }
-
-          state_p->u.expression.operand = reg;
-          state_p->u.expression.prop_name_operand = empty_operand ();
-          state_p->is_value_based_reference = false;
-        }
-        else if (state_p->u.expression.token_type == TOK_PLUS)
-        {
-          dump_get_value_if_ref (substate_p, true);
-
-          state_p->u.expression.operand = tmp_operand ();
-          dump_unary_op (VM_OP_UNARY_PLUS, state_p->u.expression.operand, substate_p->u.expression.operand);
-        }
-        else if (state_p->u.expression.token_type == TOK_MINUS)
-        {
-          dump_get_value_if_ref (substate_p, true);
-
-          state_p->u.expression.operand = tmp_operand ();
-          dump_unary_op (VM_OP_UNARY_MINUS, state_p->u.expression.operand, substate_p->u.expression.operand);
-        }
-        else if (state_p->u.expression.token_type == TOK_COMPL)
-        {
-          dump_get_value_if_ref (substate_p, true);
-
-          state_p->u.expression.operand = tmp_operand ();
-          dump_unary_op (VM_OP_B_NOT, state_p->u.expression.operand, substate_p->u.expression.operand);
-        }
-        else if (state_p->u.expression.token_type == TOK_NOT)
-        {
-          dump_get_value_if_ref (substate_p, true);
-
-          state_p->u.expression.operand = tmp_operand ();
-          dump_unary_op (VM_OP_LOGICAL_NOT, state_p->u.expression.operand, substate_p->u.expression.operand);
-        }
-        else if (state_p->u.expression.token_type == TOK_KW_DELETE)
-        {
-          state_p->u.expression.operand = tmp_operand ();
-
-          if (!substate_p->is_value_based_reference)
-          {
-            if (substate_p->u.expression.operand.is_identifier_operand ())
-            {
-              jsp_early_error_check_delete (is_strict_mode (), tok.loc);
-            }
-
-            if (substate_p->u.expression.operand.is_identifier_operand ())
-            {
-              dump_unary_op (VM_OP_DELETE_VAR, state_p->u.expression.operand, substate_p->u.expression.operand);
-            }
-            else
-            {
-              dump_boolean_assignment (state_p->u.expression.operand, true);
-            }
-          }
-          else
-          {
-            if (substate_p->u.expression.operand.is_literal_operand ())
-            {
-              jsp_operand_t reg = tmp_operand ();
-
-              dump_string_assignment (reg, substate_p->u.expression.operand.get_literal ());
-
-              substate_p->u.expression.operand = reg;
-            }
-
-            dump_delete_prop (state_p->u.expression.operand,
-                              substate_p->u.expression.operand,
-                              substate_p->u.expression.prop_name_operand);
-          }
-        }
-        else if (state_p->u.expression.token_type == TOK_KW_VOID)
-        {
-          const jsp_operand_t reg = tmp_operand ();
-
-          if (substate_p->is_value_based_reference)
-          {
-            dump_prop_getter (reg, substate_p->u.expression.operand, substate_p->u.expression.prop_name_operand);
-          }
-          else if (substate_p->u.expression.operand.is_identifier_operand ())
-          {
-            dump_variable_assignment (reg, substate_p->u.expression.operand);
-          }
-
-          dump_undefined_assignment (reg);
-          state_p->u.expression.operand = reg;
-        }
-        else
-        {
-          JERRY_ASSERT (state_p->u.expression.token_type == TOK_KW_TYPEOF);
-
-          dump_get_value_if_ref (substate_p, true);
-
-          state_p->u.expression.operand = tmp_operand ();
-          dump_unary_op (VM_OP_TYPEOF, state_p->u.expression.operand, substate_p->u.expression.operand);
-        }
+        bool is_combined_with_assignment = jsp_dump_unary_op (state_p, substate_p);
 
         JSP_FINISH_SUBEXPR ();
 
-        state_p->u.expression.token_type = TOK_EMPTY;
-        state_p->is_completed = true;
+        if (is_combined_with_assignment)
+        {
+          JSP_ASSIGNMENT_EXPR_COMBINE ();
+        }
+        else
+        {
+          state_p->is_completed = true;
+        }
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_MULTIPLICATIVE)
