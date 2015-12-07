@@ -431,7 +431,7 @@ vm_instr_counter_t dump_jump_to_end_for_rewrite (void);
 void rewrite_jump_to_end (vm_instr_counter_t);
 
 vm_instr_counter_t dumper_set_next_iteration_target (void);
-vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
+vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (bool, bool, bool, jsp_operand_t, vm_instr_counter_t);
 vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (vm_instr_counter_t, jsp_operand_t);
 

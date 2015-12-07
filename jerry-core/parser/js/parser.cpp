@@ -3329,7 +3329,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             JERRY_ASSERT (state_p->is_complex_production);
 
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_and.rewrite_chain;
-            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_FALSE_JMP_DOWN,
+            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (false, true, true,
                                                                        state_p->u.expression.operand,
                                                                        *rewrite_chain_p);
 
@@ -3453,7 +3453,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             JERRY_ASSERT (state_p->is_complex_production);
 
             vm_instr_counter_t *rewrite_chain_p = &state_p->u.expression.u.logical_or.rewrite_chain;
-            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (VM_OP_IS_TRUE_JMP_DOWN,
+            *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (false, true, false,
                                                                        state_p->u.expression.operand,
                                                                        *rewrite_chain_p);
 
@@ -3795,8 +3795,9 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           rewrite_chain_p = &labelled_stmt_p->u.statement.u.iterational.continues_rewrite_chain;
         }
 
-        vm_op_t jmp_opcode = is_simply_jumpable ? VM_OP_JMP_DOWN : VM_OP_JMP_BREAK_CONTINUE;
-        *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (jmp_opcode, empty_operand (), *rewrite_chain_p);
+        *rewrite_chain_p = dump_simple_or_nested_jump_for_rewrite (!is_simply_jumpable, false, false,
+                                                                   empty_operand (),
+                                                                   *rewrite_chain_p);
 
         JSP_COMPLETE_STATEMENT_PARSE ();
       }
