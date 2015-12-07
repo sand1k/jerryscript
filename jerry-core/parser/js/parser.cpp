@@ -1059,8 +1059,8 @@ dump_get_value_for_prev_states (jsp_state_t *state_p)
 
   while (dump_state_border_for_p != NULL)
   {
-    JERRY_STATIC_ASSERT (JSP_STATE_EXPR__BEGIN == 0);
-    if (dump_state_border_for_p->req_state <= JSP_STATE_EXPR__END
+    if (dump_state_border_for_p->state > JSP_STATE_EXPR__BEGIN
+        && dump_state_border_for_p->req_state < JSP_STATE_EXPR__END
         && (!dump_state_border_for_p->is_get_value_dumped_for_main_operand
             || !dump_state_border_for_p->is_get_value_dumped_for_prop_operand))
     {
@@ -2052,8 +2052,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       }
       else
       {
-        JERRY_STATIC_ASSERT (JSP_STATE_EXPR__BEGIN == 0);
-        is_subexpr_end = (state_p->state <= JSP_STATE_EXPR__END);
+        is_subexpr_end = (state_p->state > JSP_STATE_EXPR__BEGIN && state_p->state < JSP_STATE_EXPR__END);
 
         if (is_subexpr_end)
         {
