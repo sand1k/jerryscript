@@ -2983,28 +2983,28 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           dump_get_value_if_ref (substate_p, true);
 
           state_p->u.expression.operand = tmp_operand ();
-          dump_unary_plus (state_p->u.expression.operand, substate_p->u.expression.operand);
+          dump_unary_op (VM_OP_UNARY_PLUS, state_p->u.expression.operand, substate_p->u.expression.operand);
         }
         else if (state_p->u.expression.token_type == TOK_MINUS)
         {
           dump_get_value_if_ref (substate_p, true);
 
           state_p->u.expression.operand = tmp_operand ();
-          dump_unary_minus (state_p->u.expression.operand, substate_p->u.expression.operand);
+          dump_unary_op (VM_OP_UNARY_MINUS, state_p->u.expression.operand, substate_p->u.expression.operand);
         }
         else if (state_p->u.expression.token_type == TOK_COMPL)
         {
           dump_get_value_if_ref (substate_p, true);
 
           state_p->u.expression.operand = tmp_operand ();
-          dump_bitwise_not (state_p->u.expression.operand, substate_p->u.expression.operand);
+          dump_unary_op (VM_OP_B_NOT, state_p->u.expression.operand, substate_p->u.expression.operand);
         }
         else if (state_p->u.expression.token_type == TOK_NOT)
         {
           dump_get_value_if_ref (substate_p, true);
 
           state_p->u.expression.operand = tmp_operand ();
-          dump_logical_not (state_p->u.expression.operand, substate_p->u.expression.operand);
+          dump_unary_op (VM_OP_LOGICAL_NOT, state_p->u.expression.operand, substate_p->u.expression.operand);
         }
         else if (state_p->u.expression.token_type == TOK_KW_DELETE)
         {
@@ -3017,7 +3017,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
               jsp_early_error_check_delete (is_strict_mode (), tok.loc);
             }
 
-            dump_delete (state_p->u.expression.operand, substate_p->u.expression.operand);
+            if (substate_p->u.expression.operand.is_identifier_operand ())
+            {
+              dump_unary_op (VM_OP_DELETE_VAR, state_p->u.expression.operand, substate_p->u.expression.operand);
+            }
+            else
+            {
+              dump_boolean_assignment (state_p->u.expression.operand, true);
+            }
           }
           else
           {
@@ -3058,7 +3065,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           dump_get_value_if_ref (substate_p, true);
 
           state_p->u.expression.operand = tmp_operand ();
-          dump_typeof (state_p->u.expression.operand, substate_p->u.expression.operand);
+          dump_unary_op (VM_OP_TYPEOF, state_p->u.expression.operand, substate_p->u.expression.operand);
         }
 
         JSP_FINISH_SUBEXPR ();
@@ -4466,7 +4473,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         jsp_operand_t switch_expr = state_p->u.statement.u.switch_statement.expr;
 
         const jsp_operand_t cond = tmp_operand ();
-        dump_equal_value_type (cond, switch_expr, case_expr);
+        dump_binary_op (VM_OP_EQUAL_VALUE_TYPE, cond, switch_expr, case_expr);
 
         vm_instr_counter_t jmp_oc = dump_case_clause_check_for_rewrite (cond);
         skip_token ();
