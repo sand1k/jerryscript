@@ -61,6 +61,9 @@ typedef enum __attr_packed___
   JSP_STATE_EXPR_MEMBER,              /**< MemberExpression (11.2) */
   JSP_STATE_EXPR_CALL,                /**< CallExpression (11.2) */
   JSP_STATE_EXPR_LEFTHANDSIDE,        /**< LeftHandSideExpression (11.2) */
+
+  JSP_STATE_EXPR__SIMPLE_BEGIN,
+
   JSP_STATE_EXPR_UNARY,               /**< UnaryExpression (11.4) */
   JSP_STATE_EXPR_MULTIPLICATIVE,      /**< MultiplicativeExpression (11.5) */
   JSP_STATE_EXPR_ADDITIVE,            /**< AdditiveExpression (11.6) */
@@ -70,6 +73,9 @@ typedef enum __attr_packed___
   JSP_STATE_EXPR_BITWISE_AND,         /**< BitwiseAndExpression (11.10) */
   JSP_STATE_EXPR_BITWISE_XOR,         /**< BitwiseXorExpression (11.10) */
   JSP_STATE_EXPR_BITWISE_OR,          /**< BitwiseOrExpression (11.10) */
+
+  JSP_STATE_EXPR__SIMPLE_END,
+
   JSP_STATE_EXPR_LOGICAL_AND,         /**< LogicalAndExpression (11.11) */
   JSP_STATE_EXPR_LOGICAL_OR,          /**< LogicalOrExpression (11.11) */
   JSP_STATE_EXPR_CONDITION,           /**< ConditionalExpression (11.12) */
@@ -1581,17 +1587,15 @@ jsp_dump_binary_op (jsp_state_t *state_p,
     op1 = state_p->u.expression.operand;
     op2 = substate_p->u.expression.operand;
 
-    if (op1.is_register_operand ())
+    if (is_try_combine_with_assignment)
     {
-      dst = op1;
-    }
-    else if (is_try_combine_with_assignment)
-    {
-      jsp_state_t *prev_state_p = jsp_get_prev_state (state_p);
-
       dst = prev_state_p->u.expression.operand;
 
       is_combined_with_assignment = true;
+    }
+    else if (op1.is_register_operand ())
+    {
+      dst = op1;
     }
     else
     {
@@ -1603,7 +1607,17 @@ jsp_dump_binary_op (jsp_state_t *state_p,
     dump_get_value_if_ref (state_p, true);
     dump_get_value_if_ref (substate_p, true);
 
-    dst = state_p->u.expression.operand;
+    if (is_try_combine_with_assignment)
+    {
+      dst = prev_state_p->u.expression.operand;
+
+      is_combined_with_assignment = true;
+    }
+    else
+    {
+      dst = state_p->u.expression.operand;
+    }
+
     op1 = state_p->u.expression.operand;
     op2 = substate_p->u.expression.operand;
   }
@@ -3101,19 +3115,48 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         }
       }
     }
-    else if (state_p->state == JSP_STATE_EXPR_UNARY)
+    else if (state_p->state > JSP_STATE_EXPR__SIMPLE_BEGIN
+             && state_p->state < JSP_STATE_EXPR__SIMPLE_END)
     {
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_MULTIPLICATIVE == JSP_STATE_EXPR_UNARY + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_ADDITIVE == JSP_STATE_EXPR_MULTIPLICATIVE + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_SHIFT == JSP_STATE_EXPR_ADDITIVE + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_RELATIONAL == JSP_STATE_EXPR_SHIFT + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_EQUALITY == JSP_STATE_EXPR_RELATIONAL + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_BITWISE_AND == JSP_STATE_EXPR_EQUALITY + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_BITWISE_XOR == JSP_STATE_EXPR_BITWISE_AND + 1u);
+      JERRY_STATIC_ASSERT (JSP_STATE_EXPR_BITWISE_OR == JSP_STATE_EXPR_BITWISE_XOR + 1u);
+
       if (state_p->is_completed)
       {
-        /* propagate to MultiplicativeExpression */
-        state_p->state = JSP_STATE_EXPR_MULTIPLICATIVE;
+        if (state_p->state == JSP_STATE_EXPR_BITWISE_OR)
+        {
+          state_p->state = JSP_STATE_EXPR_LOGICAL_AND;
+
+          state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
+        }
+        else
+        {
+          JERRY_ASSERT (state_p->state != state_p->req_state);
+          JERRY_ASSERT (state_p->state == JSP_STATE_EXPR_UNARY);
+
+          state_p->state = (jsp_state_expr_t) (state_p->state + 1u);
+        }
+
         state_p->is_completed = false;
       }
-      else
+      else if (is_subexpr_end)
       {
-        JERRY_ASSERT (is_subexpr_end);
+        bool is_combined_with_assignment;
 
-        bool is_combined_with_assignment = jsp_dump_unary_op (state_p, substate_p);
+        if (state_p->state == JSP_STATE_EXPR_UNARY)
+        {
+          is_combined_with_assignment = jsp_dump_unary_op (state_p, substate_p);
+        }
+        else
+        {
+          is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
+        }
 
         JSP_FINISH_SUBEXPR ();
 
@@ -3121,310 +3164,105 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         {
           JSP_ASSIGNMENT_EXPR_COMBINE ();
         }
-        else
-        {
-          state_p->is_completed = true;
-        }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_MULTIPLICATIVE)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to AdditiveExpression */
-        state_p->state = JSP_STATE_EXPR_ADDITIVE;
-        state_p->is_completed = false;
       }
       else
       {
-        if (is_subexpr_end)
+        JERRY_ASSERT (!state_p->is_completed);
+
+
+        jsp_state_expr_t new_state, subexpr_type;
+
+        bool is_simple = true;
+
+        jsp_token_type_t tt = lexer_get_token_type (tok);
+
+        if (tt >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN && tt <= TOKEN_TYPE__MULTIPLICATIVE_END)
         {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_MULTIPLICATIVE);
 
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
-          {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
-          }
+          new_state = JSP_STATE_EXPR_MULTIPLICATIVE;
+          subexpr_type = JSP_STATE_EXPR_UNARY;
         }
-        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__MULTIPLICATIVE_BEGIN
-                 && lexer_get_token_type (tok) <= TOKEN_TYPE__MULTIPLICATIVE_END)
+        else if (tt >= TOKEN_TYPE__ADDITIVE_BEGIN && tt <= TOKEN_TYPE__ADDITIVE_END)
         {
-          state_p->u.expression.token_type = lexer_get_token_type (tok);
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_ADDITIVE);
 
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_UNARY, in_allowed);
-
-          skip_token ();
+          new_state = JSP_STATE_EXPR_ADDITIVE;
+          subexpr_type = JSP_STATE_EXPR_MULTIPLICATIVE;
         }
-        else
+        else if (tt >= TOKEN_TYPE__SHIFT_BEGIN && tt <= TOKEN_TYPE__SHIFT_END)
         {
-          state_p->is_completed = true;
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_SHIFT);
+
+          new_state = JSP_STATE_EXPR_SHIFT;
+          subexpr_type = JSP_STATE_EXPR_ADDITIVE;
         }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_ADDITIVE)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to ShiftExpression */
-        state_p->state = JSP_STATE_EXPR_SHIFT;
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
+        else if ((tt >= TOKEN_TYPE__RELATIONAL_BEGIN && tt <= TOKEN_TYPE__RELATIONAL_END)
+                 || tt == TOK_KW_INSTANCEOF
+                 || (in_allowed && tt == TOK_KW_IN))
         {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_RELATIONAL);
 
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
-          {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
-          }
+          new_state = JSP_STATE_EXPR_RELATIONAL;
+          subexpr_type = JSP_STATE_EXPR_SHIFT;
         }
-        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__ADDITIVE_BEGIN
-                 && lexer_get_token_type (tok) <= TOKEN_TYPE__ADDITIVE_END)
+        else if (tt >= TOKEN_TYPE__EQUALITY_BEGIN && tt <= TOKEN_TYPE__EQUALITY_END)
         {
-          state_p->u.expression.token_type = lexer_get_token_type (tok);
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_EQUALITY);
 
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_MULTIPLICATIVE, in_allowed);
-
-          skip_token ();
+          new_state = JSP_STATE_EXPR_EQUALITY;
+          subexpr_type = JSP_STATE_EXPR_RELATIONAL;
         }
-        else
+        else if (tt == TOK_AND)
         {
-          state_p->is_completed = true;
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_BITWISE_AND);
+
+          new_state = JSP_STATE_EXPR_BITWISE_AND;
+          subexpr_type = JSP_STATE_EXPR_EQUALITY;
         }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_SHIFT)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to RelationalExpression */
-        state_p->state = JSP_STATE_EXPR_RELATIONAL;
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
+        else if (tt == TOK_XOR)
         {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_BITWISE_XOR);
 
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
-          {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
-          }
+          new_state = JSP_STATE_EXPR_BITWISE_XOR;
+          subexpr_type = JSP_STATE_EXPR_BITWISE_AND;
         }
-        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__SHIFT_BEGIN
-                 && lexer_get_token_type (tok) <= TOKEN_TYPE__SHIFT_END)
+        else if (tt == TOK_OR)
         {
-          state_p->u.expression.token_type = lexer_get_token_type (tok);
+          JERRY_ASSERT (state_p->state >= JSP_STATE_EXPR_UNARY && state_p->state <= JSP_STATE_EXPR_BITWISE_OR);
 
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_ADDITIVE, in_allowed);
-
-          skip_token ();
+          new_state = JSP_STATE_EXPR_BITWISE_OR;
+          subexpr_type = JSP_STATE_EXPR_BITWISE_XOR;
         }
         else
         {
-          state_p->is_completed = true;
+          is_simple = false;
         }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_RELATIONAL)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to EqualityExpression */
-        state_p->state = JSP_STATE_EXPR_EQUALITY;
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
+
+        if (!is_simple && state_p->req_state >= JSP_STATE_EXPR_LOGICAL_AND)
         {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
-
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
-          {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
-          }
-        }
-        else if ((lexer_get_token_type (tok) >= TOKEN_TYPE__RELATIONAL_BEGIN
-                  && lexer_get_token_type (tok) <= TOKEN_TYPE__RELATIONAL_END)
-                 || lexer_get_token_type (tok) == TOK_KW_INSTANCEOF
-                 || (in_allowed && lexer_get_token_type (tok) == TOK_KW_IN))
-        {
-          state_p->u.expression.token_type = lexer_get_token_type (tok);
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_SHIFT, in_allowed);
-
-          skip_token ();
+          state_p->state = JSP_STATE_EXPR_LOGICAL_AND;
+          state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
         }
         else
         {
-          state_p->is_completed = true;
-        }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_EQUALITY)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to BitwiseAndExpression */
-        state_p->state = JSP_STATE_EXPR_BITWISE_AND;
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
-        {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
+          JERRY_ASSERT (is_simple || state_p->req_state < JSP_STATE_EXPR__SIMPLE_END);
 
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
+          if (!is_simple || state_p->req_state < new_state)
           {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
+            state_p->state = state_p->req_state;
+
+            state_p->is_completed = true;
           }
-        }
-        else if (lexer_get_token_type (tok) >= TOKEN_TYPE__EQUALITY_BEGIN
-                 && lexer_get_token_type (tok) <= TOKEN_TYPE__EQUALITY_END)
-        {
-          dump_get_value_if_ref (state_p, false);
-
-          state_p->u.expression.token_type = lexer_get_token_type (tok);
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_RELATIONAL, in_allowed);
-
-          skip_token ();
-        }
-        else
-        {
-          state_p->is_completed = true;
-        }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_BITWISE_AND)
-    {
-      /* FIXME: Consider merging BitwiseOR / BitwiseXOR / BitwiseAND productions
-       * into one production with different operators, taking their precedence into account */
-
-      if (state_p->is_completed)
-      {
-        /* propagate to BitwiseXorExpression */
-        state_p->state = JSP_STATE_EXPR_BITWISE_XOR;
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
-        {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
-
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
+          else
           {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
+            skip_token ();
+
+            state_p->state = new_state;
+            state_p->u.expression.token_type = tt;
+
+            jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, subexpr_type, in_allowed);
           }
-        }
-        else if (token_is (TOK_AND))
-        {
-          skip_token ();
-
-          dump_get_value_if_ref (state_p, false);
-
-          state_p->u.expression.token_type = TOK_AND;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EQUALITY, in_allowed);
-        }
-        else
-        {
-          state_p->is_completed = true;
-        }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_BITWISE_XOR)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to BitwiseOrExpression */
-        state_p->state = JSP_STATE_EXPR_BITWISE_OR;
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
-        {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
-
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
-          {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
-          }
-        }
-        else if (token_is (TOK_XOR))
-        {
-          skip_token ();
-
-          dump_get_value_if_ref (state_p, false);
-
-          state_p->u.expression.token_type = TOK_XOR;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_AND, in_allowed);
-        }
-        else
-        {
-          state_p->is_completed = true;
-        }
-      }
-    }
-    else if (state_p->state == JSP_STATE_EXPR_BITWISE_OR)
-    {
-      if (state_p->is_completed)
-      {
-        /* propagate to LogicalAndExpression */
-        state_p->state = JSP_STATE_EXPR_LOGICAL_AND;
-
-        state_p->u.expression.u.logical_and.rewrite_chain = MAX_OPCODES;
-
-        state_p->is_completed = false;
-      }
-      else
-      {
-        if (is_subexpr_end)
-        {
-          bool is_combined_with_assignment = jsp_dump_binary_op (state_p, substate_p);
-
-          JSP_FINISH_SUBEXPR ();
-
-          if (is_combined_with_assignment)
-          {
-            JSP_ASSIGNMENT_EXPR_COMBINE ();
-          }
-        }
-        else if (token_is (TOK_OR))
-        {
-          skip_token ();
-
-          dump_get_value_if_ref (state_p, false);
-
-          state_p->u.expression.token_type = TOK_OR;
-
-          jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_BITWISE_XOR, in_allowed);
-        }
-        else
-        {
-          state_p->is_completed = true;
         }
       }
     }
