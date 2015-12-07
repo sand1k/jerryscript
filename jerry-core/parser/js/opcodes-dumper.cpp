@@ -1399,11 +1399,6 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
   return vm_calc_instr_counter_from_idx_idx (id1_prev, id2_prev);
 } /* rewrite_simple_or_nested_jump_get_next */
 
-void
-start_dumping_case_clauses (void)
-{
-}
-
 vm_instr_counter_t
 dump_case_clause_check_for_rewrite (jsp_operand_t cond)
 {
@@ -1457,11 +1452,6 @@ rewrite_default_clause (vm_instr_counter_t jmp_oc)
   jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
 
   dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
-void
-finish_dumping_case_clauses (void)
-{
 }
 
 /**
