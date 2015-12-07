@@ -425,33 +425,6 @@ void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 void dump_function_end_for_rewrite (void);
 void rewrite_function_end (vm_instr_counter_t);
 
-void dump_unary_plus (jsp_operand_t, jsp_operand_t);
-void dump_unary_minus (jsp_operand_t, jsp_operand_t);
-void dump_bitwise_not (jsp_operand_t, jsp_operand_t);
-void dump_logical_not (jsp_operand_t, jsp_operand_t);
-
-void dump_multiplication (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_division (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_remainder (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_addition (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_substraction (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_left_shift (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_right_shift (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_right_shift_ex (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_less_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_greater_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_less_or_equal_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_greater_or_equal_than (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_instanceof (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_in (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_equal_value (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_not_equal_value (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_equal_value_type (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_not_equal_value_type (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_bitwise_and (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_bitwise_xor (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-void dump_bitwise_or (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-
 vm_instr_counter_t dump_conditional_check_for_rewrite (jsp_operand_t);
 void rewrite_conditional_check (vm_instr_counter_t);
 vm_instr_counter_t dump_jump_to_end_for_rewrite (void);
