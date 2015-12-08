@@ -26,7 +26,7 @@ static vm_idx_t jsp_reg_next;
  * Maximum identifier of a register, allocated for intermediate value storage
  *
  * See also:
- *          dumper_new_scope, dumper_finish_scope
+ *          dumper_save_reg_alloc_ctx, dumper_restore_reg_alloc_ctx
  */
 static vm_idx_t jsp_reg_max_for_temps;
 
@@ -596,8 +596,8 @@ dumper_new_statement (void)
 }
 
 void
-dumper_new_scope (vm_idx_t *out_saved_reg_next_p,
-                  vm_idx_t *out_saved_reg_max_for_temps_p)
+dumper_save_reg_alloc_ctx (vm_idx_t *out_saved_reg_next_p,
+                           vm_idx_t *out_saved_reg_max_for_temps_p)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
@@ -610,8 +610,8 @@ dumper_new_scope (vm_idx_t *out_saved_reg_next_p,
 }
 
 void
-dumper_finish_scope (vm_idx_t saved_reg_next,
-                     vm_idx_t saved_reg_max_for_temps)
+dumper_restore_reg_alloc_ctx (vm_idx_t saved_reg_next,
+                              vm_idx_t saved_reg_max_for_temps)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
