@@ -2106,8 +2106,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
     {
       scope_type_t scope_type = dumper_get_scope ()->type;
 
-      dumper_new_scope (&state_p->u.source_elements.saved_reg_next,
-                        &state_p->u.source_elements.saved_reg_max_for_temps);
+      dumper_save_reg_alloc_ctx (&state_p->u.source_elements.saved_reg_next,
+                                 &state_p->u.source_elements.saved_reg_max_for_temps);
 
       state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
       state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
@@ -2154,8 +2154,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         state_p->is_completed = true;
 
-        dumper_finish_scope (state_p->u.source_elements.saved_reg_next,
-                             state_p->u.source_elements.saved_reg_max_for_temps);
+        dumper_restore_reg_alloc_ctx (state_p->u.source_elements.saved_reg_next,
+                                      state_p->u.source_elements.saved_reg_max_for_temps);
       }
       else
       {
