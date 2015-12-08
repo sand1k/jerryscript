@@ -4528,8 +4528,13 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           {
             skip_token ();
 
+            uint32_t num = jsp_rewrite_jumps_chain (&state_p->u.statement.u.switch_statement.last_cond_check_jmp_oc,
+                                                    dumper_get_current_instr_counter ());
+            JERRY_ASSERT (num <= 1);
+
             dumper_restore_reg_alloc_ctx (state_p->u.statement.u.switch_statement.saved_reg_next,
-                                          state_p->u.statement.u.switch_statement.saved_reg_max_for_temps);
+                                          state_p->u.statement.u.switch_statement.saved_reg_max_for_temps,
+                                          false);
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
           }
