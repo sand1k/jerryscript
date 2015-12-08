@@ -2968,6 +2968,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           {
             JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
           }
+          else
+          {
+            state_p->u.expression.operand = empty_operand ();
+          }
         }
         else
         {
@@ -3607,8 +3611,9 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
          * See also:
          *          11.14, step 2
          */
-        JERRY_ASSERT (!state_p->is_value_based_reference
-                      && state_p->u.expression.operand.is_register_operand ());
+        JERRY_ASSERT (!state_p->is_need_retval
+                      || (!state_p->is_value_based_reference
+                          && state_p->u.expression.operand.is_register_operand ()));
 
         /* evaluating, if reference */
         dump_get_value_if_ref (substate_p, false);
