@@ -402,13 +402,24 @@ jsp_dmp_gen_instr (vm_op_t opcode, /**< operation code */
     {
       instr.data.raw_args[i] = ops[i].get_idx_const ();
     }
+    else if (ops[i].is_smallint_operand ())
+    {
+      instr.data.raw_args[i] = ops[i].get_smallint_value ();
+    }
+    else if (ops[i].is_simple_value_operand ())
+    {
+      instr.data.raw_args[i] = ops[i].get_simple_value ();
+    }
     else if (ops[i].is_register_operand () || ops[i].is_this_operand ())
     {
       instr.data.raw_args[i] = ops[i].get_idx ();
     }
     else
     {
-      JERRY_ASSERT (ops[i].is_literal_operand () || ops[i].is_identifier_operand ());
+      JERRY_ASSERT (ops[i].is_number_lit_operand ()
+                    || ops[i].is_string_lit_operand ()
+                    || ops[i].is_regexp_lit_operand ()
+                    || ops[i].is_identifier_operand ());
 
       instr.data.raw_args[i] = VM_IDX_REWRITE_LITERAL_UID;
     }
@@ -439,7 +450,9 @@ jsp_dmp_create_op_meta (vm_op_t opcode, /**< opcode */
 
   for (size_t i = 0; i < ops_num; i++)
   {
-    if (ops[i].is_literal_operand ())
+    if (ops[i].is_number_lit_operand ()
+        || ops[i].is_string_lit_operand ()
+        || ops[i].is_regexp_lit_operand ())
     {
       ret.lit_id[i] = ops[i].get_literal ();
     }
@@ -577,12 +590,6 @@ empty_operand (void)
   return jsp_operand_t::make_empty_operand ();
 }
 
-jsp_operand_t
-literal_operand (lit_cpointer_t lit_cp)
-{
-  return jsp_operand_t::make_lit_operand (lit_cp);
-}
-
 bool
 operand_is_empty (jsp_operand_t op)
 {
@@ -694,7 +701,7 @@ dump_array_hole_assignment (jsp_operand_t op)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_ARRAY_HOLE);
+  value_operand = jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_ARRAY_HOLE);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 } /* dump_array_hole_assignment */
@@ -705,7 +712,7 @@ dump_boolean_assignment (jsp_operand_t op, bool is_true)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (is_true ? ECMA_SIMPLE_VALUE_TRUE : ECMA_SIMPLE_VALUE_FALSE);
+  value_operand = jsp_operand_t::make_simple_value_operand (is_true ? ECMA_SIMPLE_VALUE_TRUE : ECMA_SIMPLE_VALUE_FALSE);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -716,7 +723,7 @@ dump_string_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_STRING);
-  value_operand = jsp_operand_t::make_lit_operand (lit_id);
+  value_operand = jsp_operand_t::make_string_lit_operand (lit_id);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -727,7 +734,7 @@ dump_number_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_NUMBER);
-  value_operand = jsp_operand_t::make_lit_operand (lit_id);
+  value_operand = jsp_operand_t::make_number_lit_operand (lit_id);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -738,7 +745,7 @@ dump_regexp_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_REGEXP);
-  value_operand = jsp_operand_t::make_lit_operand (lit_id);
+  value_operand = jsp_operand_t::make_regexp_lit_operand (lit_id);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -749,7 +756,7 @@ dump_smallint_assignment (jsp_operand_t op, vm_idx_t uid)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SMALLINT);
-  value_operand = jsp_operand_t::make_idx_const_operand (uid);
+  value_operand = jsp_operand_t::make_smallint_operand (uid);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -760,7 +767,7 @@ dump_undefined_assignment (jsp_operand_t op)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_UNDEFINED);
+  value_operand = jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_UNDEFINED);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -771,7 +778,7 @@ dump_null_assignment (jsp_operand_t op)
   jsp_operand_t type_operand, value_operand;
 
   type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_idx_const_operand (ECMA_SIMPLE_VALUE_NULL);
+  value_operand = jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_NULL);
 
   dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
 }
@@ -1034,11 +1041,7 @@ dump_varg (jsp_operand_t op)
 void
 dump_prop_name_and_value (jsp_operand_t name, jsp_operand_t value)
 {
-  JERRY_ASSERT (name.is_literal_operand ());
-  literal_t lit = lit_get_literal_by_cp (name.get_literal ());
-  JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_EX_T);
+  JERRY_ASSERT (name.is_string_lit_operand ());
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_VARG_PROP_DATA),
@@ -1049,12 +1052,8 @@ dump_prop_name_and_value (jsp_operand_t name, jsp_operand_t value)
 void
 dump_prop_getter_decl (jsp_operand_t name, jsp_operand_t func)
 {
-  JERRY_ASSERT (name.is_literal_operand ());
+  JERRY_ASSERT (name.is_string_lit_operand ());
   JERRY_ASSERT (func.is_register_operand ());
-  literal_t lit = lit_get_literal_by_cp (name.get_literal ());
-  JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_EX_T);
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_VARG_PROP_GETTER),
@@ -1065,12 +1064,8 @@ dump_prop_getter_decl (jsp_operand_t name, jsp_operand_t func)
 void
 dump_prop_setter_decl (jsp_operand_t name, jsp_operand_t func)
 {
-  JERRY_ASSERT (name.is_literal_operand ());
+  JERRY_ASSERT (name.is_string_lit_operand ());
   JERRY_ASSERT (func.is_register_operand ());
-  literal_t lit = lit_get_literal_by_cp (name.get_literal ());
-  JERRY_ASSERT (lit->get_type () == LIT_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_T
-                || lit->get_type () == LIT_MAGIC_STR_EX_T);
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_VARG_PROP_SETTER),
@@ -1544,7 +1539,7 @@ dump_catch_for_rewrite (jsp_operand_t op)
 {
   vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
-  JERRY_ASSERT (op.is_literal_operand ());
+  JERRY_ASSERT (op.is_string_lit_operand ());
 
   dump_triple_address (VM_OP_META,
                        jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_CATCH),
@@ -1623,7 +1618,7 @@ dump_throw (jsp_operand_t op)
 void
 dump_variable_declaration (lit_cpointer_t lit_id) /**< literal which holds variable's name */
 {
-  jsp_operand_t op_var_name = jsp_operand_t::make_lit_operand (lit_id);
+  jsp_operand_t op_var_name = jsp_operand_t::make_string_lit_operand (lit_id);
   op_meta op = jsp_dmp_create_op_meta (VM_OP_VAR_DECL, &op_var_name, 1);
 
   JERRY_ASSERT (scopes_tree_instrs_num (current_scope_p)
