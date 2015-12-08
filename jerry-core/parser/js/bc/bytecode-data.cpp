@@ -160,18 +160,19 @@ bc_dump_single_scope (scopes_tree scope_p,
   const size_t bytecode_size = JERRY_ALIGNUP (instrs_count * sizeof (vm_instr_t), MEM_ALIGNMENT);
   const size_t hash_table_size = lit_id_hash_table_get_size_for_table (entries_count, blocks_count);
   const size_t func_decls_table_size = JERRY_ALIGNUP (func_decls_count * sizeof (mem_cpointer_t), MEM_ALIGNMENT);
-  const size_t header_and_tables_size = JERRY_ALIGNUP (sizeof (bytecode_data_header_t) + hash_table_size
-                                                             + func_decls_table_size,
-                                                           MEM_ALIGNMENT);
+  const size_t header_and_tables_size = JERRY_ALIGNUP ((sizeof (bytecode_data_header_t)
+                                                        + hash_table_size
+                                                        + func_decls_table_size),
+                                                       MEM_ALIGNMENT);
 
-  uint8_t *buffer_p = (uint8_t*) mem_heap_alloc_block (bytecode_size + header_and_tables_size,
+  uint8_t *buffer_p = (uint8_t *) mem_heap_alloc_block (bytecode_size + header_and_tables_size,
                                                        MEM_HEAP_ALLOC_LONG_TERM);
 
   lit_id_hash_table *lit_id_hash = lit_id_hash_table_init (buffer_p + sizeof (bytecode_data_header_t),
                                                            hash_table_size,
                                                            entries_count, blocks_count);
 
-  lit_cpointer_t *func_decls_p = (lit_cpointer_t *) buffer_p + sizeof (bytecode_data_header_t) + hash_table_size;
+  mem_cpointer_t *func_decls_p = (mem_cpointer_t *) (buffer_p + sizeof (bytecode_data_header_t) + hash_table_size);
 
   vm_instr_t *bytecode_p = scopes_tree_dump_single_scope (scope_p,
                                                           buffer_p + header_and_tables_size,
