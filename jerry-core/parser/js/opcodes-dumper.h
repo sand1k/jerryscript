@@ -18,6 +18,7 @@
 
 #include "ecma-globals.h"
 #include "lexer.h"
+#include "lit-literal.h"
 #include "opcodes.h"
 #include "scopes-tree.h"
 
@@ -30,7 +31,11 @@ public:
   enum type_t : uint8_t
   {
     EMPTY, /**< empty operand */
-    LITERAL, /**< operand contains literal value */
+    STRING_LITERAL, /**< operand contains string literal value */
+    NUMBER_LITERAL, /**< operand contains number literal value */
+    REGEXP_LITERAL, /**< operand contains regexp literal value */
+    SIMPLE_VALUE, /**< operand contains a simple ecma value */
+    SMALLINT, /**< operand contains small integer value (less than 256) */
     IDENTIFIER, /**< Identifier reference */
     THIS_BINDING, /**< ThisBinding operand */
     TMP, /**< operand contains byte-code register index */
@@ -115,22 +120,112 @@ public:
   } /* make_idx_const_operand */
 
   /**
-   * Construct literal operand
+   * Construct small integer operand
    *
    * @return constructed operand
    */
   static jsp_operand_t
-  make_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  make_smallint_operand (uint8_t integer_value) /**< small integer value */
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::SMALLINT;
+    ret._data.smallint_value = integer_value;
+
+    return ret;
+  } /* make_smallint_operand */
+
+  /**
+   * Construct simple ecma value operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_simple_value_operand (ecma_simple_value_t simple_value) /**< simple ecma value */
+  {
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::SIMPLE_VALUE;
+    ret._data.simple_value = simple_value;
+
+    return ret;
+  } /* make_simple_value_operand */
+
+  /**
+   * Construct string literal operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_string_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
   {
     JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
 
+#ifndef JERRY_NDEBUG
+    literal_t lit = lit_get_literal_by_cp (lit_id);
+
+    JERRY_ASSERT (lit->get_type () == LIT_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
+#endif /* !JERRY_NDEBUG */
+
     jsp_operand_t ret;
 
-    ret._type = jsp_operand_t::LITERAL;
+    ret._type = jsp_operand_t::STRING_LITERAL;
     ret._data.lit_id = lit_id;
 
     return ret;
-  } /* make_lit_operand */
+  } /* make_string_lit_operand */
+
+  /**
+   * Construct RegExp literal operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_regexp_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+#ifndef JERRY_NDEBUG
+    literal_t lit = lit_get_literal_by_cp (lit_id);
+
+    JERRY_ASSERT (lit->get_type () == LIT_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_T
+                  || lit->get_type () == LIT_MAGIC_STR_EX_T);
+#endif /* !JERRY_NDEBUG */
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::REGEXP_LITERAL;
+    ret._data.lit_id = lit_id;
+
+    return ret;
+  } /* make_regexp_lit_operand */
+
+  /**
+   * Construct number literal operand
+   *
+   * @return constructed operand
+   */
+  static jsp_operand_t
+  make_number_lit_operand (lit_cpointer_t lit_id) /**< literal identifier */
+  {
+    JERRY_ASSERT (lit_id.packed_value != NOT_A_LITERAL.packed_value);
+
+#ifndef JERRY_NDEBUG
+    literal_t lit = lit_get_literal_by_cp (lit_id);
+
+    JERRY_ASSERT (lit->get_type () == LIT_NUMBER_T);
+#endif /* !JERRY_NDEBUG */
+
+    jsp_operand_t ret;
+
+    ret._type = jsp_operand_t::NUMBER_LITERAL;
+    ret._data.lit_id = lit_id;
+
+    return ret;
+  } /* make_number_lit_operand */
 
   /**
    * Construct identifier reference operand
@@ -244,17 +339,69 @@ public:
   } /* is_register_operand */
 
   /**
-   * Is it literal operand?
+   * Is it simple ecma value operand?
    *
    * @return true / false
    */
   bool
-  is_literal_operand (void) const
+  is_simple_value_operand (void) const
   {
     JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
 
-    return (_type == jsp_operand_t::LITERAL);
-  } /* is_literal_operand */
+    return (_type == jsp_operand_t::SIMPLE_VALUE);
+  } /* is_simple_value_operand */
+
+  /**
+   * Is it small integer operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_smallint_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::SMALLINT);
+  } /* is_smallint_operand */
+
+  /**
+   * Is it number literal operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_number_lit_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::NUMBER_LITERAL);
+  } /* is_number_lit_operand */
+
+  /**
+   * Is it string literal operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_string_lit_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::STRING_LITERAL);
+  } /* is_string_lit_operand */
+
+  /**
+   * Is it RegExp literal operand?
+   *
+   * @return true / false
+   */
+  bool
+  is_regexp_lit_operand (void) const
+  {
+    JERRY_ASSERT (_type != jsp_operand_t::UNINITIALIZED);
+
+    return (_type == jsp_operand_t::REGEXP_LITERAL);
+  } /* is_regexp_lit_operand */
 
   /**
    * Is it identifier reference operand?
@@ -295,7 +442,8 @@ public:
     {
       return _data.uid;
     }
-    else if (_type == jsp_operand_t::LITERAL)
+    else if (_type == jsp_operand_t::STRING_LITERAL
+             || _type == jsp_operand_t::NUMBER_LITERAL)
     {
       return VM_IDX_REWRITE_LITERAL_UID;
     }
@@ -326,7 +474,9 @@ public:
     {
       return NOT_A_LITERAL;
     }
-    else if (_type == jsp_operand_t::LITERAL)
+    else if (_type == jsp_operand_t::STRING_LITERAL
+             || _type == jsp_operand_t::NUMBER_LITERAL
+             || _type == jsp_operand_t::REGEXP_LITERAL)
     {
       return _data.lit_id;
     }
@@ -351,6 +501,31 @@ public:
     return _data.idx_const;
   } /* get_idx_const */
 
+  /**
+   * Get small integer constant from operand
+   *
+   * @return an integer
+   */
+  uint8_t
+  get_smallint_value (void) const
+  {
+    JERRY_ASSERT (is_smallint_operand ());
+
+    return _data.smallint_value;
+  } /* get_smallint_value */
+
+  /**
+   * Get simple value from operand
+   *
+   * @return a simple ecma value
+   */
+  ecma_simple_value_t
+  get_simple_value (void) const
+  {
+    JERRY_ASSERT (is_simple_value_operand ());
+
+    return (ecma_simple_value_t) _data.simple_value;
+  } /* get_simple_value */
 private:
   union
   {
@@ -358,6 +533,8 @@ private:
     vm_idx_t uid; /**< register index (for jsp_operand_t::TMP) */
     lit_cpointer_t lit_id; /**< literal (for jsp_operand_t::LITERAL) */
     lit_cpointer_t identifier; /**< Identifier reference (is_value_based_ref flag not set) */
+    uint8_t smallint_value; /**< small integer value */
+    uint8_t simple_value; /**< simple ecma value */
   } _data;
 
   type_t _type; /**< type of operand */
@@ -376,7 +553,6 @@ typedef enum __attr_packed___
 } varg_list_type;
 
 jsp_operand_t empty_operand (void);
-jsp_operand_t literal_operand (lit_cpointer_t);
 jsp_operand_t tmp_operand (void);
 bool operand_is_empty (jsp_operand_t);
 
@@ -401,14 +577,6 @@ void dumper_finish_varg_code_sequence (vm_idx_t);
 
 extern bool dumper_is_eval_literal (jsp_operand_t);
 
-void dump_array_hole_assignment (jsp_operand_t);
-void dump_boolean_assignment (jsp_operand_t, bool);
-void dump_string_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_number_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_regexp_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_smallint_assignment (jsp_operand_t, vm_idx_t);
-void dump_undefined_assignment (jsp_operand_t);
-void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
