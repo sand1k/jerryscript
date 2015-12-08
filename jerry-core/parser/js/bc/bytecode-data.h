@@ -34,7 +34,7 @@
  *
  * To map uid to literal id 'lit_id_hash' table is used.
  */
-#define BLOCK_SIZE 64u
+#define BLOCK_SIZE 32u
 
 /**
  * Header of byte-code memory region, containing byte-code array and literal identifiers hash table
@@ -45,16 +45,27 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
   vm_instr_counter_t instrs_count; /**< number of instructions in the byte-code array */
   mem_cpointer_t lit_id_hash_cp; /**< pointer to literal identifiers hash table
                                   *   See also: lit_id_hash_table_init */
+
+  mem_cpointer_t declarations_cp; /**< function scopes and variable declarations inside current scope
+                                   *
+                                   *   Note:
+                                   *        During bc_alloc_headers_from_scopes_tree the function scopes
+                                   *        links point to scopes_tree, and after - to bytecode_data_header_t.
+                                   */
+  uint16_t func_scopes_count; /**< count of function scopes inside current scope */
+  uint16_t var_decls_count; /**< count of variable declrations inside current scope */
+
   mem_cpointer_t next_header_cp; /**< pointer to next instructions data header */
+
+  uint8_t is_strict : 1; /**< code is strict mode code */
+  uint8_t is_ref_arguments_identifier : 1; /**< code doesn't reference 'arguments' identifier */
+  uint8_t is_ref_eval_identifier : 1; /**< code doesn't reference 'eval' identifier */
+  uint8_t is_args_moved_to_regs : 1; /**< the function's arguments are moved to registers,
+                                      *   so should be initialized in vm registers,
+                                      *   and not in lexical environment */
+  uint8_t is_no_lex_env : 1; /**< no lex. env. is necessary for the scope */
 } bytecode_data_header_t;
 
-
-bytecode_data_header_t * bc_get_first_bytecode_data_header ();
-
-void bc_add_bytecode_data (bytecode_data_header_t *,
-                           lit_id_hash_table *,
-                           vm_instr_t *,
-                           vm_instr_counter_t);
 
 void bc_remove_bytecode_data (const bytecode_data_header_t *);
 
@@ -63,7 +74,7 @@ vm_instr_t bc_get_instr (const bytecode_data_header_t *,
 
 void bc_print_instrs (const bytecode_data_header_t *bytecode_data_p);
 
-const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
+bytecode_data_header_t *bc_alloc_headers_from_scopes_tree (scopes_tree);
 
 void bc_finalize ();
 

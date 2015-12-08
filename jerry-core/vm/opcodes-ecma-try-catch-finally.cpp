@@ -50,7 +50,9 @@ opfunc_try_block (vm_instr_t instr, /**< instruction */
   if (next_instr.data.meta.type == OPCODE_META_TYPE_CATCH)
   {
     const vm_instr_counter_t catch_end_oc = (vm_instr_counter_t) (
-      vm_read_instr_counter_from_meta (OPCODE_META_TYPE_CATCH, frame_ctx_p) + frame_ctx_p->pos);
+      vm_read_instr_counter_from_meta (OPCODE_META_TYPE_CATCH,
+                                       frame_ctx_p->bytecode_header_p,
+                                       frame_ctx_p->pos) + frame_ctx_p->pos);
     frame_ctx_p->pos++;
 
     if (ecma_is_completion_value_throw (try_completion))
@@ -105,7 +107,9 @@ opfunc_try_block (vm_instr_t instr, /**< instruction */
   if (next_instr.data.meta.type == OPCODE_META_TYPE_FINALLY)
   {
     const vm_instr_counter_t finally_end_oc = (vm_instr_counter_t) (
-      vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FINALLY, frame_ctx_p) + frame_ctx_p->pos);
+      vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FINALLY,
+                                       frame_ctx_p->bytecode_header_p,
+                                       frame_ctx_p->pos) + frame_ctx_p->pos);
     frame_ctx_p->pos++;
 
     vm_run_scope_t run_scope_finally = { frame_ctx_p->pos, finally_end_oc };

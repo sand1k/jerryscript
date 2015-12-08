@@ -1589,6 +1589,7 @@ lexer_seek (lit_utf8_iterator_pos_t locus)
 
   lit_utf8_iterator_seek (&src_iter, locus);
   saved_token = empty_token;
+  prev_token = empty_token;
 }
 
 /**

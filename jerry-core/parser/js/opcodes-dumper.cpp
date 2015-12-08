@@ -16,6 +16,7 @@
 #include "jsp-early-error.h"
 #include "opcodes-dumper.h"
 #include "pretty-printer.h"
+#include "bytecode-data.h"
 
 /**
  * Register allocator's counter
@@ -65,8 +66,283 @@ scopes_tree current_scope_p = NULL;
  */
 bool is_generate_bytecode = false;
 
+/**
+ * Temporary literal set is used for estimation of number of unique literals
+ * in a byte-code instructions block (BLOCK_SIZE). The calculated number
+ * is always equal or larger than actual number of unique literals.
+ *
+ * The set is emptied upon:
+ *  - reaching a bytecode block border;
+ *  - changing scope, to which instructions are dumped.
+ *
+ * Emptying the set in second case is necessary, as the set should contain
+ * unique literals of a bytecode block, and, upon switching to another scope,
+ * current bytecode block is also switched, correspondingly. However, this
+ * could only lead to overestimation of unique literals number, relatively
+ * to the actual number.
+ */
+
+/**
+ * Size of the temporary literal set
+ */
+#define SCOPE_TMP_LIT_SET_SIZE 32
+/**
+ * Container of the temporary literal set
+ */
+static lit_cpointer_t scopes_tmp_lit_set [SCOPE_TMP_LIT_SET_SIZE];
+
+/**
+ * Number of items in the temporary literal set
+ */
+static uint8_t scopes_tmp_lit_set_num;
+
+/**
+ * Scope that is associated with the temporary literal set
+ */
+static scopes_tree scopes_tmp_lit_set_scope_p = NULL;
+
+static bool
+is_possible_literal (uint16_t mask, uint8_t index)
+{
+  int res;
+  switch (index)
+  {
+    case 0:
+    {
+      res = mask >> 8;
+      break;
+    }
+    case 1:
+    {
+      res = (mask & 0xF0) >> 4;
+      break;
+    }
+    default:
+    {
+      JERRY_ASSERT (index = 2);
+      res = mask & 0x0F;
+    }
+  }
+  JERRY_ASSERT (res == 0 || res == 1);
+  return res == 1;
+}
+
+static vm_idx_t
+get_uid (op_meta *op, size_t i)
+{
+  JERRY_ASSERT (i < 3);
+  return op->op.data.raw_args[i];
+}
+
+static void
+insert_uids_to_lit_id_map (scopes_tree scope_p, op_meta *om, uint16_t mask)
+{
+  for (uint8_t i = 0; i < 3; i++)
+  {
+    if (is_possible_literal (mask, i))
+    {
+      if (get_uid (om, i) == VM_IDX_REWRITE_LITERAL_UID)
+      {
+        JERRY_ASSERT (om->lit_id[i].packed_value != MEM_CP_NULL);
+        lit_cpointer_t lit_id = om->lit_id[i];
+
+        JERRY_ASSERT (scopes_tmp_lit_set_scope_p == scope_p);
+
+        uint8_t tmp_hash_table_index;
+        for (tmp_hash_table_index = 0;
+             tmp_hash_table_index < scopes_tmp_lit_set_num;
+             tmp_hash_table_index++)
+        {
+          if (scopes_tmp_lit_set [tmp_hash_table_index].packed_value == lit_id.packed_value)
+          {
+            break;
+          }
+        }
+
+        if (tmp_hash_table_index == scopes_tmp_lit_set_num)
+        {
+          scope_p->max_uniq_literals_num++;
+
+          if (scopes_tmp_lit_set_num < SCOPE_TMP_LIT_SET_SIZE)
+          {
+            scopes_tmp_lit_set [scopes_tmp_lit_set_num ++] = lit_id;
+          }
+          else
+          {
+            JERRY_ASSERT (scopes_tmp_lit_set_num != 0);
+
+            scopes_tmp_lit_set [scopes_tmp_lit_set_num - 1u] = lit_id;
+          }
+        }
+      }
+      else
+      {
+        JERRY_ASSERT (om->lit_id[i].packed_value == MEM_CP_NULL);
+      }
+    }
+    else
+    {
+      JERRY_ASSERT (om->lit_id[i].packed_value == MEM_CP_NULL);
+    }
+  }
+}
+
+/**
+ * Count number of literals in instruction which were not seen previously
+ */
+static void
+count_new_literals_in_instr (scopes_tree scope_p,
+                             vm_instr_counter_t instr_pos, /**< position of instruction */
+                             op_meta *om_p) /**< instruction */
+{
+  if (scope_p != scopes_tmp_lit_set_scope_p)
+  {
+    scopes_tmp_lit_set_scope_p = scope_p;
+    scopes_tmp_lit_set_num = 0;
+  }
+
+  if (instr_pos % BLOCK_SIZE == 0)
+  {
+    scopes_tmp_lit_set_num = 0;
+  }
+
+  switch (om_p->op.op_idx)
+  {
+    case VM_OP_PROP_GETTER:
+    case VM_OP_PROP_SETTER:
+    case VM_OP_DELETE_PROP:
+    case VM_OP_B_SHIFT_LEFT:
+    case VM_OP_B_SHIFT_RIGHT:
+    case VM_OP_B_SHIFT_URIGHT:
+    case VM_OP_B_AND:
+    case VM_OP_B_OR:
+    case VM_OP_B_XOR:
+    case VM_OP_EQUAL_VALUE:
+    case VM_OP_NOT_EQUAL_VALUE:
+    case VM_OP_EQUAL_VALUE_TYPE:
+    case VM_OP_NOT_EQUAL_VALUE_TYPE:
+    case VM_OP_LESS_THAN:
+    case VM_OP_GREATER_THAN:
+    case VM_OP_LESS_OR_EQUAL_THAN:
+    case VM_OP_GREATER_OR_EQUAL_THAN:
+    case VM_OP_INSTANCEOF:
+    case VM_OP_IN:
+    case VM_OP_ADDITION:
+    case VM_OP_SUBSTRACTION:
+    case VM_OP_DIVISION:
+    case VM_OP_MULTIPLICATION:
+    case VM_OP_REMAINDER:
+    {
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x111);
+      break;
+    }
+    case VM_OP_CALL_N:
+    case VM_OP_CONSTRUCT_N:
+    case VM_OP_FUNC_EXPR_N:
+    case VM_OP_DELETE_VAR:
+    case VM_OP_TYPEOF:
+    case VM_OP_B_NOT:
+    case VM_OP_LOGICAL_NOT:
+    case VM_OP_POST_INCR:
+    case VM_OP_POST_DECR:
+    case VM_OP_PRE_INCR:
+    case VM_OP_PRE_DECR:
+    case VM_OP_UNARY_PLUS:
+    case VM_OP_UNARY_MINUS:
+    {
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x110);
+      break;
+    }
+    case VM_OP_ASSIGNMENT:
+    {
+      switch (om_p->op.data.assignment.type_value_right)
+      {
+        case OPCODE_ARG_TYPE_SIMPLE:
+        case OPCODE_ARG_TYPE_SMALLINT:
+        case OPCODE_ARG_TYPE_SMALLINT_NEGATE:
+        {
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x100);
+          break;
+        }
+        case OPCODE_ARG_TYPE_NUMBER:
+        case OPCODE_ARG_TYPE_NUMBER_NEGATE:
+        case OPCODE_ARG_TYPE_REGEXP:
+        case OPCODE_ARG_TYPE_STRING:
+        case OPCODE_ARG_TYPE_VARIABLE:
+        {
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x101);
+          break;
+        }
+      }
+      break;
+    }
+    case VM_OP_FUNC_DECL_N:
+    case VM_OP_FUNC_EXPR_REF:
+    case VM_OP_FOR_IN:
+    case VM_OP_ARRAY_DECL:
+    case VM_OP_OBJ_DECL:
+    case VM_OP_WITH:
+    case VM_OP_THROW_VALUE:
+    case VM_OP_IS_TRUE_JMP_UP:
+    case VM_OP_IS_TRUE_JMP_DOWN:
+    case VM_OP_IS_FALSE_JMP_UP:
+    case VM_OP_IS_FALSE_JMP_DOWN:
+    case VM_OP_VAR_DECL:
+    case VM_OP_RETVAL:
+    {
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x100);
+      break;
+    }
+    case VM_OP_RET:
+    case VM_OP_TRY_BLOCK:
+    case VM_OP_JMP_UP:
+    case VM_OP_JMP_DOWN:
+    case VM_OP_JMP_BREAK_CONTINUE:
+    case VM_OP_REG_VAR_DECL:
+    {
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x000);
+      break;
+    }
+    case VM_OP_META:
+    {
+      switch (om_p->op.data.meta.type)
+      {
+        case OPCODE_META_TYPE_VARG_PROP_DATA:
+        case OPCODE_META_TYPE_VARG_PROP_GETTER:
+        case OPCODE_META_TYPE_VARG_PROP_SETTER:
+        {
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x011);
+          break;
+        }
+        case OPCODE_META_TYPE_VARG:
+        case OPCODE_META_TYPE_CATCH_EXCEPTION_IDENTIFIER:
+        {
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x010);
+          break;
+        }
+        case OPCODE_META_TYPE_UNDEFINED:
+        case OPCODE_META_TYPE_END_WITH:
+        case OPCODE_META_TYPE_FUNCTION_END:
+        case OPCODE_META_TYPE_CATCH:
+        case OPCODE_META_TYPE_FINALLY:
+        case OPCODE_META_TYPE_END_TRY_CATCH_FINALLY:
+        case OPCODE_META_TYPE_CALL_SITE_INFO:
+        {
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x000);
+          break;
+        }
+      }
+      break;
+    }
+
+    default:
+    {
+      JERRY_UNREACHABLE ();
+    }
+  }
+} /* count_new_literals_in_instr */
+
 void dumper_dump_op_meta (op_meta);
-void dumper_rewrite_op_meta (vm_instr_counter_t, op_meta);
 
 void dumper_set_generate_bytecode (bool generate_bytecode)
 {
@@ -113,56 +389,256 @@ void
 dumper_set_scope (scopes_tree scope_p)
 {
   current_scope_p = scope_p;
+
+  scopes_tmp_lit_set_scope_p = NULL;
 } /* dumper_set_scope */
 
 vm_instr_counter_t
 dumper_get_current_instr_counter (void)
 {
-  return scopes_tree_instrs_num (current_scope_p);
+  if (is_generate_bytecode)
+  {
+    bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                       current_scope_p->bc_header_cp);
+
+    return bc_header_p->instrs_count;
+  }
+  else
+  {
+    return scopes_tree_instrs_num (current_scope_p);
+  }
 }
 
-static op_meta
+op_meta
 dumper_get_op_meta (vm_instr_counter_t pos)
 {
   op_meta opm;
   if (is_generate_bytecode)
   {
-    opm = scopes_tree_op_meta (current_scope_p, pos);
+    bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                       current_scope_p->bc_header_cp);
+    JERRY_ASSERT (pos < bc_header_p->instrs_count);
+
+    vm_instr_t *instr_p = bc_header_p->instrs_p + pos;
+
+    opm.op = *instr_p;
+
+    uint16_t mask;
+
+    switch (opm.op.op_idx)
+    {
+      case VM_OP_PROP_GETTER:
+      case VM_OP_PROP_SETTER:
+      case VM_OP_DELETE_PROP:
+      case VM_OP_B_SHIFT_LEFT:
+      case VM_OP_B_SHIFT_RIGHT:
+      case VM_OP_B_SHIFT_URIGHT:
+      case VM_OP_B_AND:
+      case VM_OP_B_OR:
+      case VM_OP_B_XOR:
+      case VM_OP_EQUAL_VALUE:
+      case VM_OP_NOT_EQUAL_VALUE:
+      case VM_OP_EQUAL_VALUE_TYPE:
+      case VM_OP_NOT_EQUAL_VALUE_TYPE:
+      case VM_OP_LESS_THAN:
+      case VM_OP_GREATER_THAN:
+      case VM_OP_LESS_OR_EQUAL_THAN:
+      case VM_OP_GREATER_OR_EQUAL_THAN:
+      case VM_OP_INSTANCEOF:
+      case VM_OP_IN:
+      case VM_OP_ADDITION:
+      case VM_OP_SUBSTRACTION:
+      case VM_OP_DIVISION:
+      case VM_OP_MULTIPLICATION:
+      case VM_OP_REMAINDER:
+      {
+        mask = 0x111;
+        break;
+      }
+      case VM_OP_CALL_N:
+      case VM_OP_CONSTRUCT_N:
+      case VM_OP_FUNC_EXPR_N:
+      case VM_OP_DELETE_VAR:
+      case VM_OP_TYPEOF:
+      case VM_OP_B_NOT:
+      case VM_OP_LOGICAL_NOT:
+      case VM_OP_POST_INCR:
+      case VM_OP_POST_DECR:
+      case VM_OP_PRE_INCR:
+      case VM_OP_PRE_DECR:
+      case VM_OP_UNARY_PLUS:
+      case VM_OP_UNARY_MINUS:
+      {
+        mask = 0x110;
+        break;
+      }
+      case VM_OP_ASSIGNMENT:
+      {
+        switch (opm.op.data.assignment.type_value_right)
+        {
+          case OPCODE_ARG_TYPE_SIMPLE:
+          case OPCODE_ARG_TYPE_SMALLINT:
+          case OPCODE_ARG_TYPE_SMALLINT_NEGATE:
+          {
+            mask = 0x100;
+            break;
+          }
+          case OPCODE_ARG_TYPE_NUMBER:
+          case OPCODE_ARG_TYPE_NUMBER_NEGATE:
+          case OPCODE_ARG_TYPE_REGEXP:
+          case OPCODE_ARG_TYPE_STRING:
+          case OPCODE_ARG_TYPE_VARIABLE:
+          {
+            mask = 0x101;
+            break;
+          }
+          default:
+          {
+            JERRY_UNREACHABLE ();
+          }
+        }
+        break;
+      }
+      case VM_OP_FUNC_DECL_N:
+      case VM_OP_FUNC_EXPR_REF:
+      case VM_OP_FOR_IN:
+      case VM_OP_ARRAY_DECL:
+      case VM_OP_OBJ_DECL:
+      case VM_OP_WITH:
+      case VM_OP_THROW_VALUE:
+      case VM_OP_IS_TRUE_JMP_UP:
+      case VM_OP_IS_TRUE_JMP_DOWN:
+      case VM_OP_IS_FALSE_JMP_UP:
+      case VM_OP_IS_FALSE_JMP_DOWN:
+      case VM_OP_VAR_DECL:
+      case VM_OP_RETVAL:
+      {
+        mask = 0x100;
+        break;
+      }
+      case VM_OP_RET:
+      case VM_OP_TRY_BLOCK:
+      case VM_OP_JMP_UP:
+      case VM_OP_JMP_DOWN:
+      case VM_OP_JMP_BREAK_CONTINUE:
+      case VM_OP_REG_VAR_DECL:
+      {
+        mask = 0x000;
+        break;
+      }
+      case VM_OP_META:
+      {
+        switch (opm.op.data.meta.type)
+        {
+          case OPCODE_META_TYPE_VARG_PROP_DATA:
+          case OPCODE_META_TYPE_VARG_PROP_GETTER:
+          case OPCODE_META_TYPE_VARG_PROP_SETTER:
+          {
+            mask = 0x011;
+            break;
+          }
+          case OPCODE_META_TYPE_VARG:
+          case OPCODE_META_TYPE_CATCH_EXCEPTION_IDENTIFIER:
+          {
+            mask = 0x010;
+            break;
+          }
+          case OPCODE_META_TYPE_UNDEFINED:
+          case OPCODE_META_TYPE_END_WITH:
+          case OPCODE_META_TYPE_FUNCTION_END:
+          case OPCODE_META_TYPE_CATCH:
+          case OPCODE_META_TYPE_FINALLY:
+          case OPCODE_META_TYPE_END_TRY_CATCH_FINALLY:
+          case OPCODE_META_TYPE_END_FOR_IN:
+          case OPCODE_META_TYPE_CALL_SITE_INFO:
+          {
+            mask = 0x000;
+            break;
+          }
+          default:
+          {
+            JERRY_UNREACHABLE ();
+          }
+        }
+        break;
+      }
+
+      default:
+      {
+        JERRY_UNREACHABLE ();
+      }
+    }
+
+    for (uint8_t i = 0; i < 3; i++)
+    {
+      JERRY_STATIC_ASSERT (VM_IDX_LITERAL_FIRST == 0);
+
+      if (is_possible_literal (mask, i)
+          && opm.op.data.raw_args[i] <= VM_IDX_LITERAL_LAST)
+      {
+        opm.lit_id[i] = bc_get_literal_cp_by_uid (opm.op.data.raw_args[i], bc_header_p, pos);
+      }
+      else
+      {
+        opm.lit_id[i] = NOT_A_LITERAL;
+      }
+    }
   }
 
   return opm;
 }
 
 void
-dumper_dump_op_meta (op_meta op)
+dumper_dump_op_meta (op_meta opm)
 {
-  JERRY_ASSERT (scopes_tree_instrs_num (current_scope_p) < MAX_OPCODES);
-
   if (is_generate_bytecode)
   {
-    scopes_tree_add_op_meta (current_scope_p, op);
+    bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                       current_scope_p->bc_header_cp);
+
+  JERRY_ASSERT (bc_header_p->instrs_count < MAX_OPCODES);
 
 #ifdef JERRY_ENABLE_PRETTY_PRINTER
     if (is_print_instrs)
     {
-      pp_op_meta (NULL, (vm_instr_counter_t) (scopes_tree_instrs_num (current_scope_p) - 1), op, false);
+      pp_op_meta (bc_header_p, bc_header_p->instrs_count, opm, false);
     }
 #endif
+
+    vm_instr_t *new_instr_place_p = bc_header_p->instrs_p + bc_header_p->instrs_count;
+
+    bc_header_p->instrs_count++;
+
+    JERRY_ASSERT (bc_header_p->instrs_count <= current_scope_p->instrs_count);
+
+    *new_instr_place_p = opm.op;
+  }
+  else
+  {
+    count_new_literals_in_instr (current_scope_p, current_scope_p->instrs_count, &opm);
+
+    current_scope_p->instrs_count++;
   }
 } /* dumper_dump_op_meta */
 
 void
 dumper_rewrite_op_meta (const vm_instr_counter_t loc,
-                        op_meta op)
+                        op_meta opm)
 {
   if (is_generate_bytecode)
   {
-    scopes_tree_set_op_meta (current_scope_p, loc, op);
+    bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                       current_scope_p->bc_header_cp);
+    JERRY_ASSERT (loc < bc_header_p->instrs_count);
+
+    vm_instr_t *instr_p = bc_header_p->instrs_p + loc;
+
+    *instr_p = opm.op;
 
 #ifdef JERRY_ENABLE_PRETTY_PRINTER
     if (is_print_instrs)
     {
-      pp_op_meta (NULL, loc, op, true);
+      pp_op_meta (bc_header_p, loc, opm, true);
     }
 #endif
   }
@@ -236,7 +712,11 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
                                              op_meta *om_p) /**< operation meta of corresponding
                                                              *   variable declaration */
 {
+  JERRY_ASSERT (tree == dumper_get_scope ());
   JERRY_ASSERT (tree->type == SCOPE_TYPE_FUNCTION);
+
+  bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                     current_scope_p->bc_header_cp);
 
   lit_cpointer_t lit_cp;
   bool is_arg;
@@ -289,10 +769,10 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
   }
 
   for (vm_instr_counter_t instr_pos = 0;
-       instr_pos < tree->instrs_count;
+       instr_pos < bc_header_p->instrs_count;
        instr_pos++)
   {
-    op_meta om = scopes_tree_op_meta (tree, instr_pos);
+    op_meta om = dumper_get_op_meta (instr_pos);
 
     vm_op_t opcode = (vm_op_t) om.op.op_idx;
 
@@ -348,10 +828,15 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
       }
 
       if (opcode == VM_OP_META
-          && (om.op.data.meta.type == OPCODE_META_TYPE_VARG_PROP_DATA
-              || om.op.data.meta.type == OPCODE_META_TYPE_VARG_PROP_GETTER
-              || om.op.data.meta.type == OPCODE_META_TYPE_VARG_PROP_SETTER)
-          && arg_index == 1)
+          && (((om.op.data.meta.type == OPCODE_META_TYPE_VARG_PROP_DATA
+                || om.op.data.meta.type == OPCODE_META_TYPE_VARG_PROP_GETTER
+                || om.op.data.meta.type == OPCODE_META_TYPE_VARG_PROP_SETTER)
+               && arg_index == 1)
+              || om.op.data.meta.type == OPCODE_META_TYPE_END_WITH
+              || om.op.data.meta.type == OPCODE_META_TYPE_CATCH
+              || om.op.data.meta.type == OPCODE_META_TYPE_FINALLY
+              || om.op.data.meta.type == OPCODE_META_TYPE_END_TRY_CATCH_FINALLY
+              || om.op.data.meta.type == OPCODE_META_TYPE_END_FOR_IN))
       {
         continue;
       }
@@ -360,12 +845,11 @@ dumper_try_replace_identifier_name_with_reg (scopes_tree tree, /**< a function s
       {
         om.lit_id[arg_index] = NOT_A_LITERAL;
 
-        JERRY_ASSERT (om.op.data.raw_args[arg_index] == VM_IDX_REWRITE_LITERAL_UID);
         om.op.data.raw_args[arg_index] = reg;
       }
     }
 
-    scopes_tree_set_op_meta (tree, instr_pos, om);
+    dumper_rewrite_op_meta (instr_pos, om);
   }
 
   return true;
@@ -426,12 +910,34 @@ jsp_dmp_gen_instr (vm_op_t opcode, /**< operation code */
     }
     else
     {
-      JERRY_ASSERT (ops[i].is_number_lit_operand ()
-                    || ops[i].is_string_lit_operand ()
-                    || ops[i].is_regexp_lit_operand ()
-                    || ops[i].is_identifier_operand ());
+      lit_cpointer_t lit_cp;
 
-      instr.data.raw_args[i] = VM_IDX_REWRITE_LITERAL_UID;
+      if (ops[i].is_identifier_operand ())
+      {
+        lit_cp = ops[i].get_identifier_name ();
+      }
+      else
+      {
+        JERRY_ASSERT (ops[i].is_number_lit_operand ()
+                      || ops[i].is_string_lit_operand ()
+                      || ops[i].is_regexp_lit_operand ());
+
+        lit_cp = ops[i].get_literal ();
+      }
+
+      vm_idx_t idx = VM_IDX_REWRITE_LITERAL_UID;
+
+      if (is_generate_bytecode)
+      {
+        bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                           current_scope_p->bc_header_cp);
+        lit_id_hash_table *lit_id_hash_p = MEM_CP_GET_NON_NULL_POINTER (lit_id_hash_table,
+                                                                        bc_header_p->lit_id_hash_cp);
+
+        idx = lit_id_hash_table_insert (lit_id_hash_p, bc_header_p->instrs_count, lit_cp);
+      }
+
+      instr.data.raw_args[i] = idx;
     }
   }
 
@@ -740,7 +1246,7 @@ dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
 }
 
 vm_instr_counter_t
-dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
+dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t res, jsp_operand_t obj)
 {
   vm_instr_counter_t pos = dumper_get_current_instr_counter ();
 
@@ -749,7 +1255,7 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
     case VARG_FUNC_EXPR:
     {
       dump_triple_address (VM_OP_FUNC_EXPR_N,
-                           jsp_operand_t::make_unknown_operand (),
+                           res,
                            obj,
                            jsp_operand_t::make_unknown_operand ());
       break;
@@ -757,7 +1263,7 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
     case VARG_CONSTRUCT_EXPR:
     {
       dump_triple_address (VM_OP_CONSTRUCT_N,
-                           jsp_operand_t::make_unknown_operand (),
+                           res,
                            obj,
                            jsp_operand_t::make_unknown_operand ());
       break;
@@ -765,7 +1271,7 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
     case VARG_CALL_EXPR:
     {
       dump_triple_address (VM_OP_CALL_N,
-                           jsp_operand_t::make_unknown_operand (),
+                           res,
                            obj,
                            jsp_operand_t::make_unknown_operand ());
       break;
@@ -780,14 +1286,14 @@ dump_varg_header_for_rewrite (varg_list_type vlt, jsp_operand_t obj)
     case VARG_ARRAY_DECL:
     {
       dump_double_address (VM_OP_ARRAY_DECL,
-                           jsp_operand_t::make_unknown_operand (),
+                           res,
                            jsp_operand_t::make_unknown_operand ());
       break;
     }
     case VARG_OBJ_DECL:
     {
       dump_double_address (VM_OP_OBJ_DECL,
-                           jsp_operand_t::make_unknown_operand (),
+                           res,
                            jsp_operand_t::make_unknown_operand ());
       break;
     }
@@ -863,7 +1369,6 @@ dumper_assert_op_fields (rewrite_type_t rewrite_type,
   else if (rewrite_type == REWRITE_SCOPE_CODE_FLAGS)
   {
     JERRY_ASSERT (meta.op.op_idx == VM_OP_META);
-    JERRY_ASSERT (meta.op.data.meta.type == OPCODE_META_TYPE_SCOPE_CODE_FLAGS);
     JERRY_ASSERT (meta.op.data.meta.data_1 == VM_IDX_REWRITE_GENERAL_CASE);
     JERRY_ASSERT (meta.op.data.meta.data_2 == VM_IDX_EMPTY);
   }
@@ -878,8 +1383,7 @@ dumper_assert_op_fields (rewrite_type_t rewrite_type,
 } /* dumper_assert_op_fields */
 
 void
-rewrite_varg_header_set_args_count (jsp_operand_t ret,
-                                    size_t args_count,
+rewrite_varg_header_set_args_count (size_t args_count,
                                     vm_instr_counter_t pos)
 {
   /*
@@ -910,7 +1414,6 @@ rewrite_varg_header_set_args_count (jsp_operand_t ret,
                      LIT_ITERATOR_POS_ZERO);
       }
       om.op.data.func_expr_n.arg_list = (vm_idx_t) args_count;
-      om.op.data.func_expr_n.lhs = ret.get_idx ();
       dumper_rewrite_op_meta (pos, om);
       break;
     }
@@ -924,7 +1427,6 @@ rewrite_varg_header_set_args_count (jsp_operand_t ret,
       }
       om.op.data.func_decl_n.arg_list = (vm_idx_t) args_count;
       dumper_rewrite_op_meta (pos, om);
-      JERRY_ASSERT (ret.is_empty_operand ());
       break;
     }
     case VM_OP_ARRAY_DECL:
@@ -938,7 +1440,6 @@ rewrite_varg_header_set_args_count (jsp_operand_t ret,
       }
       om.op.data.obj_decl.list_1 = (vm_idx_t) (args_count >> 8);
       om.op.data.obj_decl.list_2 = (vm_idx_t) (args_count & 0xffu);
-      om.op.data.obj_decl.lhs = ret.get_idx ();
       dumper_rewrite_op_meta (pos, om);
       break;
     }
@@ -1029,37 +1530,6 @@ void
 dump_prop_setter (jsp_operand_t base, jsp_operand_t prop_name, jsp_operand_t obj)
 {
   dump_triple_address (VM_OP_PROP_SETTER, base, prop_name, obj);
-}
-
-void
-dump_function_end_for_rewrite (void)
-{
-  dump_triple_address (VM_OP_META,
-                       jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_FUNCTION_END),
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-}
-
-void
-rewrite_function_end (vm_instr_counter_t pos)
-{
-  vm_instr_counter_t oc;
-  {
-    vm_instr_counter_t instrs_in_subscopes = (vm_instr_counter_t) (scopes_tree_count_instructions (current_scope_p)
-                                                                   - scopes_tree_instrs_num (current_scope_p));
-    oc = (vm_instr_counter_t) (get_diff_from (pos) + instrs_in_subscopes);
-  }
-
-  vm_idx_t id1, id2;
-  split_instr_counter (oc, &id1, &id2);
-
-  op_meta function_end_op_meta = dumper_get_op_meta (pos);
-  dumper_assert_op_fields (REWRITE_FUNCTION_END, function_end_op_meta);
-
-  function_end_op_meta.op.data.meta.data_1 = id1;
-  function_end_op_meta.op.data.meta.data_2 = id2;
-
-  dumper_rewrite_op_meta (pos, function_end_op_meta);
 }
 
 void
@@ -1254,6 +1724,11 @@ vm_instr_counter_t
 rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< position of jump to rewrite */
                                             vm_instr_counter_t target_oc) /**< the jump's target */
 {
+  if (!is_generate_bytecode)
+  {
+    return MAX_OPCODES;
+  }
+
   op_meta jump_op_meta = dumper_get_op_meta (jump_oc);
 
   vm_op_t jmp_opcode = (vm_op_t) jump_op_meta.op.op_idx;
@@ -1567,49 +2042,8 @@ dump_variable_declaration (lit_cpointer_t lit_id) /**< literal which holds varia
   jsp_operand_t op_var_name = jsp_operand_t::make_string_lit_operand (lit_id);
   op_meta op = jsp_dmp_create_op_meta (VM_OP_VAR_DECL, &op_var_name, 1);
 
-  JERRY_ASSERT (scopes_tree_instrs_num (current_scope_p)
-                + linked_list_get_length (current_scope_p->var_decls) < MAX_OPCODES);
-
   scopes_tree_add_var_decl (current_scope_p, op);
 } /* dump_variable_declaration */
-
-/**
- * Dump template of 'meta' instruction for scope's code flags.
- *
- * Note:
- *      the instruction's flags field is written later (see also: rewrite_scope_code_flags).
- *
- * @return position of dumped instruction
- */
-vm_instr_counter_t
-dump_scope_code_flags_for_rewrite (void)
-{
-  vm_instr_counter_t oc = dumper_get_current_instr_counter ();
-
-  dump_triple_address (VM_OP_META,
-                       jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_SCOPE_CODE_FLAGS),
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_empty_operand ());
-
-  return oc;
-} /* dump_scope_code_flags_for_rewrite */
-
-/**
- * Write scope's code flags to specified 'meta' instruction template,
- * dumped earlier (see also: dump_scope_code_flags_for_rewrite).
- */
-void
-rewrite_scope_code_flags (vm_instr_counter_t scope_code_flags_oc, /**< position of instruction to rewrite */
-                          opcode_scope_code_flags_t scope_flags) /**< scope's code properties flags set */
-{
-  JERRY_ASSERT ((vm_idx_t) scope_flags == scope_flags);
-
-  op_meta opm = dumper_get_op_meta (scope_code_flags_oc);
-  dumper_assert_op_fields (REWRITE_SCOPE_CODE_FLAGS, opm);
-
-  opm.op.data.meta.data_1 = (vm_idx_t) scope_flags;
-  dumper_rewrite_op_meta (scope_code_flags_oc, opm);
-} /* rewrite_scope_code_flags */
 
 void
 dump_ret (void)

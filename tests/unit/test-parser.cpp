@@ -13,11 +13,10 @@
  * limitations under the License.
  */
 
+#include "bytecode-data.h"
 #include "mem-allocator.h"
 #include "opcodes.h"
 #include "parser.h"
-#include "serializer.h"
-
 #include "test-common.h"
 
 static bool
@@ -117,10 +116,6 @@ main (int __attr_unused___ argc,
 
   vm_instr_t instrs[] =
   {
-    getop_meta (OPCODE_META_TYPE_SCOPE_CODE_FLAGS, // [ ]
-                OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER
-                | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER,
-                VM_IDX_EMPTY),
     getop_reg_var_decl (1u, 0u, 0u),
     getop_var_decl (0),                              // var a;
     getop_assignment (VM_REG_GENERAL_FIRST, 1, 1),   // $tmp0 = 1;

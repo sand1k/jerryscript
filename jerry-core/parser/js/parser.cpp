@@ -16,7 +16,6 @@
 
 #include "bytecode-data.h"
 #include "ecma-helpers.h"
-#include "hash-table.h"
 #include "jrt-libc-includes.h"
 #include "jsp-mm.h"
 #include "opcodes.h"
@@ -123,7 +122,6 @@ typedef enum __attr_packed___
   JSP_STATE_FUNC_DECL_FINISH,
   JSP_STATE_SOURCE_ELEMENT_LIST,
 
-  JSP_STATE_SOURCE_ELEMENTS_INIT,
   JSP_STATE_SOURCE_ELEMENTS,
 
   JSP_STATE_STAT_BLOCK,
@@ -442,17 +440,64 @@ jsp_parse_directive_prologue ()
 } /* jsp_parse_directive_prologue */
 
 static jsp_operand_t
-jsp_start_parse_function_scope (jsp_operand_t func_name,
+jsp_start_parse_function_scope (jsp_parse_mode_t parse_mode,
+                                jsp_operand_t func_name,
                                 bool is_function_expression,
                                 size_t *out_formal_parameters_num_p)
 {
   scopes_tree parent_scope = dumper_get_scope ();
   scopes_tree_set_contains_functions (parent_scope);
 
-  scopes_tree func_scope = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
+  jsp_operand_t func;
 
-  dumper_set_scope (func_scope);
-  scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
+  uint16_t index;
+
+  if (parse_mode == DUMP)
+  {
+    index = parent_scope->child_scopes_processed_num++;
+  }
+  else
+  {
+    JERRY_ASSERT (parse_mode == PREPARSE);
+
+    index = 0;
+  }
+
+  if (is_function_expression)
+  {
+    func = tmp_operand ();
+
+    vm_idx_t idx1 = (vm_idx_t) jrt_extract_bit_field (index, 0, JERRY_BITSINBYTE);
+    vm_idx_t idx2 = (vm_idx_t) jrt_extract_bit_field (index, JERRY_BITSINBYTE, JERRY_BITSINBYTE);
+
+    dump_binary_op (VM_OP_FUNC_EXPR_REF,
+                    func,
+                    jsp_operand_t::make_idx_const_operand (idx1),
+                    jsp_operand_t::make_idx_const_operand (idx2));
+  }
+  else
+  {
+    func = empty_operand ();
+  }
+
+  scopes_tree func_scope_p;
+
+  if (parse_mode == PREPARSE)
+  {
+    func_scope_p = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
+  }
+  else
+  {
+    JERRY_ASSERT (parse_mode == DUMP);
+
+    func_scope_p = MEM_CP_GET_NON_NULL_POINTER (scopes_tree_int, parent_scope->children_list_cp);
+
+    parent_scope->children_list_cp = func_scope_p->next_scope_cp;
+  }
+
+  dumper_set_scope (func_scope_p);
+
+  scopes_tree_set_strict_mode (func_scope_p, scopes_tree_strict_mode (parent_scope));
 
   /* parse formal parameters list */
   size_t formal_parameters_num = 0;
@@ -464,7 +509,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   varg_list_type vlt = is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL;
 
-  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (vlt, func_name);
+  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (vlt, func, func_name);
 
   locus formal_parameters_list_loc = tok.loc;
 
@@ -490,17 +535,16 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   skip_token ();
 
-  const jsp_operand_t func = is_function_expression ? tmp_operand () : empty_operand ();
-
-  rewrite_varg_header_set_args_count (func, formal_parameters_num, varg_header_pos);
-
-  dump_function_end_for_rewrite ();
+  rewrite_varg_header_set_args_count (formal_parameters_num, varg_header_pos);
 
   current_token_must_be_check_and_skip_it (TOK_OPEN_BRACE);
 
   jsp_parse_directive_prologue ();
 
-  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
+  if (parse_mode == PREPARSE)
+  {
+    jsp_early_error_check_for_eval_and_arguments_in_strict_mode (func_name, is_strict_mode (), tok.loc);
+  }
 
   if (is_strict_mode ())
   {
@@ -523,8 +567,11 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
         skip_token ();
       }
 
-      jsp_early_error_emit_error_on_eval_and_arguments (current_parameter_name_lit,
-                                                        current_parameter_loc);
+      if (parse_mode == PREPARSE)
+      {
+        jsp_early_error_emit_error_on_eval_and_arguments (current_parameter_name_lit,
+                                                          current_parameter_loc);
+      }
 
       while (!token_is (TOK_CLOSE_PAREN))
       {
@@ -580,62 +627,35 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
   return func;
 }
 
-static vm_instr_counter_t
-jsp_find_function_end (void)
-{
-  scopes_tree scope_tree = dumper_get_scope ();
-  JERRY_ASSERT (scope_tree->type == SCOPE_TYPE_FUNCTION);
-
-  vm_instr_counter_t instr_pos = 0u;
-
-  const vm_instr_counter_t header_oc = instr_pos++;
-  op_meta header_opm = scopes_tree_op_meta (scope_tree, header_oc);
-  JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
-
-  while (true)
-  {
-    op_meta meta_opm = scopes_tree_op_meta (scope_tree, instr_pos);
-    JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
-
-    opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
-
-    if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
-    {
-      break;
-    }
-    else
-    {
-      JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
-
-      instr_pos++;
-    }
-  }
-
-  return instr_pos;
-}
-
 static void
-jsp_finish_parse_function_scope (bool is_function_expression)
+jsp_finish_parse_function_scope (jsp_parse_mode_t parse_mode,
+                                 scopes_tree parent_scope_p)
 {
-  scopes_tree func_scope = dumper_get_scope ();
-  JERRY_ASSERT (func_scope != NULL && func_scope->type == SCOPE_TYPE_FUNCTION);
-
-  scopes_tree parent_scope = (scopes_tree) func_scope->t.parent;
+  scopes_tree func_scope_p = dumper_get_scope ();
+  JERRY_ASSERT (func_scope_p != NULL && func_scope_p->type == SCOPE_TYPE_FUNCTION);
 
   current_token_must_be_check_and_skip_it (TOK_CLOSE_BRACE);
 
   dump_ret ();
 
-  vm_instr_counter_t function_end_pos = jsp_find_function_end ();
+  JERRY_ASSERT (parent_scope_p != NULL);
+  dumper_set_scope (parent_scope_p);
 
-  rewrite_function_end (function_end_pos);
-
-  dumper_set_scope (parent_scope);
-
-  if (is_function_expression)
+  if (parse_mode == DUMP)
   {
-    scopes_tree_merge_subscope (dumper_get_scope (), func_scope);
-    scopes_tree_free (func_scope);
+    bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                       func_scope_p->bc_header_cp);
+
+    /*dumper_dump_single_scope (func_scope_p,
+                              bc_header_p->instrs_p,
+                              bc_header_p->instrs_count,
+                              MEM_CP_GET_NON_NULL_POINTER (lit_id_hash_table, bc_header_p->lit_id_hash_cp));*/
+    if (parser_show_instrs)
+    {
+      bc_print_instrs (bc_header_p);
+    }
+
+    scopes_tree_free (func_scope_p);
   }
 }
 
@@ -843,11 +863,12 @@ typedef struct
 
     struct source_elements
     {
-      vm_instr_counter_t scope_code_flags_oc;
       vm_instr_counter_t reg_var_decl_oc;
 
       vm_idx_t saved_reg_next;
       vm_idx_t saved_reg_max_for_temps;
+
+      mem_cpointer_t parent_scope_cp;
     } source_elements;
     static_assert (sizeof (source_elements) == 6, "Please, update size if changed");
   } u;
@@ -1201,7 +1222,8 @@ jsp_start_call_dump (jsp_state_t *state_p)
     state_p->is_get_value_dumped_for_main_operand = true;
   }
 
-  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_CALL_EXPR, val);
+  jsp_operand_t ret = tmp_operand ();
+  vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_CALL_EXPR, ret, val);
 
   if (call_flags != OPCODE_CALL_FLAGS__EMPTY)
   {
@@ -1215,22 +1237,18 @@ jsp_start_call_dump (jsp_state_t *state_p)
     }
   }
 
-  state_p->u.expression.operand = empty_operand ();
+  state_p->u.expression.operand = ret;
   state_p->u.expression.prop_name_operand = empty_operand ();
   state_p->is_value_based_reference = false;
 
   return varg_header_pos;
 } /* jsp_start_call_dump */
 
-static jsp_operand_t
+static void
 jsp_finish_call_dump (uint32_t args_num,
                       vm_instr_counter_t header_pos)
 {
-  jsp_operand_t ret = tmp_operand ();
-
-  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
-
-  return ret;
+  rewrite_varg_header_set_args_count (args_num, header_pos);
 } /* jsp_finish_call_dump */
 
 static vm_instr_counter_t __attr_unused___
@@ -1241,18 +1259,18 @@ jsp_start_construct_dump (jsp_state_t *state_p)
 
   state_p->is_get_value_dumped_for_main_operand = true;
 
-  return dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, state_p->u.expression.operand);
+  jsp_operand_t ret = tmp_operand ();
+  vm_instr_counter_t pos = dump_varg_header_for_rewrite (VARG_CONSTRUCT_EXPR, ret, state_p->u.expression.operand);
+  state_p->u.expression.operand = ret;
+
+  return pos;
 } /* jsp_start_construct_dump */
 
-static jsp_operand_t __attr_unused___
+static void
 jsp_finish_construct_dump (uint32_t args_num,
                            vm_instr_counter_t header_pos)
 {
-  jsp_operand_t ret = tmp_operand ();
-
-  rewrite_varg_header_set_args_count (ret, args_num, header_pos);
-
-  return ret;
+  rewrite_varg_header_set_args_count (args_num, header_pos);
 } /* jsp_finish_construct_dump */
 
 static void
@@ -1337,7 +1355,8 @@ jsp_is_assignment_expression_end (jsp_state_t *current_state_p)
 }
 
 static bool
-jsp_dump_unary_op (jsp_state_t *state_p,
+jsp_dump_unary_op (jsp_parse_mode_t parse_mode,
+                   jsp_state_t *state_p,
                    jsp_state_t *substate_p)
 {
   vm_op_t opcode;
@@ -1366,15 +1385,18 @@ jsp_dump_unary_op (jsp_state_t *state_p,
     {
       if (!substate_p->is_value_based_reference)
       {
-        if (substate_p->u.expression.operand.is_identifier_operand ())
+        if (parse_mode == PREPARSE)
         {
-          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (substate_p->u.expression.operand,
-                                                                       is_strict_mode (),
-                                                                       tok.loc);
-        }
-        else
-        {
-          PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          if (substate_p->u.expression.operand.is_identifier_operand ())
+          {
+            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (substate_p->u.expression.operand,
+                                                                         is_strict_mode (),
+                                                                         tok.loc);
+          }
+          else
+          {
+            PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+          }
         }
       }
 
@@ -1417,7 +1439,10 @@ jsp_dump_unary_op (jsp_state_t *state_p,
       }
       else if (substate_p->u.expression.operand.is_identifier_operand ())
       {
-        jsp_early_error_check_delete (is_strict_mode (), tok.loc);
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_check_delete (is_strict_mode (), tok.loc);
+        }
 
         opcode = VM_OP_DELETE_VAR;
       }
@@ -1770,13 +1795,14 @@ jsp_get_prop_name_after_dot (void)
  *
  * @return number of instructions removed from function's header
  */
-static opcode_scope_code_flags_t
-jsp_try_move_vars_to_regs (jsp_state_t *state_p,
-                           opcode_scope_code_flags_t scope_flags)
+static void
+jsp_try_move_vars_to_regs (jsp_state_t *state_p)
 {
   JERRY_ASSERT (state_p->state == JSP_STATE_SOURCE_ELEMENTS);
 
   scopes_tree fe_scope_tree = dumper_get_scope ();
+  bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                     fe_scope_tree->bc_header_cp);
 
   /*
    * We don't try to perform replacement of local variables with registers for global code, eval code.
@@ -1808,40 +1834,54 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
     if (may_replace_vars_with_regs)
     {
       /* no subscopes, as no function declarations / eval etc. in the scope */
-      JERRY_ASSERT (fe_scope_tree->t.children == null_list);
+      JERRY_ASSERT (fe_scope_tree->children_list_cp == MEM_CP_NULL);
 
       vm_instr_counter_t instr_pos = 0u;
 
       const vm_instr_counter_t header_oc = instr_pos++;
-      op_meta header_opm = scopes_tree_op_meta (fe_scope_tree, header_oc);
+      op_meta header_opm = dumper_get_op_meta (header_oc);
       JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N || header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
 
-      vm_instr_counter_t function_end_pos = jsp_find_function_end ();
+      uint32_t args_num;
 
-      uint32_t args_num = (uint32_t) (function_end_pos - instr_pos);
+      if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
+      {
+        args_num = header_opm.op.data.func_expr_n.arg_list;
+      }
+      else
+      {
+        args_num = header_opm.op.data.func_decl_n.arg_list;
+      }
 
       dumper_start_move_of_vars_to_regs ();
 
+      mem_cpointer_t *declarations_p = MEM_CP_GET_POINTER (mem_cpointer_t, bc_header_p->declarations_cp);
+      lit_cpointer_t *var_declarations_p = (lit_cpointer_t *) (declarations_p + bc_header_p->func_scopes_count);
+
       /* remove declarations of variables with names equal to an argument's name */
-      vm_instr_counter_t var_decl_pos = 0;
-      while (var_decl_pos < linked_list_get_length (fe_scope_tree->var_decls))
+      uint32_t var_decl_index = 0;
+      while (var_decl_index < bc_header_p->var_decls_count)
       {
-        op_meta *om_p = (op_meta *) linked_list_element (fe_scope_tree->var_decls, var_decl_pos);
+        lit_cpointer_t var_name_lit_cp = var_declarations_p[var_decl_index];
+
+        op_meta var_decl_opm;
+        var_decl_opm.op.op_idx = VM_OP_VAR_DECL;
+        var_decl_opm.lit_id[0] = var_name_lit_cp;
+        var_decl_opm.lit_id[1] = NOT_A_LITERAL;
+        var_decl_opm.lit_id[2] = NOT_A_LITERAL;
+
         bool is_removed = false;
 
         for (vm_instr_counter_t arg_index = instr_pos;
-             arg_index < function_end_pos;
+             arg_index < instr_pos + args_num;
              arg_index++)
         {
-          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, arg_index);
+          op_meta meta_opm = dumper_get_op_meta (arg_index);
           JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
 
-          JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-          JERRY_ASSERT (om_p->op.data.var_decl.variable_name == VM_IDX_REWRITE_LITERAL_UID);
-
-          if (meta_opm.lit_id[1].packed_value == om_p->lit_id[0].packed_value)
+          if (meta_opm.lit_id[1].packed_value == var_name_lit_cp.packed_value)
           {
-            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+            var_declarations_p [var_decl_index] = NOT_A_LITERAL;
 
             is_removed = true;
             break;
@@ -1850,37 +1890,27 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
 
         if (!is_removed)
         {
-          if (!dumper_try_replace_identifier_name_with_reg (fe_scope_tree, om_p))
+          if (dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &var_decl_opm))
           {
-            var_decl_pos++;
-          }
-          else
-          {
-            linked_list_remove_element (fe_scope_tree->var_decls, var_decl_pos);
+            var_declarations_p [var_decl_index] = NOT_A_LITERAL;
           }
         }
+
+        var_decl_index++;
       }
 
       if (dumper_start_move_of_args_to_regs (args_num))
       {
-        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
+        bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                           fe_scope_tree->bc_header_cp);
 
-        JERRY_ASSERT (linked_list_get_length (fe_scope_tree->var_decls) == 0);
-        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
+        fe_scope_tree->is_args_moved_to_regs = true;
+        bc_header_p->is_args_moved_to_regs = true;
 
-        /* at this point all arguments can be moved to registers */
-        if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
-        {
-          header_opm.op.data.func_expr_n.arg_list = 0;
-        }
-        else
-        {
-          JERRY_ASSERT (header_opm.op.op_idx == VM_OP_FUNC_DECL_N);
+        fe_scope_tree->is_no_lex_env = true;
+        bc_header_p->is_no_lex_env = true;
 
-          header_opm.op.data.func_decl_n.arg_list = 0;
-        }
-
-        scopes_tree_set_op_meta (fe_scope_tree, header_oc, header_opm);
+        dumper_rewrite_op_meta (header_oc, header_opm);
 
         /*
          * Mark duplicated arguments names as empty,
@@ -1888,17 +1918,17 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
          * argument name
          */
         for (vm_instr_counter_t arg1_index = instr_pos;
-             arg1_index < function_end_pos;
+             arg1_index < instr_pos + args_num;
              arg1_index++)
         {
-          op_meta meta_opm1 = scopes_tree_op_meta (fe_scope_tree, arg1_index);
+          op_meta meta_opm1 = dumper_get_op_meta (arg1_index);
           JERRY_ASSERT (meta_opm1.op.op_idx == VM_OP_META);
 
           for (vm_instr_counter_t arg2_index = (vm_instr_counter_t) (arg1_index + 1u);
-               arg2_index < function_end_pos;
+               arg2_index < instr_pos + args_num;
                arg2_index++)
           {
-            op_meta meta_opm2 = scopes_tree_op_meta (fe_scope_tree, arg2_index);
+            op_meta meta_opm2 = dumper_get_op_meta (arg2_index);
             JERRY_ASSERT (meta_opm2.op.op_idx == VM_OP_META);
 
             if (meta_opm1.lit_id[1].packed_value == meta_opm2.lit_id[1].packed_value)
@@ -1906,56 +1936,40 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
               meta_opm1.op.data.meta.data_1 = VM_IDX_EMPTY;
               meta_opm1.lit_id[1] = NOT_A_LITERAL;
 
-              scopes_tree_set_op_meta (fe_scope_tree, arg1_index, meta_opm1);
+              dumper_rewrite_op_meta (arg1_index, meta_opm1);
 
               break;
             }
           }
         }
 
-        while (true)
+        for (vm_instr_counter_t arg_instr_pos = instr_pos;
+             arg_instr_pos < instr_pos + args_num;
+             arg_instr_pos++)
         {
-          op_meta meta_opm = scopes_tree_op_meta (fe_scope_tree, instr_pos);
+          op_meta meta_opm = dumper_get_op_meta (arg_instr_pos);
           JERRY_ASSERT (meta_opm.op.op_idx == VM_OP_META);
 
           opcode_meta_type meta_type = (opcode_meta_type) meta_opm.op.data.meta.type;
-
-          if (meta_type == OPCODE_META_TYPE_FUNCTION_END)
+          JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+          if (meta_opm.op.data.meta.data_1 == VM_IDX_EMPTY)
           {
-            /* marker of function argument list end reached */
-            break;
+            JERRY_ASSERT (meta_opm.lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
+
+            dumper_alloc_reg_for_unused_arg ();
           }
           else
           {
-            JERRY_ASSERT (meta_type == OPCODE_META_TYPE_VARG);
+            /* the varg specifies argument name, and so should be a string literal */
+            JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
 
-            if (meta_opm.op.data.meta.data_1 == VM_IDX_EMPTY)
-            {
-              JERRY_ASSERT (meta_opm.lit_id[1].packed_value == NOT_A_LITERAL.packed_value);
-
-              dumper_alloc_reg_for_unused_arg ();
-            }
-            else
-            {
-              /* the varg specifies argument name, and so should be a string literal */
-              JERRY_ASSERT (meta_opm.op.data.meta.data_1 == VM_IDX_REWRITE_LITERAL_UID);
-              JERRY_ASSERT (meta_opm.lit_id[1].packed_value != NOT_A_LITERAL.packed_value);
-
-              bool is_replaced = dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm);
-              JERRY_ASSERT (is_replaced);
-            }
-
-            scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
-
-            state_p->u.source_elements.scope_code_flags_oc--;
-            state_p->u.source_elements.reg_var_decl_oc--;
+            bool is_replaced = dumper_try_replace_identifier_name_with_reg (fe_scope_tree, &meta_opm);
+            JERRY_ASSERT (is_replaced);
           }
         }
       }
     }
   }
-
-  return scope_flags;
 }
 #endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
@@ -1994,6 +2008,29 @@ jsp_start_statement_parse (jsp_state_expr_t stat)
 
   jsp_state_push (new_state);
 } /* jsp_start_statement_parse */
+
+static void
+jsp_start_parse_source_element_list (scopes_tree parent_scope_p)
+{
+  jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS);
+
+  jsp_state_t *source_elements_state_p = jsp_state_top ();
+
+  source_elements_state_p->req_state = JSP_STATE_SOURCE_ELEMENTS;
+
+  MEM_CP_SET_POINTER (source_elements_state_p->u.source_elements.parent_scope_cp, parent_scope_p);
+
+  dumper_save_reg_alloc_ctx (&source_elements_state_p->u.source_elements.saved_reg_next,
+                             &source_elements_state_p->u.source_elements.saved_reg_max_for_temps);
+
+  source_elements_state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
+
+  if (dumper_get_scope ()->type == SCOPE_TYPE_EVAL)
+  {
+    dump_variable_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET),
+                              jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_UNDEFINED));
+  }
+} /* jsp_start_parse_source_element_list */
 
 static jsp_state_t *
 jsp_find_unnamed_label (bool is_label_for_break,
@@ -2141,13 +2178,15 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 {
   dumper_set_generate_bytecode (parse_mode == DUMP);
 
-  jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-  jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+  jsp_start_parse_source_element_list (NULL);
 
   while (true)
   {
     bool is_source_elements_list_end = false;
+    scopes_tree parent_scope_p = NULL;
+
     bool is_stmt_list_end = false, is_stmt_list_control_flow_exit_stmt_occured = false;
+
     bool is_subexpr_end = false;
 
     jsp_state_t *state_p = jsp_state_top (), *substate_p = NULL;
@@ -2160,7 +2199,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         jsp_state_pop ();
 
-        return;
+        break;
       }
       else
       {
@@ -2176,6 +2215,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           if (state_p->req_state == JSP_STATE_SOURCE_ELEMENTS)
           {
             is_source_elements_list_end = true;
+
+            parent_scope_p = MEM_CP_GET_POINTER (scopes_tree_int, state_p->u.source_elements.parent_scope_cp);
           }
           else if (state_p->req_state == JSP_STATE_STAT_STATEMENT_LIST)
           {
@@ -2206,25 +2247,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
     const bool in_allowed = !state_p->is_no_in_mode;
 
-    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS_INIT)
-    {
-      scope_type_t scope_type = dumper_get_scope ()->type;
-
-      dumper_save_reg_alloc_ctx (&state_p->u.source_elements.saved_reg_next,
-                                 &state_p->u.source_elements.saved_reg_max_for_temps);
-
-      state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
-      state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
-
-      if (scope_type == SCOPE_TYPE_EVAL)
-      {
-        dump_variable_assignment (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET),
-                                  jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_UNDEFINED));
-      }
-
-      state_p->state = JSP_STATE_SOURCE_ELEMENTS;
-    }
-    else if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
+    if (state_p->state == JSP_STATE_SOURCE_ELEMENTS)
     {
       scope_type_t scope_type = dumper_get_scope ()->type;
 
@@ -2232,29 +2255,13 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (token_is (end_token_type))
       {
-        opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
-
-        scopes_tree fe_scope_tree = dumper_get_scope ();
-        if (fe_scope_tree->strict_mode)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
-        }
-
-        if (!fe_scope_tree->ref_arguments)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
-        }
-
-        if (!fe_scope_tree->ref_eval)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
-        }
-
 #ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
-        scope_flags = jsp_try_move_vars_to_regs (state_p, scope_flags);
+        if (parse_mode == DUMP)
+        {
+          jsp_try_move_vars_to_regs (state_p);
+        }
 #endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
-        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
         rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
 
         state_p->is_completed = true;
@@ -2304,7 +2311,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         dump_get_value_for_prev_states (state_p);
 
         /* ArrayLiteral */
-        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_ARRAY_DECL, empty_operand ());
+        state_p->u.expression.operand = tmp_operand ();
+        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_ARRAY_DECL,
+                                                                           state_p->u.expression.operand,
+                                                                           empty_operand ());
 
         state_p->state = JSP_STATE_EXPR_ARRAY_LITERAL;
         state_p->is_list_in_process = true;
@@ -2316,8 +2326,14 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         dump_get_value_for_prev_states (state_p);
 
         /* ObjectLiteral */
-        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_OBJ_DECL, empty_operand ());
-        jsp_early_error_start_checking_of_prop_names ();
+        state_p->u.expression.operand = tmp_operand ();
+        vm_instr_counter_t varg_header_pos = dump_varg_header_for_rewrite (VARG_OBJ_DECL,
+                                                                           state_p->u.expression.operand,
+                                                                           empty_operand ());
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_start_checking_of_prop_names ();
+        }
 
         state_p->state = JSP_STATE_EXPR_OBJECT_LITERAL;
         state_p->is_list_in_process = true;
@@ -2415,7 +2431,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (is_source_elements_list_end)
       {
-        jsp_finish_parse_function_scope (true);
+        jsp_finish_parse_function_scope (parse_mode, parent_scope_p);
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
       }
@@ -2432,10 +2448,11 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           name = empty_operand ();
         }
 
-        state_p->u.expression.operand = jsp_start_parse_function_scope (name, true, NULL);
+        scopes_tree parent_scope_p = dumper_get_scope ();
 
-        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+        state_p->u.expression.operand = jsp_start_parse_function_scope (parse_mode, name, true, NULL);
+
+        jsp_start_parse_source_element_list (parent_scope_p);
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_DATA_PROP_DECL)
@@ -2455,7 +2472,11 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         JERRY_ASSERT (prop_name.is_string_lit_operand ());
 
         dump_prop_name_and_value (prop_name, value);
-        jsp_early_error_add_prop_name (prop_name, PROP_DATA);
+
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_add_prop_name (prop_name, PROP_DATA);
+        }
 
         state_p->is_completed = true;
 
@@ -2479,7 +2500,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (is_source_elements_list_end)
       {
-        jsp_finish_parse_function_scope (true);
+        jsp_finish_parse_function_scope (parse_mode, parent_scope_p);
 
         jsp_operand_t prop_name = state_p->u.expression.u.accessor_prop_decl.prop_name;
         jsp_operand_t func = state_p->u.expression.operand;
@@ -2522,10 +2543,18 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         jsp_operand_t prop_name = parse_property_name ();
         skip_token ();
 
-        jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_add_prop_name (prop_name, is_setter ? PROP_SET : PROP_GET);
+        }
+
+        scopes_tree parent_scope_p = dumper_get_scope ();
 
         size_t formal_parameters_num;
-        const jsp_operand_t func = jsp_start_parse_function_scope (empty_operand (), true, &formal_parameters_num);
+        const jsp_operand_t func = jsp_start_parse_function_scope (parse_mode,
+                                                                   empty_operand (),
+                                                                   true,
+                                                                   &formal_parameters_num);
 
         size_t req_num_of_formal_parameters = is_setter ? 1 : 0;
 
@@ -2540,8 +2569,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         state_p->u.expression.u.accessor_prop_decl.prop_name = prop_name;
         state_p->u.expression.u.accessor_prop_decl.is_setter = is_setter;
 
-        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+        jsp_start_parse_source_element_list (parent_scope_p);
       }
     }
     else if (state_p->state == JSP_STATE_EXPR_OBJECT_LITERAL)
@@ -2572,16 +2600,17 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (token_is (TOK_CLOSE_BRACE))
       {
-        jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_check_for_duplication_of_prop_names (is_strict_mode (), tok.loc);
+        }
 
         skip_token ();
 
         uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
         vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
-        state_p->u.expression.operand = tmp_operand ();
-
-        rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
+        rewrite_varg_header_set_args_count (list_len, header_pos);
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
         state_p->is_list_in_process = false;
@@ -2644,8 +2673,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
           vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
-          state_p->u.expression.operand = tmp_operand ();
-          rewrite_varg_header_set_args_count (state_p->u.expression.operand, list_len, header_pos);
+          rewrite_varg_header_set_args_count (list_len, header_pos);
 
           state_p->state = JSP_STATE_EXPR_MEMBER;
           state_p->is_list_in_process = false;
@@ -2722,7 +2750,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
               uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
               vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
-              state_p->u.expression.operand = jsp_finish_construct_dump (list_len, header_pos);
+              jsp_finish_construct_dump (list_len, header_pos);
             }
             else
             {
@@ -2805,7 +2833,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
                 state_p->is_completed = true;
               }
 
-              state_p->u.expression.operand = jsp_finish_construct_dump (0, header_pos);
+              jsp_finish_construct_dump (0, header_pos);
               state_p->u.expression.prop_name_operand = empty_operand ();
               state_p->is_value_based_reference = false;
             }
@@ -2887,7 +2915,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
             uint32_t list_len = state_p->u.expression.u.varg_sequence.list_length;
             vm_instr_counter_t header_pos = state_p->u.expression.u.varg_sequence.header_pos;
 
-            state_p->u.expression.operand = jsp_finish_call_dump (list_len, header_pos);
+            jsp_finish_call_dump (list_len, header_pos);
             state_p->u.expression.prop_name_operand = empty_operand ();
             state_p->is_value_based_reference = false;
           }
@@ -2932,7 +2960,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           {
             skip_token ();
 
-            state_p->u.expression.operand = jsp_finish_call_dump (0, header_pos);
+            jsp_finish_call_dump (0, header_pos);
             state_p->u.expression.prop_name_operand = empty_operand ();
             state_p->is_value_based_reference = false;
           }
@@ -3146,9 +3174,12 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           }
           else if (state_p->u.expression.operand.is_identifier_operand ())
           {
-            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
-                                                                         is_strict_mode (),
-                                                                         tok.loc);
+            if (parse_mode == PREPARSE)
+            {
+              jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
+                                                                           is_strict_mode (),
+                                                                           tok.loc);
+            }
 
             dump_unary_op (VM_OP_POST_INCR, reg, state_p->u.expression.operand);
 
@@ -3185,9 +3216,12 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           }
           else if (state_p->u.expression.operand.is_identifier_operand ())
           {
-            jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
-                                                                         is_strict_mode (),
-                                                                         tok.loc);
+            if (parse_mode == PREPARSE)
+            {
+              jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
+                                                                           is_strict_mode (),
+                                                                           tok.loc);
+            }
 
             dump_unary_op (VM_OP_POST_DECR, reg, state_p->u.expression.operand);
 
@@ -3211,15 +3245,18 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           {
             if (!state_p->is_value_based_reference)
             {
-              if (!state_p->u.expression.operand.is_identifier_operand ())
+              if (parse_mode == PREPARSE)
               {
-                PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
-              }
-              else
-              {
-                jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
-                                                                             is_strict_mode (),
-                                                                             tok.loc);
+                if (!state_p->u.expression.operand.is_identifier_operand ())
+                {
+                  PARSE_ERROR (JSP_EARLY_ERROR_REFERENCE, "Invalid left-hand-side expression", tok.loc);
+                }
+                else
+                {
+                  jsp_early_error_check_for_eval_and_arguments_in_strict_mode (state_p->u.expression.operand,
+                                                                               is_strict_mode (),
+                                                                               tok.loc);
+                }
               }
             }
 
@@ -3272,7 +3309,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         if (state_p->state == JSP_STATE_EXPR_UNARY)
         {
-          is_combined_with_assignment = jsp_dump_unary_op (state_p, substate_p);
+          is_combined_with_assignment = jsp_dump_unary_op (parse_mode, state_p, substate_p);
         }
         else
         {
@@ -4011,12 +4048,13 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         const jsp_operand_t func_name = jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
         skip_token ();
 
-        jsp_start_parse_function_scope (func_name, false, NULL);
+        scopes_tree parent_scope_p = dumper_get_scope ();
+
+        jsp_start_parse_function_scope (parse_mode, func_name, false,  NULL);
 
         state_p->state = JSP_STATE_FUNC_DECL_FINISH;
 
-        jsp_start_statement_parse (JSP_STATE_SOURCE_ELEMENTS_INIT);
-        jsp_state_top ()->req_state = JSP_STATE_SOURCE_ELEMENTS;
+        jsp_start_parse_source_element_list (parent_scope_p);
       }
       else
       {
@@ -4159,7 +4197,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       skip_token ();
 
-      jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
+      if (parse_mode == PREPARSE)
+      {
+        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
+      }
 
       if (!scopes_tree_variable_declaration_exists (dumper_get_scope (), lit_cp))
       {
@@ -4399,7 +4440,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         skip_token ();
 
-        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), name_loc);
+        }
 
         if (!scopes_tree_variable_declaration_exists (dumper_get_scope (), lit_cp))
         {
@@ -4658,7 +4702,11 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         current_token_must_be (TOK_NAME);
 
         const jsp_operand_t name = jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
-        jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
+
+        if (parse_mode == PREPARSE)
+        {
+          jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
+        }
 
         skip_token ();
 
@@ -4757,7 +4805,9 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
     }
     else if (state_p->state == JSP_STATE_FUNC_DECL_FINISH)
     {
-      jsp_finish_parse_function_scope (false);
+      JERRY_ASSERT (is_source_elements_list_end);
+      jsp_finish_parse_function_scope (parse_mode, parent_scope_p);
+
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
     else if (state_p->state == JSP_STATE_STAT_NAMED_LABEL)
@@ -4831,6 +4881,15 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
     JERRY_ASSERT (substate_p == NULL);
   }
+
+  if (dumper_get_scope ()->type == SCOPE_TYPE_EVAL)
+  {
+    dump_retval (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET));
+  }
+  else
+  {
+    dump_ret ();
+  }
 } /* jsp_parse_source_element_list */
 
 /**
@@ -4860,7 +4919,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
   const scope_type_t scope_type = (in_eval ? SCOPE_TYPE_EVAL : SCOPE_TYPE_GLOBAL);
 
 #ifndef JERRY_NDEBUG
-  volatile bool is_parse_finished = false;
+  volatile bool is_pre_parse_finished = false;
 #endif /* !JERRY_NDEBUG */
 
   jsp_status_t status;
@@ -4886,45 +4945,52 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
      *      Operations that could raise an early error can be performed only during execution of the block.
      */
     lexer_init (source_p, source_size, parser_show_instrs);
-
     skip_token ();
+
+    locus start_loc = tok.loc;
 
     jsp_parse_directive_prologue ();
 
-    // jsp_parse_source_element_list (PREPARSE);
-    jsp_parse_source_element_list (DUMP);
-
+    jsp_parse_source_element_list (PREPARSE);
     JERRY_ASSERT (token_is (TOK_EOF));
 
-    if (scope_type == SCOPE_TYPE_EVAL)
-    {
-      dump_retval (jsp_operand_t::make_reg_operand (VM_REG_SPECIAL_EVAL_RET));
-    }
-    else
-    {
-      dump_ret ();
-    }
-
 #ifndef JERRY_NDEBUG
-    is_parse_finished = true;
+    is_pre_parse_finished = true;
 #endif /* !JERRY_NDEBUG */
 
     jsp_early_error_free ();
-
-    *out_bytecode_data_p = bc_merge_scopes_into_bytecode (dumper_get_scope (),
-                                                          parser_show_instrs);
-
-    dumper_free ();
 
     if (out_contains_functions_p != NULL)
     {
       *out_contains_functions_p = scope->contains_functions;
     }
 
+    *out_bytecode_data_p = bc_alloc_headers_from_scopes_tree (scope);
+
+    seek_token (start_loc);
+
+    JERRY_ASSERT (dumper_get_scope () == scope);
+
+    jsp_parse_source_element_list (DUMP);
+
     dumper_set_scope (NULL);
-    scopes_tree_free (scope);
+    dumper_free ();
 
     jsp_stack_finalize ();
+
+    bytecode_data_header_t *bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                       scope->bc_header_cp);
+    /*dumper_dump_single_scope (scope,
+                              bc_header_p->instrs_p,
+                              bc_header_p->instrs_count,
+                              MEM_CP_GET_NON_NULL_POINTER (lit_id_hash_table, bc_header_p->lit_id_hash_cp));*/
+    if (parser_show_instrs)
+    {
+      lit_dump_literals ();
+      bc_print_instrs (bc_header_p);
+    }
+
+    scopes_tree_free (scope);
 
     status = JSP_STATUS_OK;
   }
@@ -4933,7 +4999,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
     /* SyntaxError handling */
 
 #ifndef JERRY_NDEBUG
-    JERRY_ASSERT (!is_parse_finished);
+    JERRY_ASSERT (!is_pre_parse_finished);
 #endif /* !JERRY_NDEBUG */
 
     *out_bytecode_data_p = NULL;

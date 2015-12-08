@@ -579,8 +579,8 @@ extern bool dumper_is_eval_literal (jsp_operand_t);
 
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 
-vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
-void rewrite_varg_header_set_args_count (jsp_operand_t, size_t, vm_instr_counter_t);
+vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t, jsp_operand_t);
+void rewrite_varg_header_set_args_count (size_t, vm_instr_counter_t);
 void dump_call_additional_info (opcode_call_flags_t, jsp_operand_t);
 void dump_varg (jsp_operand_t);
 
@@ -589,9 +589,6 @@ void dump_prop_getter_decl (jsp_operand_t, jsp_operand_t);
 void dump_prop_setter_decl (jsp_operand_t, jsp_operand_t);
 void dump_prop_getter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
 void dump_prop_setter (jsp_operand_t, jsp_operand_t, jsp_operand_t);
-
-void dump_function_end_for_rewrite (void);
-void rewrite_function_end (vm_instr_counter_t);
 
 vm_instr_counter_t dump_conditional_check_for_rewrite (jsp_operand_t);
 void rewrite_conditional_check (vm_instr_counter_t);
@@ -630,13 +627,13 @@ void dump_throw (jsp_operand_t);
 
 void dump_variable_declaration (lit_cpointer_t);
 
-vm_instr_counter_t dump_scope_code_flags_for_rewrite (void);
-void rewrite_scope_code_flags (vm_instr_counter_t, opcode_scope_code_flags_t);
-
 vm_instr_counter_t dump_reg_var_decl_for_rewrite (void);
 void rewrite_reg_var_decl (vm_instr_counter_t);
 
 void dump_ret (void);
 void dump_retval (jsp_operand_t);
+
+op_meta dumper_get_op_meta (vm_instr_counter_t);
+void dumper_rewrite_op_meta (vm_instr_counter_t, op_meta);
 
 #endif /* OPCODES_DUMPER_H */
