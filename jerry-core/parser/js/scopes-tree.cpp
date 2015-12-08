@@ -19,9 +19,22 @@
 
 #define HASH_SIZE 128
 
-static hash_table lit_id_to_uid = null_hash;
+static hash_table seen_literals_in_block = null_hash;
 static vm_instr_counter_t global_oc;
 static vm_idx_t next_uid;
+
+/**
+ * Free hash table of seen literals in block
+ */
+static void
+seen_literals_in_block_free ()
+{
+  if (seen_literals_in_block != null_hash)
+  {
+    hash_table_free (seen_literals_in_block);
+    seen_literals_in_block = null_hash;
+  }
+} /* seen_literals_in_block */
 
 static void
 assert_tree (scopes_tree t)
@@ -151,6 +164,18 @@ scopes_tree_count_instructions (scopes_tree t)
 }
 
 /**
+ * Count instructions number in a scope
+ */
+vm_instr_counter_t
+scopes_tree_count_instructions_in_single_scope (scopes_tree t) /**< scopes tree node */
+{
+  assert_tree (t);
+  vm_instr_counter_t res = (vm_instr_counter_t) (t->instrs_count + linked_list_get_length (t->var_decls));
+
+  return res;
+} /* scopes_tree_count_instructions_in_single_scope */
+
+/**
  * Checks if variable declaration exists in the scope
  *
  * @return true / false
@@ -191,12 +216,8 @@ start_new_block_if_necessary (void)
   if (global_oc % BLOCK_SIZE == 0)
   {
     next_uid = 0;
-    if (lit_id_to_uid != null_hash)
-    {
-      hash_table_free (lit_id_to_uid);
-      lit_id_to_uid = null_hash;
-    }
-    lit_id_to_uid = hash_table_init (sizeof (lit_cpointer_t), sizeof (vm_idx_t), HASH_SIZE, lit_id_hash);
+    seen_literals_in_block_free ();
+    seen_literals_in_block = hash_table_init (sizeof (lit_cpointer_t), sizeof (vm_idx_t), HASH_SIZE, lit_id_hash);
   }
 }
 
@@ -237,12 +258,12 @@ change_uid (op_meta *om, lit_id_hash_table *lit_ids, uint16_t mask)
       {
         JERRY_ASSERT (om->lit_id[i].packed_value != MEM_CP_NULL);
         lit_cpointer_t lit_id = om->lit_id[i];
-        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (lit_id_to_uid, &lit_id);
+        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
         if (uid == NULL)
         {
-          hash_table_insert (lit_id_to_uid, &lit_id, &next_uid);
+          hash_table_insert (seen_literals_in_block, &lit_id, &next_uid);
           lit_id_hash_table_insert (lit_ids, next_uid, global_oc, lit_id);
-          uid = (vm_idx_t *) hash_table_lookup (lit_id_to_uid, &lit_id);
+          uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
           JERRY_ASSERT (uid != NULL);
           JERRY_ASSERT (*uid == next_uid);
           next_uid++;
@@ -272,11 +293,11 @@ insert_uids_to_lit_id_map (op_meta *om, uint16_t mask)
       {
         JERRY_ASSERT (om->lit_id[i].packed_value != MEM_CP_NULL);
         lit_cpointer_t lit_id = om->lit_id[i];
-        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (lit_id_to_uid, &lit_id);
+        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
         if (uid == NULL)
         {
-          hash_table_insert (lit_id_to_uid, &lit_id, &next_uid);
-          uid = (vm_idx_t *) hash_table_lookup (lit_id_to_uid, &lit_id);
+          hash_table_insert (seen_literals_in_block, &lit_id, &next_uid);
+          uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
           JERRY_ASSERT (uid != NULL);
           JERRY_ASSERT (*uid == next_uid);
           next_uid++;
@@ -610,11 +631,7 @@ scopes_tree_count_literals_in_blocks (scopes_tree tree) /**< scope */
   assert_tree (tree);
   size_t result = 0;
 
-  if (lit_id_to_uid != null_hash)
-  {
-    hash_table_free (lit_id_to_uid);
-    lit_id_to_uid = null_hash;
-  }
+  seen_literals_in_block_free ();
   next_uid = 0;
   global_oc = 0;
 
@@ -659,6 +676,59 @@ scopes_tree_count_literals_in_blocks (scopes_tree tree) /**< scope */
 
   return result;
 } /* scopes_tree_count_literals_in_blocks */
+
+/**
+ * Count slots needed for a scope's hash table
+ *
+ * Before filling literal indexes 'hash' table we shall initiate it with number of neccesary literal indexes.
+ * Since bytecode is divided into blocks and id of the block is a part of hash key, we shall divide bytecode
+ *  into blocks and count unique literal indexes used in each block.
+ *
+ * @return total number of literals in a single scope
+ */
+size_t
+scopes_tree_count_literals_in_blocks_in_single_scope (scopes_tree tree) /**< scope */
+{
+  assert_tree (tree);
+  size_t result = 0;
+
+  seen_literals_in_block_free ();
+  next_uid = 0;
+  global_oc = 0;
+
+  assert_tree (tree);
+  vm_instr_counter_t instr_pos;
+  bool header = true;
+  for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
+  {
+    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
+    if (om_p->op.op_idx != VM_OP_META && !header)
+    {
+      break;
+    }
+    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
+    {
+      header = false;
+    }
+    result += count_new_literals_in_instr (om_p);
+  }
+
+  for (vm_instr_counter_t var_decl_pos = 0;
+       var_decl_pos < linked_list_get_length (tree->var_decls);
+       var_decl_pos++)
+  {
+    op_meta *om_p = extract_op_meta (tree->var_decls, var_decl_pos);
+    result += count_new_literals_in_instr (om_p);
+  }
+
+  for (; instr_pos < tree->instrs_count; instr_pos++)
+  {
+    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
+    result += count_new_literals_in_instr (om_p);
+  }
+
+  return result;
+} /* scopes_tree_count_literals_in_blocks_in_single_scope */
 
 /*
  * This function performs functions hoisting.
@@ -737,11 +807,7 @@ scopes_tree_raw_data (scopes_tree tree, /**< scopes tree to convert to byte-code
 {
   JERRY_ASSERT (lit_ids);
   assert_tree (tree);
-  if (lit_id_to_uid != null_hash)
-  {
-    hash_table_free (lit_id_to_uid);
-    lit_id_to_uid = null_hash;
-  }
+  seen_literals_in_block_free ();
   next_uid = 0;
   global_oc = 0;
 
@@ -752,14 +818,72 @@ scopes_tree_raw_data (scopes_tree tree, /**< scopes tree to convert to byte-code
   memset (instrs, 0, instructions_array_size);
 
   merge_subscopes (tree, instrs, lit_ids);
-  if (lit_id_to_uid != null_hash)
-  {
-    hash_table_free (lit_id_to_uid);
-    lit_id_to_uid = null_hash;
-  }
+  seen_literals_in_block_free ();
 
   return instrs;
 } /* scopes_tree_raw_data */
+
+/**
+ * Dump instruction of a single scope.
+ * Init literal indexes 'hash' table.
+ * Rewrite instructions' temporary uids with their keys in literal indexes 'hash' table.
+ */
+vm_instr_t *
+scopes_tree_dump_single_scope (scopes_tree tree, /**< scopes tree to convert to byte-code array */
+                               uint8_t *data_p, /**< buffer for byte-code array and literal identifiers hash table */
+                               size_t instructions_array_size, /**< size of space for byte-code array */
+                               lit_id_hash_table *lit_ids_p) /**< literal identifiers hash table */
+{
+  JERRY_ASSERT (lit_ids_p);
+  assert_tree (tree);
+  seen_literals_in_block_free ();
+  next_uid = 0;
+  global_oc = 0;
+
+  /* Dump bytecode and fill literal indexes 'hash' table. */
+  JERRY_ASSERT (instructions_array_size >= (size_t) (scopes_tree_count_instructions_in_single_scope (tree))
+                  * sizeof (vm_instr_t));
+
+  vm_instr_t *instrs_p = (vm_instr_t *) data_p;
+  memset (instrs_p, 0, instructions_array_size);
+
+  JERRY_ASSERT (data_p);
+  vm_instr_counter_t instr_pos;
+  bool header = true;
+  for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
+  {
+    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
+    if (om_p->op.op_idx != VM_OP_VAR_DECL
+        && om_p->op.op_idx != VM_OP_META && !header)
+    {
+      break;
+    }
+    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
+    {
+      header = false;
+    }
+    instrs_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
+    global_oc++;
+  }
+
+  for (vm_instr_counter_t var_decl_pos = 0;
+       var_decl_pos < linked_list_get_length (tree->var_decls);
+       var_decl_pos++)
+  {
+    instrs_p[global_oc] = generate_instr (tree->var_decls, var_decl_pos, lit_ids_p);
+    global_oc++;
+  }
+
+  for (; instr_pos < tree->instrs_count; instr_pos++)
+  {
+    instrs_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
+    global_oc++;
+  }
+
+  seen_literals_in_block_free ();
+
+  return instrs_p;
+} /* scopes_tree_dump_single_scope */
 
 /**
  * Set up a flag, indicating that scope should be executed in strict mode
