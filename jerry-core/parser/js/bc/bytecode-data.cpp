@@ -27,13 +27,17 @@ bc_get_first_bytecode_data_header ()
 
 void
 bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
-                          lit_id_hash_table *lit_id_hash_table_p,
-                          vm_instr_t *bytecode_p,
-                          vm_instr_counter_t instrs_count)
+                      lit_id_hash_table *lit_id_hash_table_p,
+                      vm_instr_t *bytecode_p,
+                      vm_instr_counter_t instrs_count,
+                      lit_cpointer_t *func_decls_p,
+                      uint16_t func_decls_count)
 {
   MEM_CP_SET_POINTER (bc_header_p->lit_id_hash_cp, lit_id_hash_table_p);
   bc_header_p->instrs_p = bytecode_p;
   bc_header_p->instrs_count = instrs_count;
+  MEM_CP_SET_POINTER (bc_header_p->func_decls_cp, func_decls_p);
+  bc_header_p->func_decls_count = func_decls_count;
   MEM_CP_SET_POINTER (bc_header_p->next_header_cp, first_bytecode_header_p);
 
   first_bytecode_header_p = bc_header_p;
@@ -129,7 +133,7 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
-  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count);
+  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, NULL, 0);
 
   if (is_show_instrs)
   {
@@ -139,6 +143,89 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
 
   return header_p;
 } /* bc_merge_scopes_into_bytecode */
+
+/**
+ * Dump single scopes tree into bytecode
+ *
+ * @return pointer to bytecode header of the outer most scope
+ */
+static bytecode_data_header_t *
+bc_dump_single_scope (scopes_tree scope_p,
+                      bool is_show_instrs)
+{
+  const size_t entries_count = scopes_tree_count_literals_in_blocks_in_single_scope (scope_p);
+  const vm_instr_counter_t instrs_count = scopes_tree_count_instructions_in_single_scope (scope_p);
+  const size_t blocks_count = JERRY_ALIGNUP (instrs_count, BLOCK_SIZE) / BLOCK_SIZE;
+  const uint16_t func_decls_count = scope_p->t.children ? linked_list_get_length (scope_p->t.children) : 0;
+  const size_t bytecode_size = JERRY_ALIGNUP (instrs_count * sizeof (vm_instr_t), MEM_ALIGNMENT);
+  const size_t hash_table_size = lit_id_hash_table_get_size_for_table (entries_count, blocks_count);
+  const size_t func_decls_table_size = JERRY_ALIGNUP (func_decls_count * sizeof (mem_cpointer_t), MEM_ALIGNMENT);
+  const size_t header_and_tables_size = JERRY_ALIGNUP (sizeof (bytecode_data_header_t) + hash_table_size
+                                                             + func_decls_table_size,
+                                                           MEM_ALIGNMENT);
+
+  uint8_t *buffer_p = (uint8_t*) mem_heap_alloc_block (bytecode_size + header_and_tables_size,
+                                                       MEM_HEAP_ALLOC_LONG_TERM);
+
+  lit_id_hash_table *lit_id_hash = lit_id_hash_table_init (buffer_p + sizeof (bytecode_data_header_t),
+                                                           hash_table_size,
+                                                           entries_count, blocks_count);
+
+  lit_cpointer_t *func_decls_p = (lit_cpointer_t *) buffer_p + sizeof (bytecode_data_header_t) + hash_table_size;
+
+  vm_instr_t *bytecode_p = scopes_tree_dump_single_scope (scope_p,
+                                                          buffer_p + header_and_tables_size,
+                                                          bytecode_size,
+                                                          lit_id_hash);
+
+  bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
+
+  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, func_decls_p, func_decls_count);
+
+  if (is_show_instrs)
+  {
+    lit_dump_literals ();
+    bc_print_instrs (header_p);
+  }
+
+  return header_p;
+} /* bc_dump_single_scope */
+
+
+static void
+bc_data_header_set_child (bytecode_data_header_t *header_p,
+                          bytecode_data_header_t *child_p,
+                          uint32_t i)
+{
+  JERRY_ASSERT (i < header_p->func_decls_count);
+
+  mem_cpointer_t *func_decls_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_decls_cp);
+  MEM_CP_SET_POINTER (func_decls_p[i], child_p);
+} /* bc_data_header_set_child */
+
+/**
+ * Dump scopes tree into bytecode
+ *
+ * @return pointer to bytecode header of the outer most scope
+ */
+bytecode_data_header_t *
+bc_dump_scopes (scopes_tree scope_p,
+                bool is_show_instrs)
+{
+  bytecode_data_header_t *header_p = bc_dump_single_scope (scope_p, is_show_instrs);
+
+  if (scope_p->t.children != null_list)
+  {
+    for (uint32_t i = 0; i < linked_list_get_length (scope_p->t.children); ++i)
+    {
+      bytecode_data_header_t *child_p;
+      child_p = bc_dump_scopes (*(scopes_tree *) linked_list_element (scope_p->t.children, i), is_show_instrs);
+      bc_data_header_set_child (header_p, child_p, i);
+    }
+  }
+
+  return header_p;
+} /* bc_dump_scopes */
 
 void
 bc_finalize ()
@@ -313,7 +400,9 @@ bc_load_bytecode_with_idx_map (const uint8_t *bytecode_and_idx_map_p, /**< buffe
     bc_add_bytecode_data (header_p,
                           (lit_id_hash_table *) lit_id_hash_table_buffer_p,
                           instrs_p,
-                          (vm_instr_counter_t) instructions_number);
+                          (vm_instr_counter_t) instructions_number,
+                          NULL,
+                          0);
 
     return header_p;
   }

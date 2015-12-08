@@ -45,16 +45,25 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
   vm_instr_counter_t instrs_count; /**< number of instructions in the byte-code array */
   mem_cpointer_t lit_id_hash_cp; /**< pointer to literal identifiers hash table
                                   *   See also: lit_id_hash_table_init */
+
+  mem_cpointer_t func_decls_cp; /**< declrations inside current scope */
+  uint16_t func_decls_count; /**< cound of function declarations inside current scope */
+  // mem_cpointer_t scope_func_exprs_cp; /**< function expressions inside current scope */
+  // uint16_t func_exprs_count;
+
   mem_cpointer_t next_header_cp; /**< pointer to next instructions data header */
 } bytecode_data_header_t;
 
 
 bytecode_data_header_t * bc_get_first_bytecode_data_header ();
 
-void bc_add_bytecode_data (bytecode_data_header_t *,
-                           lit_id_hash_table *,
-                           vm_instr_t *,
-                           vm_instr_counter_t);
+void
+bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
+                      lit_id_hash_table *lit_id_hash_table_p,
+                      vm_instr_t *bytecode_p,
+                      vm_instr_counter_t instrs_count,
+                      lit_cpointer_t *func_decls_p,
+                      uint16_t func_decls_count);
 
 void bc_remove_bytecode_data (const bytecode_data_header_t *);
 
@@ -64,6 +73,7 @@ vm_instr_t bc_get_instr (const bytecode_data_header_t *,
 void bc_print_instrs (const bytecode_data_header_t *bytecode_data_p);
 
 const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
+bytecode_data_header_t *bc_dump_scopes (scopes_tree, bool);
 
 void bc_finalize ();
 
