@@ -2216,7 +2216,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         state_p->is_completed = true;
 
         dumper_restore_reg_alloc_ctx (state_p->u.source_elements.saved_reg_next,
-                                      state_p->u.source_elements.saved_reg_max_for_temps);
+                                      state_p->u.source_elements.saved_reg_max_for_temps,
+                                      true);
       }
       else
       {
@@ -2967,6 +2968,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           {
             JERRY_ASSERT (state_p->u.expression.operand.is_register_operand ());
           }
+          else
+          {
+            state_p->u.expression.operand = empty_operand ();
+          }
         }
         else
         {
@@ -3606,8 +3611,9 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
          * See also:
          *          11.14, step 2
          */
-        JERRY_ASSERT (!state_p->is_value_based_reference
-                      && state_p->u.expression.operand.is_register_operand ());
+        JERRY_ASSERT (!state_p->is_need_retval
+                      || (!state_p->is_value_based_reference
+                          && state_p->u.expression.operand.is_register_operand ()));
 
         /* evaluating, if reference */
         dump_get_value_if_ref (substate_p, false);
@@ -4511,10 +4517,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         if (token_is (TOK_KW_CASE) || token_is (TOK_KW_DEFAULT))
         {
-          uint32_t num = jsp_rewrite_jumps_chain (&state_p->u.statement.u.switch_statement.last_cond_check_jmp_oc,
-                                                  dumper_get_current_instr_counter ());
-          JERRY_ASSERT (num <= 1);
-
           if (!is_stmt_list_end /* no StatementList[opt] occured in the SwitchStatement yet,
                                  * so no conditions were checked for now and the DefaultClause
                                  * should be jumped over */
@@ -4531,8 +4533,13 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
           {
             skip_token ();
 
+            uint32_t num = jsp_rewrite_jumps_chain (&state_p->u.statement.u.switch_statement.last_cond_check_jmp_oc,
+                                                    dumper_get_current_instr_counter ());
+            JERRY_ASSERT (num <= 1);
+
             dumper_restore_reg_alloc_ctx (state_p->u.statement.u.switch_statement.saved_reg_next,
-                                          state_p->u.statement.u.switch_statement.saved_reg_max_for_temps);
+                                          state_p->u.statement.u.switch_statement.saved_reg_max_for_temps,
+                                          false);
 
             jsp_push_new_expr_state (JSP_STATE_EXPR_EMPTY, JSP_STATE_EXPR_EXPRESSION, true);
           }

@@ -395,7 +395,7 @@ void dumper_alloc_reg_for_unused_arg (void);
 
 void dumper_new_statement (void);
 void dumper_save_reg_alloc_ctx (vm_idx_t *, vm_idx_t *);
-void dumper_restore_reg_alloc_ctx (vm_idx_t, vm_idx_t);
+void dumper_restore_reg_alloc_ctx (vm_idx_t, vm_idx_t, bool);
 vm_idx_t dumper_start_varg_code_sequence (void);
 void dumper_finish_varg_code_sequence (vm_idx_t);
 
