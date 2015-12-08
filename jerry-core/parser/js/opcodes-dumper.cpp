@@ -621,12 +621,21 @@ dumper_save_reg_alloc_ctx (vm_idx_t *out_saved_reg_next_p,
 
 void
 dumper_restore_reg_alloc_ctx (vm_idx_t saved_reg_next,
-                              vm_idx_t saved_reg_max_for_temps)
+                              vm_idx_t saved_reg_max_for_temps,
+                              bool is_overwrite_max)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
 
-  jsp_reg_max_for_temps = saved_reg_max_for_temps;
+  if (is_overwrite_max)
+  {
+    jsp_reg_max_for_temps = saved_reg_max_for_temps;
+  }
+  else
+  {
+    jsp_reg_max_for_temps = JERRY_MAX (jsp_reg_max_for_temps, saved_reg_max_for_temps);
+  }
+
   jsp_reg_next = saved_reg_next;
 }
 

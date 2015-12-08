@@ -2216,7 +2216,8 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         state_p->is_completed = true;
 
         dumper_restore_reg_alloc_ctx (state_p->u.source_elements.saved_reg_next,
-                                      state_p->u.source_elements.saved_reg_max_for_temps);
+                                      state_p->u.source_elements.saved_reg_max_for_temps,
+                                      true);
       }
       else
       {
