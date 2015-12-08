@@ -356,7 +356,7 @@ parse_property_name (void)
     const char *s = lexer_token_type_to_string (lexer_get_token_type (tok));
     literal_t lit = lit_find_or_create_literal_from_utf8_string ((const lit_utf8_byte_t *) s,
                                                                  (lit_utf8_size_t)strlen (s));
-    return literal_operand (lit_cpointer_t::compress (lit));
+    return jsp_operand_t::make_string_lit_operand (lit_cpointer_t::compress (lit));
   }
   else
   {
@@ -365,7 +365,7 @@ parse_property_name (void)
       case TOK_NAME:
       case TOK_STRING:
       {
-        return literal_operand (token_data_as_lit_cp ());
+        return jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
       }
       case TOK_NUMBER:
       case TOK_SMALL_INT:
@@ -388,7 +388,7 @@ parse_property_name (void)
         JERRY_ASSERT (sz <= ECMA_MAX_CHARS_IN_STRINGIFIED_NUMBER);
 
         literal_t str_lit = lit_find_or_create_literal_from_utf8_string (buff, sz);
-        return literal_operand (lit_cpointer_t::compress (str_lit));
+        return jsp_operand_t::make_string_lit_operand (lit_cpointer_t::compress (str_lit));
       }
       case TOK_NULL:
       case TOK_BOOL:
@@ -398,7 +398,7 @@ parse_property_name (void)
                                     : (tok.uid ? LIT_MAGIC_STRING_TRUE : LIT_MAGIC_STRING_FALSE));
         literal_t lit = lit_find_or_create_literal_from_utf8_string (lit_get_magic_string_utf8 (id),
                                                                      lit_get_magic_string_size (id));
-        return literal_operand (lit_cpointer_t::compress (lit));
+        return jsp_operand_t::make_string_lit_operand (lit_cpointer_t::compress (lit));
       }
       default:
       {
@@ -459,7 +459,8 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   current_token_must_be_check_and_skip_it (TOK_OPEN_PAREN);
 
-  JERRY_ASSERT (func_name.is_empty_operand () || func_name.is_literal_operand ());
+  JERRY_ASSERT (func_name.is_empty_operand ()
+                || func_name.is_string_lit_operand ());
 
   varg_list_type vlt = is_function_expression ? VARG_FUNC_EXPR : VARG_FUNC_DECL;
 
@@ -470,7 +471,7 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
   while (!token_is (TOK_CLOSE_PAREN))
   {
     current_token_must_be (TOK_NAME);
-    jsp_operand_t formal_parameter_name = literal_operand (token_data_as_lit_cp ());
+    jsp_operand_t formal_parameter_name = jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
     skip_token ();
 
     dump_varg (formal_parameter_name);
@@ -2387,7 +2388,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         jsp_operand_t name;
         if (token_is (TOK_NAME))
         {
-          name = literal_operand (token_data_as_lit_cp ());
+          name = jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
           skip_token ();
         }
         else
@@ -2414,7 +2415,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         jsp_operand_t prop_name = state_p->u.expression.operand;
         jsp_operand_t value = substate_p->u.expression.operand;
 
-        JERRY_ASSERT (prop_name.is_literal_operand ());
+        JERRY_ASSERT (prop_name.is_string_lit_operand ());
 
         dump_prop_name_and_value (prop_name, value);
         jsp_early_error_add_prop_name (prop_name, PROP_DATA);
@@ -3944,7 +3945,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         current_token_must_be (TOK_NAME);
 
-        const jsp_operand_t func_name = literal_operand (token_data_as_lit_cp ());
+        const jsp_operand_t func_name = jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
         skip_token ();
 
         jsp_start_parse_function_scope (func_name, false, NULL);
@@ -4090,7 +4091,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       current_token_must_be (TOK_NAME);
 
       const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
-      const jsp_operand_t name = literal_operand (lit_cp);
+      const jsp_operand_t name = jsp_operand_t::make_string_lit_operand (lit_cp);
 
       skip_token ();
 
@@ -4329,7 +4330,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
         current_token_must_be (TOK_NAME);
 
         const lit_cpointer_t lit_cp = token_data_as_lit_cp ();
-        const jsp_operand_t name = literal_operand (lit_cp);
+        const jsp_operand_t name = jsp_operand_t::make_string_lit_operand (lit_cp);
 
         skip_token ();
 
@@ -4589,7 +4590,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
         current_token_must_be (TOK_NAME);
 
-        const jsp_operand_t name = literal_operand (token_data_as_lit_cp ());
+        const jsp_operand_t name = jsp_operand_t::make_string_lit_operand (token_data_as_lit_cp ());
         jsp_early_error_check_for_eval_and_arguments_in_strict_mode (name, is_strict_mode (), tok.loc);
 
         skip_token ();
