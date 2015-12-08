@@ -702,103 +702,39 @@ dumper_is_eval_literal (jsp_operand_t obj) /**< byte-code operand */
   return is_eval_lit;
 } /* dumper_is_eval_literal */
 
-/**
- * Dump assignment of an array-hole simple value
- */
-void
-dump_array_hole_assignment (jsp_operand_t op)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_ARRAY_HOLE);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-} /* dump_array_hole_assignment */
-
-void
-dump_boolean_assignment (jsp_operand_t op, bool is_true)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_simple_value_operand (is_true ? ECMA_SIMPLE_VALUE_TRUE : ECMA_SIMPLE_VALUE_FALSE);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_string_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_STRING);
-  value_operand = jsp_operand_t::make_string_lit_operand (lit_id);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_number_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_NUMBER);
-  value_operand = jsp_operand_t::make_number_lit_operand (lit_id);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_regexp_assignment (jsp_operand_t op, lit_cpointer_t lit_id)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_REGEXP);
-  value_operand = jsp_operand_t::make_regexp_lit_operand (lit_id);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_smallint_assignment (jsp_operand_t op, vm_idx_t uid)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SMALLINT);
-  value_operand = jsp_operand_t::make_smallint_operand (uid);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_undefined_assignment (jsp_operand_t op)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_UNDEFINED);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
-void
-dump_null_assignment (jsp_operand_t op)
-{
-  jsp_operand_t type_operand, value_operand;
-
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
-  value_operand = jsp_operand_t::make_simple_value_operand (ECMA_SIMPLE_VALUE_NULL);
-
-  dump_triple_address (VM_OP_ASSIGNMENT, op, type_operand, value_operand);
-}
-
 void
 dump_variable_assignment (jsp_operand_t res, jsp_operand_t var)
 {
   jsp_operand_t type_operand;
 
-  type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_VARIABLE);
+  if (var.is_string_lit_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_STRING);
+  }
+  else if (var.is_number_lit_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_NUMBER);
+  }
+  else if (var.is_regexp_lit_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_REGEXP);
+  }
+  else if (var.is_smallint_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SMALLINT);
+  }
+  else if (var.is_simple_value_operand ())
+  {
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_SIMPLE);
+  }
+  else
+  {
+    JERRY_ASSERT (var.is_identifier_operand ()
+                  || var.is_register_operand ()
+                  || var.is_this_operand ());
+
+    type_operand = jsp_operand_t::make_idx_const_operand (OPCODE_ARG_TYPE_VARIABLE);
+  }
 
   dump_triple_address (VM_OP_ASSIGNMENT, res, type_operand, var);
 }
