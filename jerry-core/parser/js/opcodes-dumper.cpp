@@ -26,7 +26,7 @@ static vm_idx_t jsp_reg_next;
  * Maximum identifier of a register, allocated for intermediate value storage
  *
  * See also:
- *          dumper_new_scope, dumper_finish_scope
+ *          dumper_save_reg_alloc_ctx, dumper_restore_reg_alloc_ctx
  */
 static vm_idx_t jsp_reg_max_for_temps;
 
@@ -596,8 +596,8 @@ dumper_new_statement (void)
 }
 
 void
-dumper_new_scope (vm_idx_t *out_saved_reg_next_p,
-                  vm_idx_t *out_saved_reg_max_for_temps_p)
+dumper_save_reg_alloc_ctx (vm_idx_t *out_saved_reg_next_p,
+                           vm_idx_t *out_saved_reg_max_for_temps_p)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
@@ -610,8 +610,8 @@ dumper_new_scope (vm_idx_t *out_saved_reg_next_p,
 }
 
 void
-dumper_finish_scope (vm_idx_t saved_reg_next,
-                     vm_idx_t saved_reg_max_for_temps)
+dumper_restore_reg_alloc_ctx (vm_idx_t saved_reg_next,
+                              vm_idx_t saved_reg_max_for_temps)
 {
   JERRY_ASSERT (jsp_reg_max_for_local_var == VM_IDX_EMPTY);
   JERRY_ASSERT (jsp_reg_max_for_args == VM_IDX_EMPTY);
@@ -1230,7 +1230,12 @@ dump_continue_iterations_check (vm_instr_counter_t pos,
  * @return position of dumped instruction
  */
 vm_instr_counter_t
-dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode */
+dump_simple_or_nested_jump_for_rewrite (bool is_nested, /**< flag, indicating whether nested (true)
+                                                         *   or simple (false) jump should be dumped */
+                                        bool is_conditional, /**< flag, indicating whether conditional (true)
+                                                              *   or unconditional jump should be dumped */
+                                        bool is_inverted_condition, /**< if is_conditional is set, this flag
+                                                                     *   indicates whether to invert the condition */
                                         jsp_operand_t cond, /**< condition (for conditional jumps),
                                                              *   empty operand - for non-conditional */
                                         vm_instr_counter_t next_jump_for_tgt_oc) /**< instr counter of next
@@ -1243,8 +1248,29 @@ dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode *
 
   vm_instr_counter_t ret = dumper_get_current_instr_counter ();
 
+  vm_op_t jmp_opcode;
+
+  if (is_nested)
+  {
+    jmp_opcode = VM_OP_JMP_BREAK_CONTINUE;
+  }
+  else if (is_conditional)
+  {
+    if (is_inverted_condition)
+    {
+      jmp_opcode = VM_OP_IS_FALSE_JMP_DOWN;
+    }
+    else
+    {
+      jmp_opcode = VM_OP_IS_TRUE_JMP_DOWN;
+    }
+  }
+  else
+  {
+    jmp_opcode = VM_OP_JMP_DOWN;
+  }
+
   if (jmp_opcode == VM_OP_JMP_DOWN
-      || jmp_opcode == VM_OP_JMP_UP
       || jmp_opcode == VM_OP_JMP_BREAK_CONTINUE)
   {
     JERRY_ASSERT (cond.is_empty_operand ());
@@ -1255,9 +1281,9 @@ dump_simple_or_nested_jump_for_rewrite (vm_op_t jmp_opcode, /**< a jump opcode *
   }
   else
   {
+    JERRY_ASSERT (!cond.is_empty_operand ());
+
     JERRY_ASSERT (jmp_opcode == VM_OP_IS_FALSE_JMP_DOWN
-                  || jmp_opcode == VM_OP_IS_TRUE_JMP_UP
-                  || jmp_opcode == VM_OP_IS_FALSE_JMP_UP
                   || jmp_opcode == VM_OP_IS_TRUE_JMP_DOWN);
 
     dump_triple_address (jmp_opcode,
@@ -1283,59 +1309,83 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
   vm_op_t jmp_opcode = (vm_op_t) jump_op_meta.op.op_idx;
 
   vm_idx_t id1, id2, id1_prev, id2_prev;
-  split_instr_counter ((vm_instr_counter_t) (target_oc - jump_oc), &id1, &id2);
+  if (target_oc < jump_oc)
+  {
+    split_instr_counter ((vm_instr_counter_t) (jump_oc - target_oc), &id1, &id2);
+  }
+  else
+  {
+    split_instr_counter ((vm_instr_counter_t) (target_oc - jump_oc), &id1, &id2);
+  }
 
   if (jmp_opcode == VM_OP_JMP_DOWN)
   {
-    id1_prev = jump_op_meta.op.data.jmp_down.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.jmp_down.oc_idx_2;
+    if (target_oc < jump_oc)
+    {
+      jump_op_meta.op.op_idx = VM_OP_JMP_UP;
 
-    jump_op_meta.op.data.jmp_down.oc_idx_1 = id1;
-    jump_op_meta.op.data.jmp_down.oc_idx_2 = id2;
-  }
-  else if (jmp_opcode == VM_OP_JMP_UP)
-  {
-    id1_prev = jump_op_meta.op.data.jmp_up.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.jmp_up.oc_idx_2;
+      id1_prev = jump_op_meta.op.data.jmp_up.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.jmp_up.oc_idx_2;
 
-    jump_op_meta.op.data.jmp_up.oc_idx_1 = id1;
-    jump_op_meta.op.data.jmp_up.oc_idx_2 = id2;
+      jump_op_meta.op.data.jmp_up.oc_idx_1 = id1;
+      jump_op_meta.op.data.jmp_up.oc_idx_2 = id2;
+    }
+    else
+    {
+      id1_prev = jump_op_meta.op.data.jmp_down.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.jmp_down.oc_idx_2;
+
+      jump_op_meta.op.data.jmp_down.oc_idx_1 = id1;
+      jump_op_meta.op.data.jmp_down.oc_idx_2 = id2;
+    }
   }
   else if (jmp_opcode == VM_OP_IS_TRUE_JMP_DOWN)
   {
-    id1_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_2;
+    if (target_oc < jump_oc)
+    {
+      jump_op_meta.op.op_idx = VM_OP_IS_TRUE_JMP_UP;
 
-    jump_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
-  }
-  else if (jmp_opcode == VM_OP_IS_TRUE_JMP_UP)
-  {
-    id1_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_2;
+      id1_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_true_jmp_up.oc_idx_2;
 
-    jump_op_meta.op.data.is_true_jmp_up.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_true_jmp_up.oc_idx_2 = id2;
+      jump_op_meta.op.data.is_true_jmp_up.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_true_jmp_up.oc_idx_2 = id2;
+    }
+    else
+    {
+      id1_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_true_jmp_down.oc_idx_2;
+
+      jump_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
+    }
   }
   else if (jmp_opcode == VM_OP_IS_FALSE_JMP_DOWN)
   {
-    id1_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_2;
+    if (target_oc < jump_oc)
+    {
+      jump_op_meta.op.op_idx = VM_OP_IS_FALSE_JMP_UP;
 
-    jump_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_false_jmp_down.oc_idx_2 = id2;
-  }
-  else if (jmp_opcode == VM_OP_IS_FALSE_JMP_UP)
-  {
-    id1_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_1;
-    id2_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_2;
+      id1_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_false_jmp_up.oc_idx_2;
 
-    jump_op_meta.op.data.is_false_jmp_up.oc_idx_1 = id1;
-    jump_op_meta.op.data.is_false_jmp_up.oc_idx_2 = id2;
+      jump_op_meta.op.data.is_false_jmp_up.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_false_jmp_up.oc_idx_2 = id2;
+    }
+    else
+    {
+      id1_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_1;
+      id2_prev = jump_op_meta.op.data.is_false_jmp_down.oc_idx_2;
+
+      jump_op_meta.op.data.is_false_jmp_down.oc_idx_1 = id1;
+      jump_op_meta.op.data.is_false_jmp_down.oc_idx_2 = id2;
+    }
   }
   else
   {
     JERRY_ASSERT (!is_generate_bytecode || (jmp_opcode == VM_OP_JMP_BREAK_CONTINUE));
+
+    JERRY_ASSERT (target_oc > jump_oc);
 
     id1_prev = jump_op_meta.op.data.jmp_break_continue.oc_idx_1;
     id2_prev = jump_op_meta.op.data.jmp_break_continue.oc_idx_2;
@@ -1348,71 +1398,6 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
 
   return vm_calc_instr_counter_from_idx_idx (id1_prev, id2_prev);
 } /* rewrite_simple_or_nested_jump_get_next */
-
-void
-start_dumping_case_clauses (void)
-{
-}
-
-vm_instr_counter_t
-dump_case_clause_check_for_rewrite (jsp_operand_t cond)
-{
-  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
-
-  dump_triple_address (VM_OP_IS_TRUE_JMP_DOWN,
-                       cond,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-
-  return jmp_oc;
-}
-
-vm_instr_counter_t
-dump_default_clause_check_for_rewrite (void)
-{
-  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
-
-  dump_double_address (VM_OP_JMP_DOWN,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-
-  return jmp_oc;
-}
-
-void
-rewrite_case_clause (vm_instr_counter_t jmp_oc)
-{
-  vm_idx_t id1, id2;
-  split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
-
-  op_meta jmp_op_meta = dumper_get_op_meta (jmp_oc);
-  dumper_assert_op_fields (REWRITE_CASE_CLAUSE, jmp_op_meta);
-
-  jmp_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
-  jmp_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
-
-  dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
-void
-rewrite_default_clause (vm_instr_counter_t jmp_oc)
-{
-  vm_idx_t id1, id2;
-  split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
-
-  op_meta jmp_op_meta = dumper_get_op_meta (jmp_oc);
-  dumper_assert_op_fields (REWRITE_DEFAULT_CLAUSE, jmp_op_meta);
-
-  jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
-  jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
-
-  dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
-void
-finish_dumping_case_clauses (void)
-{
-}
 
 /**
  * Dump template of 'with' instruction.

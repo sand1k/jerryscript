@@ -394,8 +394,8 @@ bool dumper_try_replace_identifier_name_with_reg (scopes_tree, op_meta *);
 void dumper_alloc_reg_for_unused_arg (void);
 
 void dumper_new_statement (void);
-void dumper_new_scope (vm_idx_t *, vm_idx_t *);
-void dumper_finish_scope (vm_idx_t, vm_idx_t);
+void dumper_save_reg_alloc_ctx (vm_idx_t *, vm_idx_t *);
+void dumper_restore_reg_alloc_ctx (vm_idx_t, vm_idx_t);
 vm_idx_t dumper_start_varg_code_sequence (void);
 void dumper_finish_varg_code_sequence (vm_idx_t);
 
@@ -431,16 +431,9 @@ vm_instr_counter_t dump_jump_to_end_for_rewrite (void);
 void rewrite_jump_to_end (vm_instr_counter_t);
 
 vm_instr_counter_t dumper_set_next_iteration_target (void);
-vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (vm_op_t, jsp_operand_t, vm_instr_counter_t);
+vm_instr_counter_t dump_simple_or_nested_jump_for_rewrite (bool, bool, bool, jsp_operand_t, vm_instr_counter_t);
 vm_instr_counter_t rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t, vm_instr_counter_t);
 void dump_continue_iterations_check (vm_instr_counter_t, jsp_operand_t);
-
-void start_dumping_case_clauses (void);
-vm_instr_counter_t dump_case_clause_check_for_rewrite (jsp_operand_t);
-vm_instr_counter_t dump_default_clause_check_for_rewrite (void);
-void rewrite_case_clause (vm_instr_counter_t);
-void rewrite_default_clause (vm_instr_counter_t);
-void finish_dumping_case_clauses (void);
 
 void dump_delete (jsp_operand_t, jsp_operand_t);
 void dump_delete_prop (jsp_operand_t, jsp_operand_t, jsp_operand_t);
