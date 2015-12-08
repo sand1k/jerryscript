@@ -577,14 +577,6 @@ void dumper_finish_varg_code_sequence (vm_idx_t);
 
 extern bool dumper_is_eval_literal (jsp_operand_t);
 
-void dump_array_hole_assignment (jsp_operand_t);
-void dump_boolean_assignment (jsp_operand_t, bool);
-void dump_string_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_number_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_regexp_assignment (jsp_operand_t, lit_cpointer_t);
-void dump_smallint_assignment (jsp_operand_t, vm_idx_t);
-void dump_undefined_assignment (jsp_operand_t);
-void dump_null_assignment (jsp_operand_t);
 void dump_variable_assignment (jsp_operand_t, jsp_operand_t);
 
 vm_instr_counter_t dump_varg_header_for_rewrite (varg_list_type, jsp_operand_t);
