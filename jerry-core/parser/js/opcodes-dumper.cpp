@@ -1399,61 +1399,6 @@ rewrite_simple_or_nested_jump_and_get_next (vm_instr_counter_t jump_oc, /**< pos
   return vm_calc_instr_counter_from_idx_idx (id1_prev, id2_prev);
 } /* rewrite_simple_or_nested_jump_get_next */
 
-vm_instr_counter_t
-dump_case_clause_check_for_rewrite (jsp_operand_t cond)
-{
-  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
-
-  dump_triple_address (VM_OP_IS_TRUE_JMP_DOWN,
-                       cond,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-
-  return jmp_oc;
-}
-
-vm_instr_counter_t
-dump_default_clause_check_for_rewrite (void)
-{
-  vm_instr_counter_t jmp_oc = dumper_get_current_instr_counter ();
-
-  dump_double_address (VM_OP_JMP_DOWN,
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_unknown_operand ());
-
-  return jmp_oc;
-}
-
-void
-rewrite_case_clause (vm_instr_counter_t jmp_oc)
-{
-  vm_idx_t id1, id2;
-  split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
-
-  op_meta jmp_op_meta = dumper_get_op_meta (jmp_oc);
-  dumper_assert_op_fields (REWRITE_CASE_CLAUSE, jmp_op_meta);
-
-  jmp_op_meta.op.data.is_true_jmp_down.oc_idx_1 = id1;
-  jmp_op_meta.op.data.is_true_jmp_down.oc_idx_2 = id2;
-
-  dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
-void
-rewrite_default_clause (vm_instr_counter_t jmp_oc)
-{
-  vm_idx_t id1, id2;
-  split_instr_counter (get_diff_from (jmp_oc), &id1, &id2);
-
-  op_meta jmp_op_meta = dumper_get_op_meta (jmp_oc);
-  dumper_assert_op_fields (REWRITE_DEFAULT_CLAUSE, jmp_op_meta);
-
-  jmp_op_meta.op.data.jmp_down.oc_idx_1 = id1;
-  jmp_op_meta.op.data.jmp_down.oc_idx_2 = id2;
-
-  dumper_rewrite_op_meta (jmp_oc, jmp_op_meta);
-}
-
 /**
  * Dump template of 'with' instruction.
  *
