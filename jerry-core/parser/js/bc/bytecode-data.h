@@ -62,7 +62,7 @@ bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
                       lit_id_hash_table *lit_id_hash_table_p,
                       vm_instr_t *bytecode_p,
                       vm_instr_counter_t instrs_count,
-                      lit_cpointer_t *func_decls_p,
+                      mem_cpointer_t *func_decls_p,
                       uint16_t func_decls_count);
 
 void bc_remove_bytecode_data (const bytecode_data_header_t *);

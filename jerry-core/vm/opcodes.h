@@ -246,7 +246,9 @@ typedef struct
 } vm_run_scope_t;
 
 vm_instr_counter_t vm_calc_instr_counter_from_idx_idx (const vm_idx_t, const vm_idx_t);
-vm_instr_counter_t vm_read_instr_counter_from_meta (opcode_meta_type, vm_frame_ctx_t *);
+vm_instr_counter_t vm_read_instr_counter_from_meta (opcode_meta_type,
+                                                    const bytecode_data_header_t *,
+                                                    vm_instr_counter_t);
 
 typedef struct vm_instr_t
 {

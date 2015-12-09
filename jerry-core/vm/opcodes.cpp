@@ -483,51 +483,26 @@ opfunc_var_decl (vm_instr_t instr, /**< instruction */
  * @return completion value
  *         returned value must be freed with ecma_free_completion_value.
  */
-static ecma_completion_value_t
-function_declaration (vm_frame_ctx_t *frame_ctx_p, /**< interpreter context */
-                      lit_cpointer_t function_name_lit_cp, /**< compressed pointer to literal with function name */
-                      ecma_collection_header_t *formal_params_collection_p) /** formal parameters collection */
-{
-  const bool is_configurable_bindings = frame_ctx_p->is_eval_code;
-
-  const vm_instr_counter_t function_code_end_oc = (vm_instr_counter_t) (
-    vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FUNCTION_END, frame_ctx_p) + frame_ctx_p->pos);
-  frame_ctx_p->pos++;
-
-  ecma_string_t *function_name_string_p = ecma_new_ecma_string_from_lit_cp (function_name_lit_cp);
-
-  ecma_completion_value_t ret_value = ecma_op_function_declaration (frame_ctx_p->lex_env_p,
-                                                                    function_name_string_p,
-                                                                    frame_ctx_p->bytecode_header_p,
-                                                                    frame_ctx_p->pos,
-                                                                    formal_params_collection_p,
-                                                                    frame_ctx_p->is_strict,
-                                                                    is_configurable_bindings);
-  ecma_deref_ecma_string (function_name_string_p);
-
-  frame_ctx_p->pos = function_code_end_oc;
-
-  return ret_value;
-} /* function_declaration */
-
-/**
- * 'Function declaration' opcode handler.
- *
- * @return completion value
- *         returned value must be freed with ecma_free_completion_value.
- */
 ecma_completion_value_t
-opfunc_func_decl_n (vm_instr_t instr, /**< instruction */
-                    vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
+vm_function_declaration (const bytecode_data_header_t *bytecode_header_p, /**< byte-code header */
+                         bool is_strict, /**< is function declared in strict mode code? */
+                         bool is_eval_code, /**< is function declared in eval code? */
+                         vm_instr_counter_t *in_out_instr_pos_p, /**< in-out: instruction position */
+                         ecma_object_t *lex_env_p) /**< lexical environment to use */
 {
-  const vm_idx_t function_name_idx = instr.data.func_decl_n.name_lit_idx;
-  const ecma_length_t params_number = instr.data.func_decl_n.arg_list;
+  vm_instr_t *function_instrs_p = bytecode_header_p->instrs_p;
+
+  vm_instr_counter_t instr_pos = *in_out_instr_pos_p;
+
+  vm_instr_t func_decl_instr = function_instrs_p[instr_pos];
+  JERRY_ASSERT (func_decl_instr.op_idx == VM_OP_FUNC_DECL_N);
+
+  const vm_idx_t function_name_idx = func_decl_instr.data.func_decl_n.name_lit_idx;
+  const ecma_length_t params_number = func_decl_instr.data.func_decl_n.arg_list;
 
   lit_cpointer_t function_name_lit_cp = bc_get_literal_cp_by_uid (function_name_idx,
-                                                                  frame_ctx_p->bytecode_header_p,
-                                                                  frame_ctx_p->pos);
-
-  frame_ctx_p->pos++;
+                                                                  bytecode_header_p,
+                                                                  instr_pos++);
 
   ecma_completion_value_t ret_value;
 
@@ -537,18 +512,62 @@ opfunc_func_decl_n (vm_instr_t instr, /**< instruction */
   {
     formal_params_collection_p = ecma_new_strings_collection (NULL, 0);
 
-    vm_fill_params_list (frame_ctx_p, params_number, formal_params_collection_p);
+    instr_pos = vm_fill_params_list (bytecode_header_p,
+                                     instr_pos,
+                                     params_number,
+                                     formal_params_collection_p);
   }
   else
   {
     formal_params_collection_p = NULL;
   }
 
-  ret_value = function_declaration (frame_ctx_p,
-                                    function_name_lit_cp,
-                                    formal_params_collection_p);
+  const vm_instr_counter_t function_code_end_oc = (vm_instr_counter_t) (
+    vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FUNCTION_END,
+                                     bytecode_header_p,
+                                     instr_pos) + instr_pos);
+  instr_pos++;
+
+  const bool is_configurable_bindings = is_eval_code;
+
+  ecma_string_t *function_name_string_p = ecma_new_ecma_string_from_lit_cp (function_name_lit_cp);
+
+  ret_value = ecma_op_function_declaration (lex_env_p,
+                                            function_name_string_p,
+                                            bytecode_header_p,
+                                            instr_pos,
+                                            formal_params_collection_p,
+                                            is_strict,
+                                            is_configurable_bindings);
+
+  ecma_deref_ecma_string (function_name_string_p);
+
+  *in_out_instr_pos_p = function_code_end_oc;
 
   return ret_value;
+} /* vm_function_declaration */
+
+/**
+ * 'Function declaration' opcode handler.
+ *
+ * @return completion value
+ *         returned value must be freed with ecma_free_completion_value.
+ */
+ecma_completion_value_t
+opfunc_func_decl_n (vm_instr_t instr __attr_unused___, /**< instruction */
+                    vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
+{
+  /*
+   * FIXME:
+   *       Remove after turning on separate dumping of functions that are declared in function expressions
+   */
+  return vm_function_declaration (frame_ctx_p->bytecode_header_p,
+                                  frame_ctx_p->is_strict,
+                                  frame_ctx_p->is_eval_code,
+                                  &frame_ctx_p->pos,
+                                  frame_ctx_p->lex_env_p);
+
+  JERRY_UNREACHABLE ();
 } /* opfunc_func_decl_n */
 
 /**
@@ -580,7 +599,10 @@ opfunc_func_expr_n (vm_instr_t instr, /**< instruction */
   {
     formal_params_collection_p = ecma_new_strings_collection (NULL, 0);
 
-    vm_fill_params_list (frame_ctx_p, params_number, formal_params_collection_p);
+    frame_ctx_p->pos = vm_fill_params_list (frame_ctx_p->bytecode_header_p,
+                                            frame_ctx_p->pos,
+                                            params_number,
+                                            formal_params_collection_p);
   }
   else
   {
@@ -588,7 +610,9 @@ opfunc_func_expr_n (vm_instr_t instr, /**< instruction */
   }
 
   function_code_end_oc = (vm_instr_counter_t) (vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FUNCTION_END,
-                                                                                frame_ctx_p) + frame_ctx_p->pos);
+                                                                                frame_ctx_p->bytecode_header_p,
+                                                                                frame_ctx_p->pos)
+                                               + frame_ctx_p->pos);
   frame_ctx_p->pos++;
 
   ecma_object_t *scope_p;
@@ -1751,14 +1775,15 @@ vm_calc_instr_counter_from_idx_idx (const vm_idx_t oc_idx_1, /**< first idx */
 } /* vm_calc_instr_counter_from_idx_idx */
 
 /**
- * Read instruction counter from current instruction,
+ * Read instruction counter from specified instruction,
  * that should be 'meta' instruction of specified type.
  */
 vm_instr_counter_t
 vm_read_instr_counter_from_meta (opcode_meta_type expected_type, /**< expected type of meta instruction */
-                                 vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
+                                 const bytecode_data_header_t *bytecode_header_p, /**< byte-code header */
+                                 vm_instr_counter_t instr_pos) /**< position of the instruction */
 {
-  vm_instr_t meta_opcode = vm_get_instr (frame_ctx_p->bytecode_header_p->instrs_p, frame_ctx_p->pos);
+  vm_instr_t meta_opcode = vm_get_instr (bytecode_header_p->instrs_p, instr_pos);
   JERRY_ASSERT (meta_opcode.data.meta.type == expected_type);
 
   const vm_idx_t data_1 = meta_opcode.data.meta.data_1;

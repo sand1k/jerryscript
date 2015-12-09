@@ -4911,7 +4911,7 @@ parser_parse_program (const jerry_api_char_t *source_p, /**< source code buffer 
 
     jsp_early_error_free ();
 
-    *out_bytecode_data_p = bc_merge_scopes_into_bytecode (dumper_get_scope (), parser_show_instrs);
+    *out_bytecode_data_p = bc_dump_scopes (dumper_get_scope (), parser_show_instrs);
 
     dumper_free ();
 

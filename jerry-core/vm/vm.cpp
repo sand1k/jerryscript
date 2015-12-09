@@ -26,6 +26,7 @@
 #include "vm.h"
 #include "vm-stack.h"
 #include "opcodes.h"
+#include "opcodes-ecma-support.h"
 
 /**
  * Top (current) interpreter context
@@ -605,57 +606,82 @@ vm_run_from_pos (const bytecode_data_header_t *header_p, /**< byte-code data hea
                                                               * - NULL - otherwise.
                                                               */
 {
-  ecma_completion_value_t completion;
+  ecma_completion_value_t completion = ecma_make_empty_completion_value ();
 
   const vm_instr_t *instrs_p = header_p->instrs_p;
   const vm_instr_t *curr = &instrs_p[start_pos];
   JERRY_ASSERT (curr->op_idx == VM_OP_REG_VAR_DECL);
 
-  const uint32_t tmp_regs_num = curr->data.reg_var_decl.tmp_regs_num;
-  const uint32_t local_var_regs_num = curr->data.reg_var_decl.local_var_regs_num;
-  const uint32_t arg_regs_num = curr->data.reg_var_decl.arg_regs_num;
+  mem_cpointer_t *func_decls_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_decls_cp);
+  for (uint16_t func_decl_index = 0;
+       func_decl_index < header_p->func_decls_count && ecma_is_completion_value_empty (completion);
+       func_decl_index++)
+  {
+    bytecode_data_header_t *func_bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
+                                                                            func_decls_p [func_decl_index]);
 
-  uint32_t regs_num = VM_SPECIAL_REGS_NUMBER + tmp_regs_num + local_var_regs_num + arg_regs_num;
+    vm_instr_counter_t instr_pos = 0;
 
-  MEM_DEFINE_LOCAL_ARRAY (regs, regs_num, ecma_value_t);
+    completion = vm_function_declaration (func_bc_header_p,
+                                          is_strict,
+                                          is_eval_code,
+                                          &instr_pos,
+                                          lex_env_p);
+    // JERRY_ASSERT (instr_pos == func_bc_header_p->instrs_count);
+  }
 
-  vm_frame_ctx_t frame_ctx;
-  frame_ctx.bytecode_header_p = header_p;
-  frame_ctx.pos = (vm_instr_counter_t) (start_pos + 1);
-  frame_ctx.lex_env_p = lex_env_p;
-  frame_ctx.is_strict = is_strict;
-  frame_ctx.is_eval_code = is_eval_code;
-  frame_ctx.is_call_in_direct_eval_form = false;
-  frame_ctx.tmp_num_p = ecma_alloc_number ();
+  if (!ecma_is_completion_value_empty (completion))
+  {
+    JERRY_ASSERT (ecma_is_completion_value_throw (completion));
+  }
+  else
+  {
+    const uint32_t tmp_regs_num = curr->data.reg_var_decl.tmp_regs_num;
+    const uint32_t local_var_regs_num = curr->data.reg_var_decl.local_var_regs_num;
+    const uint32_t arg_regs_num = curr->data.reg_var_decl.arg_regs_num;
 
-  vm_stack_add_frame (&frame_ctx.stack_frame, regs, regs_num, local_var_regs_num, arg_regs_num, arg_collection_p);
-  vm_stack_frame_set_reg_value (&frame_ctx.stack_frame,
-                                VM_REG_SPECIAL_THIS_BINDING,
-                                ecma_copy_value (this_binding_value, false));
+    uint32_t regs_num = VM_SPECIAL_REGS_NUMBER + tmp_regs_num + local_var_regs_num + arg_regs_num;
 
-  vm_frame_ctx_t *prev_context_p = vm_top_context_p;
-  vm_top_context_p = &frame_ctx;
+    MEM_DEFINE_LOCAL_ARRAY (regs, regs_num, ecma_value_t);
+
+    vm_frame_ctx_t frame_ctx;
+    frame_ctx.bytecode_header_p = header_p;
+    frame_ctx.pos = (vm_instr_counter_t) (start_pos + 1);
+    frame_ctx.lex_env_p = lex_env_p;
+    frame_ctx.is_strict = is_strict;
+    frame_ctx.is_eval_code = is_eval_code;
+    frame_ctx.is_call_in_direct_eval_form = false;
+    frame_ctx.tmp_num_p = ecma_alloc_number ();
+
+    vm_stack_add_frame (&frame_ctx.stack_frame, regs, regs_num, local_var_regs_num, arg_regs_num, arg_collection_p);
+    vm_stack_frame_set_reg_value (&frame_ctx.stack_frame,
+                                  VM_REG_SPECIAL_THIS_BINDING,
+                                  ecma_copy_value (this_binding_value, false));
+
+    vm_frame_ctx_t *prev_context_p = vm_top_context_p;
+    vm_top_context_p = &frame_ctx;
 
 #ifdef MEM_STATS
-  interp_mem_stats_context_enter (&frame_ctx, start_pos);
+    interp_mem_stats_context_enter (&frame_ctx, start_pos);
 #endif /* MEM_STATS */
 
-  completion = vm_loop (&frame_ctx, NULL);
+    completion = vm_loop (&frame_ctx, NULL);
 
-  JERRY_ASSERT (ecma_is_completion_value_throw (completion)
-                || ecma_is_completion_value_return (completion));
+    JERRY_ASSERT (ecma_is_completion_value_throw (completion)
+                  || ecma_is_completion_value_return (completion));
 
-  vm_top_context_p = prev_context_p;
+    vm_top_context_p = prev_context_p;
 
-  vm_stack_free_frame (&frame_ctx.stack_frame);
+    vm_stack_free_frame (&frame_ctx.stack_frame);
 
-  ecma_dealloc_number (frame_ctx.tmp_num_p);
+    ecma_dealloc_number (frame_ctx.tmp_num_p);
 
 #ifdef MEM_STATS
-  interp_mem_stats_context_exit (&frame_ctx, start_pos);
+    interp_mem_stats_context_exit (&frame_ctx, start_pos);
 #endif /* MEM_STATS */
 
-  MEM_FINALIZE_LOCAL_ARRAY (regs);
+    MEM_FINALIZE_LOCAL_ARRAY (regs);
+  }
 
   return completion;
 } /* vm_run_from_pos */
