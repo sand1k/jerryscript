@@ -630,9 +630,6 @@ void dump_throw (jsp_operand_t);
 
 void dump_variable_declaration (lit_cpointer_t);
 
-vm_instr_counter_t dump_scope_code_flags_for_rewrite (void);
-void rewrite_scope_code_flags (vm_instr_counter_t, opcode_scope_code_flags_t);
-
 vm_instr_counter_t dump_reg_var_decl_for_rewrite (void);
 void rewrite_reg_var_decl (vm_instr_counter_t);
 

@@ -856,13 +856,12 @@ typedef struct
 
     struct source_elements
     {
-      vm_instr_counter_t scope_code_flags_oc;
       vm_instr_counter_t reg_var_decl_oc;
 
       vm_idx_t saved_reg_next;
       vm_idx_t saved_reg_max_for_temps;
     } source_elements;
-    static_assert (sizeof (source_elements) == 6, "Please, update size if changed");
+    static_assert (sizeof (source_elements) == 4, "Please, update size if changed");
   } u;
   static_assert (sizeof (u) == 20, "Please, update size if changed");
 } jsp_state_t;
@@ -1783,9 +1782,8 @@ jsp_get_prop_name_after_dot (void)
  *
  * @return number of instructions removed from function's header
  */
-static opcode_scope_code_flags_t
-jsp_try_move_vars_to_regs (jsp_state_t *state_p,
-                           opcode_scope_code_flags_t scope_flags)
+static void
+jsp_try_move_vars_to_regs (jsp_state_t *state_p)
 {
   JERRY_ASSERT (state_p->state == JSP_STATE_SOURCE_ELEMENTS);
 
@@ -1876,10 +1874,10 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
 
       if (dumper_start_move_of_args_to_regs (args_num))
       {
-        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
+        fe_scope_tree->is_args_moved_to_regs = true;
 
         JERRY_ASSERT (linked_list_get_length (fe_scope_tree->var_decls) == 0);
-        scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
+        fe_scope_tree->is_no_lex_env = true;
 
         /* at this point all arguments can be moved to registers */
         if (header_opm.op.op_idx == VM_OP_FUNC_EXPR_N)
@@ -1960,15 +1958,12 @@ jsp_try_move_vars_to_regs (jsp_state_t *state_p,
 
             scopes_tree_remove_op_meta (fe_scope_tree, instr_pos);
 
-            state_p->u.source_elements.scope_code_flags_oc--;
             state_p->u.source_elements.reg_var_decl_oc--;
           }
         }
       }
     }
   }
-
-  return scope_flags;
 }
 #endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
@@ -2226,7 +2221,6 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
       dumper_save_reg_alloc_ctx (&state_p->u.source_elements.saved_reg_next,
                                  &state_p->u.source_elements.saved_reg_max_for_temps);
 
-      state_p->u.source_elements.scope_code_flags_oc = dump_scope_code_flags_for_rewrite ();
       state_p->u.source_elements.reg_var_decl_oc = dump_reg_var_decl_for_rewrite ();
 
       if (scope_type == SCOPE_TYPE_EVAL)
@@ -2245,29 +2239,10 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (token_is (end_token_type))
       {
-        opcode_scope_code_flags_t scope_flags = OPCODE_SCOPE_CODE_FLAGS__EMPTY;
-
-        scopes_tree fe_scope_tree = dumper_get_scope ();
-        if (fe_scope_tree->strict_mode)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_STRICT);
-        }
-
-        if (!fe_scope_tree->ref_arguments)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
-        }
-
-        if (!fe_scope_tree->ref_eval)
-        {
-          scope_flags = (opcode_scope_code_flags_t) (scope_flags | OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
-        }
-
 #ifdef CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER
-        scope_flags = jsp_try_move_vars_to_regs (state_p, scope_flags);
+        jsp_try_move_vars_to_regs (state_p);
 #endif /* CONFIG_PARSER_ENABLE_PARSE_TIME_BYTE_CODE_OPTIMIZER */
 
-        rewrite_scope_code_flags (state_p->u.source_elements.scope_code_flags_oc, scope_flags);
         rewrite_reg_var_decl (state_p->u.source_elements.reg_var_decl_oc);
 
         state_p->is_completed = true;

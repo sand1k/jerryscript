@@ -1774,7 +1774,6 @@ opfunc_meta (vm_instr_t instr, /**< instruction */
       return ecma_make_meta_completion_value ();
     }
 
-    case OPCODE_META_TYPE_SCOPE_CODE_FLAGS:
     case OPCODE_META_TYPE_UNDEFINED:
     case OPCODE_META_TYPE_CALL_SITE_INFO:
     case OPCODE_META_TYPE_FUNCTION_END:

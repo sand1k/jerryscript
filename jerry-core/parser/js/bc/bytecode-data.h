@@ -50,18 +50,18 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
   uint16_t func_scopes_count; /**< count of function scopes inside current scope */
 
   mem_cpointer_t next_header_cp; /**< pointer to next instructions data header */
+
+  uint8_t is_strict : 1; /**< code is strict mode code */
+  uint8_t is_ref_arguments_identifier : 1; /**< code doesn't reference 'arguments' identifier */
+  uint8_t is_ref_eval_identifier : 1; /**< code doesn't reference 'eval' identifier */
+  uint8_t is_args_moved_to_regs : 1; /**< the function's arguments are moved to registers,
+                                      *   so should be initialized in vm registers,
+                                      *   and not in lexical environment */
+  uint8_t is_no_lex_env : 1; /**< no lex. env. is necessary for the scope */
 } bytecode_data_header_t;
 
 
 bytecode_data_header_t * bc_get_first_bytecode_data_header ();
-
-void
-bc_add_bytecode_data (bytecode_data_header_t *,
-                      lit_id_hash_table *,
-                      vm_instr_t *,
-                      vm_instr_counter_t,
-                      mem_cpointer_t *,
-                      uint16_t);
 
 void bc_remove_bytecode_data (const bytecode_data_header_t *);
 

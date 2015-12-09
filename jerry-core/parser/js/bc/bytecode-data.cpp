@@ -25,13 +25,18 @@ bc_get_first_bytecode_data_header ()
   return first_bytecode_header_p;
 } /* bc_get_first_bytecode_header */
 
-void
+static void
 bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
                       lit_id_hash_table *lit_id_hash_table_p,
                       vm_instr_t *bytecode_p,
                       vm_instr_counter_t instrs_count,
                       mem_cpointer_t *func_scopes_p,
-                      uint16_t func_scopes_count)
+                      uint16_t func_scopes_count,
+                      bool is_strict,
+                      bool is_ref_arguments_identifier,
+                      bool is_ref_eval_identifier,
+                      bool is_arguments_moved_to_regs,
+                      bool is_no_lex_env)
 {
   MEM_CP_SET_POINTER (bc_header_p->lit_id_hash_cp, lit_id_hash_table_p);
   bc_header_p->instrs_p = bytecode_p;
@@ -39,6 +44,12 @@ bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
   MEM_CP_SET_POINTER (bc_header_p->func_scopes_cp, func_scopes_p);
   bc_header_p->func_scopes_count = func_scopes_count;
   MEM_CP_SET_POINTER (bc_header_p->next_header_cp, first_bytecode_header_p);
+
+  bc_header_p->is_strict = is_strict;
+  bc_header_p->is_ref_arguments_identifier = is_ref_arguments_identifier;
+  bc_header_p->is_ref_eval_identifier = is_ref_eval_identifier;
+  bc_header_p->is_args_moved_to_regs = is_arguments_moved_to_regs;
+  bc_header_p->is_no_lex_env = is_no_lex_env;
 
   first_bytecode_header_p = bc_header_p;
 } /* bc_add_bytecode */
@@ -133,7 +144,12 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
-  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, NULL, 0);
+  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, NULL, 0,
+                        scope_p->strict_mode,
+                        scope_p->ref_arguments,
+                        scope_p->ref_eval,
+                        scope_p->is_args_moved_to_regs,
+                        scope_p->is_no_lex_env);
 
   if (is_show_instrs)
   {
@@ -181,7 +197,12 @@ bc_dump_single_scope (scopes_tree scope_p,
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
-  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, func_scopes_p, func_scopes_count);
+  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, func_scopes_p, func_scopes_count,
+                        scope_p->strict_mode,
+                        scope_p->ref_arguments,
+                        scope_p->ref_eval,
+                        scope_p->is_args_moved_to_regs,
+                        scope_p->is_no_lex_env);
 
   if (is_show_instrs)
   {
@@ -403,7 +424,12 @@ bc_load_bytecode_with_idx_map (const uint8_t *bytecode_and_idx_map_p, /**< buffe
                           instrs_p,
                           (vm_instr_counter_t) instructions_number,
                           NULL,
-                          0);
+                          0,
+                          /* FIXME: scope_p->strict_mode */ false,
+                          /* FIXME: scope_p->ref_arguments */ false,
+                          /* FIXME: scope_p->ref_eval */ false,
+                          /* FIXME: scope_p->is_args_moved_to_regs */ false,
+                          /* FIXME: scope_p->is_no_lex_env */ false);
 
     return header_p;
   }

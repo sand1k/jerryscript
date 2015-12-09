@@ -397,12 +397,7 @@ vm_run_global (void)
   bool is_strict = false;
   vm_instr_counter_t start_pos = 0;
 
-  opcode_scope_code_flags_t scope_flags = vm_get_scope_flags (__program, start_pos++);
-
-  if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_STRICT)
-  {
-    is_strict = true;
-  }
+  is_strict = __program->is_strict;
 
   ecma_object_t *glob_obj_p = ecma_builtin_get (ECMA_BUILTIN_ID_GLOBAL);
   ecma_object_t *lex_env_p = ecma_get_global_environment ();
@@ -450,8 +445,8 @@ vm_run_eval (const bytecode_data_header_t *bytecode_data_p, /**< byte-code data 
              bool is_direct) /**< is eval called in direct mode? */
 {
   vm_instr_counter_t first_instr_index = 0u;
-  opcode_scope_code_flags_t scope_flags = vm_get_scope_flags (bytecode_data_p, first_instr_index++);
-  bool is_strict = ((scope_flags & OPCODE_SCOPE_CODE_FLAGS_STRICT) != 0);
+
+  bool is_strict = bytecode_data_p->is_strict;
 
   ecma_value_t this_binding;
   ecma_object_t *lex_env_p;
@@ -629,6 +624,7 @@ vm_run_from_pos (const bytecode_data_header_t *header_p, /**< byte-code data hea
                                             is_eval_code,
                                             &instr_pos,
                                             lex_env_p);
+
       JERRY_ASSERT (instr_pos == func_bc_header_p->instrs_count);
     }
   }
@@ -698,21 +694,6 @@ vm_get_instr (const vm_instr_t *instrs_p, /**< byte-code array */
 {
   return instrs_p[ counter ];
 } /* vm_get_instr */
-
-/**
- * Get scope code flags from instruction at specified position
- *
- * @return mask of scope code flags
- */
-opcode_scope_code_flags_t
-vm_get_scope_flags (const bytecode_data_header_t *bytecode_header_p, /**< byte-code data */
-                    vm_instr_counter_t counter) /**< instruction counter */
-{
-  vm_instr_t flags_instr = vm_get_instr (bytecode_header_p->instrs_p, counter);
-  JERRY_ASSERT (flags_instr.op_idx == VM_OP_META
-                && flags_instr.data.meta.type == OPCODE_META_TYPE_SCOPE_CODE_FLAGS);
-  return (opcode_scope_code_flags_t) flags_instr.data.meta.data_1;
-} /* vm_get_scope_flags */
 
 /**
  * Get arguments number, encoded in specified reg_var_decl instruction

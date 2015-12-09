@@ -853,7 +853,6 @@ dumper_assert_op_fields (rewrite_type_t rewrite_type,
   else if (rewrite_type == REWRITE_SCOPE_CODE_FLAGS)
   {
     JERRY_ASSERT (meta.op.op_idx == VM_OP_META);
-    JERRY_ASSERT (meta.op.data.meta.type == OPCODE_META_TYPE_SCOPE_CODE_FLAGS);
     JERRY_ASSERT (meta.op.data.meta.data_1 == VM_IDX_REWRITE_GENERAL_CASE);
     JERRY_ASSERT (meta.op.data.meta.data_2 == VM_IDX_EMPTY);
   }
@@ -1557,44 +1556,6 @@ dump_variable_declaration (lit_cpointer_t lit_id) /**< literal which holds varia
 
   scopes_tree_add_var_decl (current_scope_p, op);
 } /* dump_variable_declaration */
-
-/**
- * Dump template of 'meta' instruction for scope's code flags.
- *
- * Note:
- *      the instruction's flags field is written later (see also: rewrite_scope_code_flags).
- *
- * @return position of dumped instruction
- */
-vm_instr_counter_t
-dump_scope_code_flags_for_rewrite (void)
-{
-  vm_instr_counter_t oc = dumper_get_current_instr_counter ();
-
-  dump_triple_address (VM_OP_META,
-                       jsp_operand_t::make_idx_const_operand (OPCODE_META_TYPE_SCOPE_CODE_FLAGS),
-                       jsp_operand_t::make_unknown_operand (),
-                       jsp_operand_t::make_empty_operand ());
-
-  return oc;
-} /* dump_scope_code_flags_for_rewrite */
-
-/**
- * Write scope's code flags to specified 'meta' instruction template,
- * dumped earlier (see also: dump_scope_code_flags_for_rewrite).
- */
-void
-rewrite_scope_code_flags (vm_instr_counter_t scope_code_flags_oc, /**< position of instruction to rewrite */
-                          opcode_scope_code_flags_t scope_flags) /**< scope's code properties flags set */
-{
-  JERRY_ASSERT ((vm_idx_t) scope_flags == scope_flags);
-
-  op_meta opm = dumper_get_op_meta (scope_code_flags_oc);
-  dumper_assert_op_fields (REWRITE_SCOPE_CODE_FLAGS, opm);
-
-  opm.op.data.meta.data_1 = (vm_idx_t) scope_flags;
-  dumper_rewrite_op_meta (scope_code_flags_oc, opm);
-} /* rewrite_scope_code_flags */
 
 void
 dump_ret (void)
