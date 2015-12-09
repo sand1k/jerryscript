@@ -71,7 +71,6 @@ vm_instr_t bc_get_instr (const bytecode_data_header_t *,
 
 void bc_print_instrs (const bytecode_data_header_t *bytecode_data_p);
 
-const bytecode_data_header_t *bc_merge_scopes_into_bytecode (scopes_tree, bool);
 bytecode_data_header_t *bc_dump_scopes (scopes_tree, bool);
 
 void bc_finalize ();

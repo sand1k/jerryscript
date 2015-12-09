@@ -145,24 +145,6 @@ scopes_tree_remove_op_meta (scopes_tree tree, /**< scopes tree node */
   tree->instrs_count--;
 } /* scopes_tree_remove_op_meta */
 
-vm_instr_counter_t
-scopes_tree_count_instructions (scopes_tree t)
-{
-  assert_tree (t);
-  vm_instr_counter_t res = t->instrs_count;
-
-  if (t->t.children != null_list)
-  {
-    for (uint8_t i = 0; i < linked_list_get_length (t->t.children); i++)
-    {
-      res = (vm_instr_counter_t) (
-        res + scopes_tree_count_instructions (
-          *(scopes_tree *) linked_list_element (t->t.children, i)));
-    }
-  }
-  return res;
-}
-
 /**
  * Count instructions number in a scope
  */
@@ -621,60 +603,6 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
  * Since bytecode is divided into blocks and id of the block is a part of hash key, we shall divide bytecode
  *  into blocks and count unique literal indexes used in each block.
  *
- * @return total number of literals in scope
- */
-size_t
-scopes_tree_count_literals_in_blocks (scopes_tree tree) /**< scope */
-{
-  assert_tree (tree);
-  size_t result = 0;
-
-  seen_literals_in_block_free ();
-  next_uid = 0;
-  global_oc = 0;
-
-  assert_tree (tree);
-  vm_instr_counter_t instr_pos;
-  bool header = true;
-  for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_META && !header)
-    {
-      break;
-    }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
-    {
-      header = false;
-    }
-    result += count_new_literals_in_instr (om_p);
-  }
-
-
-  if (tree->t.children != null_list)
-  {
-    for (uint8_t child_id = 0; child_id < linked_list_get_length (tree->t.children); child_id++)
-    {
-      result += scopes_tree_count_literals_in_blocks (*(scopes_tree *) linked_list_element (tree->t.children, child_id));
-    }
-  }
-
-  for (; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
-    result += count_new_literals_in_instr (om_p);
-  }
-
-  return result;
-} /* scopes_tree_count_literals_in_blocks */
-
-/**
- * Count slots needed for a scope's hash table
- *
- * Before filling literal indexes 'hash' table we shall initiate it with number of neccesary literal indexes.
- * Since bytecode is divided into blocks and id of the block is a part of hash key, we shall divide bytecode
- *  into blocks and count unique literal indexes used in each block.
- *
  * @return total number of literals in a single scope
  */
 size_t
@@ -697,99 +625,6 @@ scopes_tree_count_literals_in_blocks_in_single_scope (scopes_tree tree) /**< sco
 
   return result;
 } /* scopes_tree_count_literals_in_blocks_in_single_scope */
-
-/*
- * This function performs functions hoisting.
- *
- *  Each scope consists of four parts:
- *  1) Header with 'use strict' marker and reg_var_decl opcode
- *  2) Variable declarations, dumped by the preparser
- *  3) Function declarations
- *  4) Computational code
- *
- *  Header and var_decls are dumped first,
- *  then we shall recursively dump function declaration,
- *  and finally, other instructions.
- *
- *  For each instructions block (size of block is defined in bytecode-data.h)
- *  literal indexes 'hash' table is filled.
- */
-static void
-merge_subscopes (scopes_tree tree, /**< scopes tree to merge */
-                 vm_instr_t *data_p, /**< instruction array, where the scopes are merged to */
-                 lit_id_hash_table *lit_ids_p) /**< literal indexes 'hash' table */
-{
-  assert_tree (tree);
-  JERRY_ASSERT (data_p);
-  vm_instr_counter_t instr_pos;
-  bool header = true;
-  for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_VAR_DECL
-        && om_p->op.op_idx != VM_OP_META && !header)
-    {
-      break;
-    }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
-    {
-      header = false;
-    }
-    data_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
-    global_oc++;
-  }
-
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (tree->var_decls);
-       var_decl_pos++)
-  {
-    data_p[global_oc] = generate_instr (tree->var_decls, var_decl_pos, lit_ids_p);
-    global_oc++;
-  }
-
-  if (tree->t.children != null_list)
-  {
-    for (uint8_t child_id = 0; child_id < linked_list_get_length (tree->t.children); child_id++)
-    {
-      merge_subscopes (*(scopes_tree *) linked_list_element (tree->t.children, child_id),
-                       data_p, lit_ids_p);
-    }
-  }
-
-  for (; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    data_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
-    global_oc++;
-  }
-} /* merge_subscopes */
-
-/* Postparser.
-   Init literal indexes 'hash' table.
-   Reorder function declarations.
-   Rewrite instructions' temporary uids with their keys in literal indexes 'hash' table. */
-vm_instr_t *
-scopes_tree_raw_data (scopes_tree tree, /**< scopes tree to convert to byte-code array */
-                      uint8_t *buffer_p, /**< buffer for byte-code array and literal identifiers hash table */
-                      size_t instructions_array_size, /**< size of space for byte-code array */
-                      lit_id_hash_table *lit_ids) /**< literal identifiers hash table */
-{
-  JERRY_ASSERT (lit_ids);
-  assert_tree (tree);
-  seen_literals_in_block_free ();
-  next_uid = 0;
-  global_oc = 0;
-
-  /* Dump bytecode and fill literal indexes 'hash' table. */
-  JERRY_ASSERT (instructions_array_size >= (size_t) (scopes_tree_count_instructions (tree)) * sizeof (vm_instr_t));
-
-  vm_instr_t *instrs = (vm_instr_t *) buffer_p;
-  memset (instrs, 0, instructions_array_size);
-
-  merge_subscopes (tree, instrs, lit_ids);
-  seen_literals_in_block_free ();
-
-  return instrs;
-} /* scopes_tree_raw_data */
 
 /**
  * Fill variable declaration list of bytecode header
@@ -1004,56 +839,4 @@ scopes_tree_free (scopes_tree tree)
 
   jsp_mm_free (tree);
 }
-
-/**
- * Dump scope to current scope
- *
- * NOTE:
- *   This function is used for processing of function expressions as they should not be hoisted.
- *   After parsing a function expression, it is immediately dumped to current scope via call of this function.
- */
-void
-scopes_tree_merge_subscope (scopes_tree parent_tree_p,
-                            scopes_tree child_scope_p) /**< scope to dump */
-{
-  JERRY_ASSERT (child_scope_p != NULL);
-  vm_instr_counter_t instr_pos;
-  bool header = true;
-  for (instr_pos = 0; instr_pos < child_scope_p->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_VAR_DECL
-        && om_p->op.op_idx != VM_OP_META && !header)
-    {
-      break;
-    }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
-    {
-      header = false;
-    }
-    scopes_tree_add_op_meta (parent_tree_p, *om_p);
-  }
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (child_scope_p->var_decls);
-       var_decl_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->var_decls, var_decl_pos);
-    scopes_tree_add_op_meta (parent_tree_p, *om_p);
-  }
-
-  if (child_scope_p->t.children != null_list)
-  {
-    for (uint8_t child_id = 0; child_id < linked_list_get_length (child_scope_p->t.children); child_id++)
-    {
-      scopes_tree_merge_subscope (parent_tree_p,
-                                  *(scopes_tree *) linked_list_element (child_scope_p->t.children, child_id));
-    }
-  }
-
-  for (; instr_pos < child_scope_p->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = (op_meta *) linked_list_element (child_scope_p->instrs, instr_pos);
-    scopes_tree_add_op_meta (parent_tree_p, *om_p);
-  }
-} /* scopes_tree_merge_subscope */
 

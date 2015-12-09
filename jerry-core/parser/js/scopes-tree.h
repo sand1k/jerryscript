@@ -94,12 +94,9 @@ void scopes_tree_set_instrs_num (scopes_tree, vm_instr_counter_t);
 op_meta scopes_tree_op_meta (scopes_tree, vm_instr_counter_t);
 op_meta scopes_tree_var_decl (scopes_tree, vm_instr_counter_t);
 void scopes_tree_remove_op_meta (scopes_tree tree, vm_instr_counter_t oc);
-size_t scopes_tree_count_literals_in_blocks (scopes_tree);
 size_t scopes_tree_count_literals_in_blocks_in_single_scope (scopes_tree);
-vm_instr_counter_t scopes_tree_count_instructions (scopes_tree);
 vm_instr_counter_t scopes_tree_count_instructions_in_single_scope (scopes_tree t);
 bool scopes_tree_variable_declaration_exists (scopes_tree, lit_cpointer_t);
-vm_instr_t *scopes_tree_raw_data (scopes_tree, uint8_t *, size_t, lit_id_hash_table *);
 void scopes_tree_dump_var_decls (scopes_tree, lit_cpointer_t *);
 vm_instr_t *scopes_tree_dump_single_scope (scopes_tree, uint8_t *, size_t, lit_id_hash_table *);
 void scopes_tree_set_strict_mode (scopes_tree, bool);
@@ -110,5 +107,4 @@ void scopes_tree_set_contains_try (scopes_tree);
 void scopes_tree_set_contains_delete (scopes_tree);
 void scopes_tree_set_contains_functions (scopes_tree);
 bool scopes_tree_strict_mode (scopes_tree);
-void scopes_tree_merge_subscope (scopes_tree, scopes_tree);
 #endif /* SCOPES_TREE_H */
