@@ -416,6 +416,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
       break;
     }
     case VM_OP_FUNC_DECL_N:
+    case VM_OP_FUNC_EXPR_REF:
     case VM_OP_ARRAY_DECL:
     case VM_OP_OBJ_DECL:
     case VM_OP_WITH:
@@ -557,6 +558,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
       break;
     }
     case VM_OP_FUNC_DECL_N:
+    case VM_OP_FUNC_EXPR_REF:
     case VM_OP_ARRAY_DECL:
     case VM_OP_OBJ_DECL:
     case VM_OP_WITH:
