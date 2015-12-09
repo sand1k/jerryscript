@@ -59,6 +59,11 @@ typedef enum
 typedef struct
 {
   tree_header t; /**< header */
+
+  hash_table seen_literals_in_block; /**< hash table for mapping uid -> lit_id */
+  uint16_t hash_entries_count; /**< number of entries in literals hash table */
+  vm_idx_t next_uid;
+
   linked_list instrs; /**< instructions */
   vm_instr_counter_t instrs_count; /**< count of instructions */
   linked_list var_decls; /**< instructions for variable declarations */

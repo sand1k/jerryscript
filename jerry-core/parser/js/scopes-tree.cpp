@@ -19,20 +19,21 @@
 
 #define HASH_SIZE 128
 
-static hash_table seen_literals_in_block = null_hash;
-static vm_instr_counter_t global_oc;
-static vm_idx_t next_uid;
+static vm_idx_t
+count_new_literals_in_instr (scopes_tree scope_p,
+                             vm_instr_counter_t instr_pos,
+                             op_meta *om_p); /**< instruction */
 
 /**
  * Free hash table of seen literals in block
  */
 static void
-seen_literals_in_block_free ()
+seen_literals_in_block_free (scopes_tree scope_p)
 {
-  if (seen_literals_in_block != null_hash)
+  if (scope_p->seen_literals_in_block != null_hash)
   {
-    hash_table_free (seen_literals_in_block);
-    seen_literals_in_block = null_hash;
+    hash_table_free (scope_p->seen_literals_in_block);
+    scope_p->seen_literals_in_block = null_hash;
   }
 } /* seen_literals_in_block */
 
@@ -79,7 +80,10 @@ void
 scopes_tree_add_op_meta (scopes_tree tree, op_meta op)
 {
   assert_tree (tree);
-  linked_list_set_element (tree->instrs, tree->instrs_count++, &op);
+  linked_list_set_element (tree->instrs, tree->instrs_count, &op);
+  tree->hash_entries_count = (uint16_t) (tree->hash_entries_count
+                                         + count_new_literals_in_instr (tree, tree->instrs_count, &op));
+  tree->instrs_count++;
 }
 
 /**
@@ -191,13 +195,17 @@ lit_id_hash (void * lit_id)
 }
 
 static void
-start_new_block_if_necessary (void)
+start_new_block_if_necessary (scopes_tree scope_p,
+                              vm_instr_counter_t instr_pos)
 {
-  if (global_oc % BLOCK_SIZE == 0)
+  if (instr_pos % BLOCK_SIZE == 0)
   {
-    next_uid = 0;
-    seen_literals_in_block_free ();
-    seen_literals_in_block = hash_table_init (sizeof (lit_cpointer_t), sizeof (vm_idx_t), HASH_SIZE, lit_id_hash);
+    scope_p->next_uid = 0;
+    seen_literals_in_block_free (scope_p);
+    scope_p->seen_literals_in_block = hash_table_init (sizeof (lit_cpointer_t),
+                                                       sizeof (vm_idx_t),
+                                                       HASH_SIZE,
+                                                       lit_id_hash);
   }
 }
 
@@ -228,7 +236,11 @@ is_possible_literal (uint16_t mask, uint8_t index)
 }
 
 static void
-change_uid (op_meta *om, lit_id_hash_table *lit_ids, uint16_t mask)
+change_uid (scopes_tree scope_p,
+            vm_instr_counter_t instr_pos,
+            op_meta *om,
+            lit_id_hash_table *lit_ids,
+            uint16_t mask)
 {
   for (uint8_t i = 0; i < 3; i++)
   {
@@ -238,15 +250,15 @@ change_uid (op_meta *om, lit_id_hash_table *lit_ids, uint16_t mask)
       {
         JERRY_ASSERT (om->lit_id[i].packed_value != MEM_CP_NULL);
         lit_cpointer_t lit_id = om->lit_id[i];
-        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
+        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (scope_p->seen_literals_in_block, &lit_id);
         if (uid == NULL)
         {
-          hash_table_insert (seen_literals_in_block, &lit_id, &next_uid);
-          lit_id_hash_table_insert (lit_ids, next_uid, global_oc, lit_id);
-          uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
+          hash_table_insert (scope_p->seen_literals_in_block, &lit_id, &scope_p->next_uid);
+          lit_id_hash_table_insert (lit_ids, scope_p->next_uid, instr_pos, lit_id);
+          uid = (vm_idx_t *) hash_table_lookup (scope_p->seen_literals_in_block, &lit_id);
           JERRY_ASSERT (uid != NULL);
-          JERRY_ASSERT (*uid == next_uid);
-          next_uid++;
+          JERRY_ASSERT (*uid == scope_p->next_uid);
+          scope_p->next_uid++;
         }
         set_uid (om, i, *uid);
       }
@@ -263,7 +275,7 @@ change_uid (op_meta *om, lit_id_hash_table *lit_ids, uint16_t mask)
 }
 
 static void
-insert_uids_to_lit_id_map (op_meta *om, uint16_t mask)
+insert_uids_to_lit_id_map (scopes_tree scope_p, op_meta *om, uint16_t mask)
 {
   for (uint8_t i = 0; i < 3; i++)
   {
@@ -273,14 +285,14 @@ insert_uids_to_lit_id_map (op_meta *om, uint16_t mask)
       {
         JERRY_ASSERT (om->lit_id[i].packed_value != MEM_CP_NULL);
         lit_cpointer_t lit_id = om->lit_id[i];
-        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
+        vm_idx_t *uid = (vm_idx_t *) hash_table_lookup (scope_p->seen_literals_in_block, &lit_id);
         if (uid == NULL)
         {
-          hash_table_insert (seen_literals_in_block, &lit_id, &next_uid);
-          uid = (vm_idx_t *) hash_table_lookup (seen_literals_in_block, &lit_id);
+          hash_table_insert (scope_p->seen_literals_in_block, &lit_id, &scope_p->next_uid);
+          uid = (vm_idx_t *) hash_table_lookup (scope_p->seen_literals_in_block, &lit_id);
           JERRY_ASSERT (uid != NULL);
-          JERRY_ASSERT (*uid == next_uid);
-          next_uid++;
+          JERRY_ASSERT (*uid == scope_p->next_uid);
+          scope_p->next_uid++;
         }
       }
       else
@@ -313,12 +325,12 @@ extract_op_meta (linked_list instr_list, /**< instruction list */
  * @return generated instruction
  */
 static vm_instr_t
-generate_instr (linked_list instr_list, /**< instruction list */
+generate_instr (scopes_tree scope_p, /**< scope */
                 vm_instr_counter_t instr_pos, /**< position where to generate an instruction */
                 lit_id_hash_table *lit_ids) /**< hash table binding operand identifiers and literals */
 {
-  start_new_block_if_necessary ();
-  op_meta *om_p = extract_op_meta (instr_list, instr_pos);
+  start_new_block_if_necessary (scope_p, instr_pos);
+  op_meta *om_p = extract_op_meta (scope_p->instrs, instr_pos);
   /* Now we should change uids of instructions.
      Since different instructions has different literals/tmps in different places,
      we should change only them.
@@ -352,7 +364,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
     case VM_OP_MULTIPLICATION:
     case VM_OP_REMAINDER:
     {
-      change_uid (om_p, lit_ids, 0x111);
+      change_uid (scope_p, instr_pos, om_p, lit_ids, 0x111);
       break;
     }
     case VM_OP_CALL_N:
@@ -369,7 +381,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
     case VM_OP_UNARY_PLUS:
     case VM_OP_UNARY_MINUS:
     {
-      change_uid (om_p, lit_ids, 0x110);
+      change_uid (scope_p, instr_pos, om_p, lit_ids, 0x110);
       break;
     }
     case VM_OP_ASSIGNMENT:
@@ -380,7 +392,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
         case OPCODE_ARG_TYPE_SMALLINT:
         case OPCODE_ARG_TYPE_SMALLINT_NEGATE:
         {
-          change_uid (om_p, lit_ids, 0x100);
+          change_uid (scope_p, instr_pos, om_p, lit_ids, 0x100);
           break;
         }
         case OPCODE_ARG_TYPE_NUMBER:
@@ -389,7 +401,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
         case OPCODE_ARG_TYPE_STRING:
         case OPCODE_ARG_TYPE_VARIABLE:
         {
-          change_uid (om_p, lit_ids, 0x101);
+          change_uid (scope_p, instr_pos, om_p, lit_ids, 0x101);
           break;
         }
       }
@@ -409,7 +421,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
     case VM_OP_VAR_DECL:
     case VM_OP_RETVAL:
     {
-      change_uid (om_p, lit_ids, 0x100);
+      change_uid (scope_p, instr_pos, om_p, lit_ids, 0x100);
       break;
     }
     case VM_OP_RET:
@@ -418,7 +430,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
     case VM_OP_JMP_DOWN:
     case VM_OP_REG_VAR_DECL:
     {
-      change_uid (om_p, lit_ids, 0x000);
+      change_uid (scope_p, instr_pos, om_p, lit_ids, 0x000);
       break;
     }
     case VM_OP_META:
@@ -429,13 +441,13 @@ generate_instr (linked_list instr_list, /**< instruction list */
         case OPCODE_META_TYPE_VARG_PROP_GETTER:
         case OPCODE_META_TYPE_VARG_PROP_SETTER:
         {
-          change_uid (om_p, lit_ids, 0x011);
+          change_uid (scope_p, instr_pos, om_p, lit_ids, 0x011);
           break;
         }
         case OPCODE_META_TYPE_VARG:
         case OPCODE_META_TYPE_CATCH_EXCEPTION_IDENTIFIER:
         {
-          change_uid (om_p, lit_ids, 0x010);
+          change_uid (scope_p, instr_pos, om_p, lit_ids, 0x010);
           break;
         }
         case OPCODE_META_TYPE_UNDEFINED:
@@ -446,7 +458,7 @@ generate_instr (linked_list instr_list, /**< instruction list */
         case OPCODE_META_TYPE_END_TRY_CATCH_FINALLY:
         case OPCODE_META_TYPE_CALL_SITE_INFO:
         {
-          change_uid (om_p, lit_ids, 0x000);
+          change_uid (scope_p, instr_pos, om_p, lit_ids, 0x000);
           break;
         }
       }
@@ -462,10 +474,12 @@ generate_instr (linked_list instr_list, /**< instruction list */
  * @return number of new literals
  */
 static vm_idx_t
-count_new_literals_in_instr (op_meta *om_p) /**< instruction */
+count_new_literals_in_instr (scopes_tree scope_p,
+                             vm_instr_counter_t instr_pos, /**< position of instruction */
+                             op_meta *om_p) /**< instruction */
 {
-  start_new_block_if_necessary ();
-  vm_idx_t current_uid = next_uid;
+  start_new_block_if_necessary (scope_p, instr_pos);
+  vm_idx_t current_uid = scope_p->next_uid;
   switch (om_p->op.op_idx)
   {
     case VM_OP_PROP_GETTER:
@@ -493,7 +507,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
     case VM_OP_MULTIPLICATION:
     case VM_OP_REMAINDER:
     {
-      insert_uids_to_lit_id_map (om_p, 0x111);
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x111);
       break;
     }
     case VM_OP_CALL_N:
@@ -510,7 +524,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
     case VM_OP_UNARY_PLUS:
     case VM_OP_UNARY_MINUS:
     {
-      insert_uids_to_lit_id_map (om_p, 0x110);
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x110);
       break;
     }
     case VM_OP_ASSIGNMENT:
@@ -521,7 +535,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
         case OPCODE_ARG_TYPE_SMALLINT:
         case OPCODE_ARG_TYPE_SMALLINT_NEGATE:
         {
-          insert_uids_to_lit_id_map (om_p, 0x100);
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x100);
           break;
         }
         case OPCODE_ARG_TYPE_NUMBER:
@@ -530,7 +544,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
         case OPCODE_ARG_TYPE_STRING:
         case OPCODE_ARG_TYPE_VARIABLE:
         {
-          insert_uids_to_lit_id_map (om_p, 0x101);
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x101);
           break;
         }
       }
@@ -549,7 +563,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
     case VM_OP_VAR_DECL:
     case VM_OP_RETVAL:
     {
-      insert_uids_to_lit_id_map (om_p, 0x100);
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x100);
       break;
     }
     case VM_OP_RET:
@@ -558,7 +572,7 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
     case VM_OP_JMP_DOWN:
     case VM_OP_REG_VAR_DECL:
     {
-      insert_uids_to_lit_id_map (om_p, 0x000);
+      insert_uids_to_lit_id_map (scope_p, om_p, 0x000);
       break;
     }
     case VM_OP_META:
@@ -569,13 +583,13 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
         case OPCODE_META_TYPE_VARG_PROP_GETTER:
         case OPCODE_META_TYPE_VARG_PROP_SETTER:
         {
-          insert_uids_to_lit_id_map (om_p, 0x011);
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x011);
           break;
         }
         case OPCODE_META_TYPE_VARG:
         case OPCODE_META_TYPE_CATCH_EXCEPTION_IDENTIFIER:
         {
-          insert_uids_to_lit_id_map (om_p, 0x010);
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x010);
           break;
         }
         case OPCODE_META_TYPE_UNDEFINED:
@@ -586,14 +600,15 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
         case OPCODE_META_TYPE_END_TRY_CATCH_FINALLY:
         case OPCODE_META_TYPE_CALL_SITE_INFO:
         {
-          insert_uids_to_lit_id_map (om_p, 0x000);
+          insert_uids_to_lit_id_map (scope_p, om_p, 0x000);
           break;
         }
       }
       break;
     }
   }
-  return (vm_idx_t) (next_uid - current_uid);
+
+  return (vm_idx_t) (scope_p->next_uid - current_uid);
 } /* count_new_literals_in_instr */
 
 /**
@@ -611,17 +626,19 @@ scopes_tree_count_literals_in_blocks_in_single_scope (scopes_tree tree) /**< sco
   assert_tree (tree);
   size_t result = 0;
 
-  seen_literals_in_block_free ();
-  next_uid = 0;
-  global_oc = 0;
+  seen_literals_in_block_free (tree);
+  tree->next_uid = 0;
 
   assert_tree (tree);
   vm_instr_counter_t instr_pos;
   for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
   {
     op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
-    result += count_new_literals_in_instr (om_p);
+    result += count_new_literals_in_instr (tree, instr_pos, om_p);
   }
+
+  // jsp_try_move_vars_to_regs breaks this check
+  // JERRY_ASSERT (result == tree->hash_entries_count);
 
   return result;
 } /* scopes_tree_count_literals_in_blocks_in_single_scope */
@@ -657,9 +674,8 @@ scopes_tree_dump_single_scope (scopes_tree tree, /**< scopes tree to convert to 
   JERRY_ASSERT (data_p);
   JERRY_ASSERT (lit_ids_p);
   assert_tree (tree);
-  seen_literals_in_block_free ();
-  next_uid = 0;
-  global_oc = 0;
+  seen_literals_in_block_free (tree);
+  tree->next_uid = 0;
 
   /* Dump bytecode and fill literal indexes 'hash' table. */
   JERRY_ASSERT (instructions_array_size >= (size_t) (scopes_tree_count_instructions_in_single_scope (tree))
@@ -671,11 +687,10 @@ scopes_tree_dump_single_scope (scopes_tree tree, /**< scopes tree to convert to 
   vm_instr_counter_t instr_pos;
   for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
   {
-    instrs_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
-    global_oc++;
+    instrs_p[instr_pos] = generate_instr (tree, instr_pos, lit_ids_p);
   }
 
-  seen_literals_in_block_free ();
+  seen_literals_in_block_free (tree);
 
   return instrs_p;
 } /* scopes_tree_dump_single_scope */
@@ -783,6 +798,11 @@ scopes_tree_init (scopes_tree parent, /**< parent scope */
 
     JERRY_ASSERT (*(scopes_tree *) linked_list_element (parent->t.children, new_index) == tree);
   }
+
+  tree->hash_entries_count = 0;
+  tree->seen_literals_in_block = null_hash;
+  tree->next_uid = 0;
+
   tree->instrs_count = 0;
   tree->type = type;
   tree->strict_mode = false;

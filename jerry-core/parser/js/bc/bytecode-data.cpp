@@ -123,7 +123,7 @@ static bytecode_data_header_t *
 bc_dump_single_scope (scopes_tree scope_p,
                       bool is_show_instrs)
 {
-  const size_t entries_count = scopes_tree_count_literals_in_blocks_in_single_scope (scope_p);
+  const size_t entries_count = scope_p->hash_entries_count;
   const vm_instr_counter_t instrs_count = scopes_tree_count_instructions_in_single_scope (scope_p);
   const size_t blocks_count = JERRY_ALIGNUP (instrs_count, BLOCK_SIZE) / BLOCK_SIZE;
   const uint16_t func_scopes_count = scope_p->t.children ? linked_list_get_length (scope_p->t.children) : 0;
