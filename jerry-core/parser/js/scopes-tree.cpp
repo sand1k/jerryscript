@@ -149,7 +149,7 @@ vm_instr_counter_t
 scopes_tree_count_instructions (scopes_tree t)
 {
   assert_tree (t);
-  vm_instr_counter_t res = (vm_instr_counter_t) (t->instrs_count + linked_list_get_length (t->var_decls));
+  vm_instr_counter_t res = t->instrs_count;
 
   if (t->t.children != null_list)
   {
@@ -170,9 +170,7 @@ vm_instr_counter_t
 scopes_tree_count_instructions_in_single_scope (scopes_tree t) /**< scopes tree node */
 {
   assert_tree (t);
-  vm_instr_counter_t res = (vm_instr_counter_t) (t->instrs_count + linked_list_get_length (t->var_decls));
-
-  return res;
+  return t->instrs_count;
 } /* scopes_tree_count_instructions_in_single_scope */
 
 /**
@@ -652,13 +650,6 @@ scopes_tree_count_literals_in_blocks (scopes_tree tree) /**< scope */
     result += count_new_literals_in_instr (om_p);
   }
 
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (tree->var_decls);
-       var_decl_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->var_decls, var_decl_pos);
-    result += count_new_literals_in_instr (om_p);
-  }
 
   if (tree->t.children != null_list)
   {
@@ -698,30 +689,7 @@ scopes_tree_count_literals_in_blocks_in_single_scope (scopes_tree tree) /**< sco
 
   assert_tree (tree);
   vm_instr_counter_t instr_pos;
-  bool header = true;
   for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_META && !header)
-    {
-      break;
-    }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
-    {
-      header = false;
-    }
-    result += count_new_literals_in_instr (om_p);
-  }
-
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (tree->var_decls);
-       var_decl_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->var_decls, var_decl_pos);
-    result += count_new_literals_in_instr (om_p);
-  }
-
-  for (; instr_pos < tree->instrs_count; instr_pos++)
   {
     op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
     result += count_new_literals_in_instr (om_p);
@@ -824,6 +792,23 @@ scopes_tree_raw_data (scopes_tree tree, /**< scopes tree to convert to byte-code
 } /* scopes_tree_raw_data */
 
 /**
+ * Fill variable declaration list of bytecode header
+ */
+void
+scopes_tree_dump_var_decls (scopes_tree scope_p, /**< scopes tree */
+                            lit_cpointer_t *var_decls_p) /**< pointer to bytecode header's declarations table,
+                                                          *   where variables' lit_cp's should be stored */
+{
+  for (uint32_t i = 0; i < scopes_tree_var_decls_num (scope_p); ++i)
+  {
+     op_meta var_decl_op_meta = *(op_meta *) linked_list_element (scope_p->var_decls, i);
+     var_decls_p[i] = var_decl_op_meta.lit_id[0];
+  }
+
+  scopes_tree_var_decls_num (scope_p);
+} /* scopes_tree_dump_var_decls */
+
+/**
  * Dump instruction of a single scope.
  * Init literal indexes 'hash' table.
  * Rewrite instructions' temporary uids with their keys in literal indexes 'hash' table.
@@ -834,6 +819,7 @@ scopes_tree_dump_single_scope (scopes_tree tree, /**< scopes tree to convert to 
                                size_t instructions_array_size, /**< size of space for byte-code array */
                                lit_id_hash_table *lit_ids_p) /**< literal identifiers hash table */
 {
+  JERRY_ASSERT (data_p);
   JERRY_ASSERT (lit_ids_p);
   assert_tree (tree);
   seen_literals_in_block_free ();
@@ -847,34 +833,8 @@ scopes_tree_dump_single_scope (scopes_tree tree, /**< scopes tree to convert to 
   vm_instr_t *instrs_p = (vm_instr_t *) data_p;
   memset (instrs_p, 0, instructions_array_size);
 
-  JERRY_ASSERT (data_p);
   vm_instr_counter_t instr_pos;
-  bool header = true;
   for (instr_pos = 0; instr_pos < tree->instrs_count; instr_pos++)
-  {
-    op_meta *om_p = extract_op_meta (tree->instrs, instr_pos);
-    if (om_p->op.op_idx != VM_OP_VAR_DECL
-        && om_p->op.op_idx != VM_OP_META && !header)
-    {
-      break;
-    }
-    if (om_p->op.op_idx == VM_OP_REG_VAR_DECL)
-    {
-      header = false;
-    }
-    instrs_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
-    global_oc++;
-  }
-
-  for (vm_instr_counter_t var_decl_pos = 0;
-       var_decl_pos < linked_list_get_length (tree->var_decls);
-       var_decl_pos++)
-  {
-    instrs_p[global_oc] = generate_instr (tree->var_decls, var_decl_pos, lit_ids_p);
-    global_oc++;
-  }
-
-  for (; instr_pos < tree->instrs_count; instr_pos++)
   {
     instrs_p[global_oc] = generate_instr (tree->instrs, instr_pos, lit_ids_p);
     global_oc++;

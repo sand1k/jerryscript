@@ -46,8 +46,9 @@ typedef struct __attribute__ ((aligned (MEM_ALIGNMENT))) bytecode_data_header_t
   mem_cpointer_t lit_id_hash_cp; /**< pointer to literal identifiers hash table
                                   *   See also: lit_id_hash_table_init */
 
-  mem_cpointer_t func_scopes_cp; /**< function scopes inside current scope */
+  mem_cpointer_t declarations_cp; /**< function scopes and variable declarations inside current scope */
   uint16_t func_scopes_count; /**< count of function scopes inside current scope */
+  uint16_t var_decls_count; /**< count of variable declrations inside current scope */
 
   mem_cpointer_t next_header_cp; /**< pointer to next instructions data header */
 

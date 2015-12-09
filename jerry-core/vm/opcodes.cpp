@@ -441,40 +441,10 @@ opfunc_reg_var_decl (vm_instr_t instr __attr_unused___, /**< instruction */
  *         However, ecma_free_completion_value may be called for it, but it is a no-op.
  */
 ecma_completion_value_t
-opfunc_var_decl (vm_instr_t instr, /**< instruction */
-                 vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
+opfunc_var_decl (vm_instr_t instr __attr_unused___, /**< instruction */
+                 vm_frame_ctx_t *frame_ctx_p __attr_unused___) /**< interpreter context */
 {
-  lit_cpointer_t lit_cp = bc_get_literal_cp_by_uid (instr.data.var_decl.variable_name,
-                                                    frame_ctx_p->bytecode_header_p,
-                                                    frame_ctx_p->pos);
-  JERRY_ASSERT (lit_cp.packed_value != MEM_CP_NULL);
-
-  ecma_string_t *var_name_string_p = ecma_new_ecma_string_from_lit_cp (lit_cp);
-
-  if (!ecma_op_has_binding (frame_ctx_p->lex_env_p, var_name_string_p))
-  {
-    const bool is_configurable_bindings = frame_ctx_p->is_eval_code;
-
-    ecma_completion_value_t completion = ecma_op_create_mutable_binding (frame_ctx_p->lex_env_p,
-                                                                         var_name_string_p,
-                                                                         is_configurable_bindings);
-
-    JERRY_ASSERT (ecma_is_completion_value_empty (completion));
-
-    /* Skipping SetMutableBinding as we have already checked that there were not
-     * any binding with specified name in current lexical environment
-     * and CreateMutableBinding sets the created binding's value to undefined */
-    JERRY_ASSERT (ecma_is_completion_value_normal_simple_value (ecma_op_get_binding_value (frame_ctx_p->lex_env_p,
-                                                                                           var_name_string_p,
-                                                                                           true),
-                                                                ECMA_SIMPLE_VALUE_UNDEFINED));
-  }
-
-  ecma_deref_ecma_string (var_name_string_p);
-
-  frame_ctx_p->pos++;
-
-  return ecma_make_empty_completion_value ();
+  JERRY_UNREACHABLE ();
 } /* opfunc_var_decl */
 
 /**
@@ -663,11 +633,11 @@ opfunc_func_expr_ref (vm_instr_t instr, /**< instruction */
                                                        idx2, JERRY_BITSINBYTE, JERRY_BITSINBYTE);
 
   const bytecode_data_header_t *header_p = frame_ctx_p->bytecode_header_p;
-  mem_cpointer_t *func_scopes_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_scopes_cp);
+  mem_cpointer_t *declarations_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->declarations_cp);
   JERRY_ASSERT (index < header_p->func_scopes_count);
 
   const bytecode_data_header_t *func_expr_bc_header_p = MEM_CP_GET_NON_NULL_POINTER (const bytecode_data_header_t,
-                                                                                     func_scopes_p [index]);
+                                                                                     declarations_p[index]);
 
   vm_instr_counter_t instr_pos = 0;
 

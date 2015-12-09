@@ -607,13 +607,13 @@ vm_run_from_pos (const bytecode_data_header_t *header_p, /**< byte-code data hea
   const vm_instr_t *curr = &instrs_p[start_pos];
   JERRY_ASSERT (curr->op_idx == VM_OP_REG_VAR_DECL);
 
-  mem_cpointer_t *func_scopes_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_scopes_cp);
+  mem_cpointer_t *declarations_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->declarations_cp);
   for (uint16_t func_scope_index = 0;
        func_scope_index < header_p->func_scopes_count && ecma_is_completion_value_empty (completion);
        func_scope_index++)
   {
     bytecode_data_header_t *func_bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
-                                                                            func_scopes_p [func_scope_index]);
+                                                                            declarations_p [func_scope_index]);
 
     vm_instr_counter_t instr_pos = 0;
 
@@ -627,6 +627,39 @@ vm_run_from_pos (const bytecode_data_header_t *header_p, /**< byte-code data hea
 
       JERRY_ASSERT (instr_pos == func_bc_header_p->instrs_count);
     }
+  }
+
+  lit_cpointer_t *lit_ids_p = (lit_cpointer_t *) (declarations_p + header_p->func_scopes_count);
+  for (uint16_t var_decl_index = 0;
+       var_decl_index < header_p->var_decls_count && ecma_is_completion_value_empty (completion);
+       var_decl_index++)
+  {
+    lit_cpointer_t lit_cp = lit_ids_p[var_decl_index];
+
+    JERRY_ASSERT (lit_cp.packed_value != MEM_CP_NULL);
+
+    ecma_string_t *var_name_string_p = ecma_new_ecma_string_from_lit_cp (lit_cp);
+
+    if (!ecma_op_has_binding (lex_env_p, var_name_string_p))
+    {
+      const bool is_configurable_bindings = is_eval_code;
+
+      completion = ecma_op_create_mutable_binding (lex_env_p,
+                                                   var_name_string_p,
+                                                   is_configurable_bindings);
+
+      JERRY_ASSERT (ecma_is_completion_value_empty (completion));
+
+      /* Skipping SetMutableBinding as we have already checked that there were not
+       * any binding with specified name in current lexical environment
+       * and CreateMutableBinding sets the created binding's value to undefined */
+      JERRY_ASSERT (ecma_is_completion_value_normal_simple_value (ecma_op_get_binding_value (lex_env_p,
+                                                                                             var_name_string_p,
+                                                                                             true),
+                                                                  ECMA_SIMPLE_VALUE_UNDEFINED));
+    }
+
+    ecma_deref_ecma_string (var_name_string_p);
   }
 
   if (!ecma_is_completion_value_empty (completion))

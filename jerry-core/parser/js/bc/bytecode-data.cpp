@@ -30,8 +30,9 @@ bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
                       lit_id_hash_table *lit_id_hash_table_p,
                       vm_instr_t *bytecode_p,
                       vm_instr_counter_t instrs_count,
-                      mem_cpointer_t *func_scopes_p,
+                      mem_cpointer_t *declarations_p,
                       uint16_t func_scopes_count,
+                      uint16_t var_decls_count,
                       bool is_strict,
                       bool is_ref_arguments_identifier,
                       bool is_ref_eval_identifier,
@@ -41,8 +42,9 @@ bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
   MEM_CP_SET_POINTER (bc_header_p->lit_id_hash_cp, lit_id_hash_table_p);
   bc_header_p->instrs_p = bytecode_p;
   bc_header_p->instrs_count = instrs_count;
-  MEM_CP_SET_POINTER (bc_header_p->func_scopes_cp, func_scopes_p);
+  MEM_CP_SET_POINTER (bc_header_p->declarations_cp, declarations_p);
   bc_header_p->func_scopes_count = func_scopes_count;
+  bc_header_p->var_decls_count = var_decls_count;
   MEM_CP_SET_POINTER (bc_header_p->next_header_cp, first_bytecode_header_p);
 
   bc_header_p->is_strict = is_strict;
@@ -144,7 +146,13 @@ bc_merge_scopes_into_bytecode (scopes_tree scope_p,
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
-  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, NULL, 0,
+  bc_add_bytecode_data (header_p,
+                        lit_id_hash,
+                        bytecode_p,
+                        instrs_count,
+                        NULL,
+                        0,
+                        0,
                         scope_p->strict_mode,
                         scope_p->ref_arguments,
                         scope_p->ref_eval,
@@ -173,12 +181,15 @@ bc_dump_single_scope (scopes_tree scope_p,
   const vm_instr_counter_t instrs_count = scopes_tree_count_instructions_in_single_scope (scope_p);
   const size_t blocks_count = JERRY_ALIGNUP (instrs_count, BLOCK_SIZE) / BLOCK_SIZE;
   const uint16_t func_scopes_count = scope_p->t.children ? linked_list_get_length (scope_p->t.children) : 0;
+  const uint16_t var_decls_count = linked_list_get_length (scope_p->var_decls);
   const size_t bytecode_size = JERRY_ALIGNUP (instrs_count * sizeof (vm_instr_t), MEM_ALIGNMENT);
   const size_t hash_table_size = lit_id_hash_table_get_size_for_table (entries_count, blocks_count);
-  const size_t func_scopes_table_size = JERRY_ALIGNUP (func_scopes_count * sizeof (mem_cpointer_t), MEM_ALIGNMENT);
+  const size_t declarations_area_size = JERRY_ALIGNUP (func_scopes_count * sizeof (mem_cpointer_t)
+                                                       + var_decls_count * sizeof (lit_cpointer_t),
+                                                       MEM_ALIGNMENT);
   const size_t header_and_tables_size = JERRY_ALIGNUP ((sizeof (bytecode_data_header_t)
                                                         + hash_table_size
-                                                        + func_scopes_table_size),
+                                                        + declarations_area_size),
                                                        MEM_ALIGNMENT);
 
   uint8_t *buffer_p = (uint8_t *) mem_heap_alloc_block (bytecode_size + header_and_tables_size,
@@ -188,7 +199,9 @@ bc_dump_single_scope (scopes_tree scope_p,
                                                            hash_table_size,
                                                            entries_count, blocks_count);
 
-  mem_cpointer_t *func_scopes_p = (mem_cpointer_t *) (buffer_p + sizeof (bytecode_data_header_t) + hash_table_size);
+  mem_cpointer_t *declarations_p = (mem_cpointer_t *) (buffer_p + sizeof (bytecode_data_header_t) + hash_table_size);
+
+  scopes_tree_dump_var_decls (scope_p, (lit_cpointer_t *) (declarations_p + func_scopes_count));
 
   vm_instr_t *bytecode_p = scopes_tree_dump_single_scope (scope_p,
                                                           buffer_p + header_and_tables_size,
@@ -197,7 +210,12 @@ bc_dump_single_scope (scopes_tree scope_p,
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
-  bc_add_bytecode_data (header_p, lit_id_hash, bytecode_p, instrs_count, func_scopes_p, func_scopes_count,
+  bc_add_bytecode_data (header_p,
+                        lit_id_hash, bytecode_p,
+                        instrs_count,
+                        declarations_p,
+                        func_scopes_count,
+                        var_decls_count,
                         scope_p->strict_mode,
                         scope_p->ref_arguments,
                         scope_p->ref_eval,
@@ -221,8 +239,8 @@ bc_data_header_set_child (bytecode_data_header_t *header_p,
 {
   JERRY_ASSERT (i < header_p->func_scopes_count);
 
-  mem_cpointer_t *func_scopes_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_scopes_cp);
-  MEM_CP_SET_POINTER (func_scopes_p[i], child_p);
+  mem_cpointer_t *declarations_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->declarations_cp);
+  MEM_CP_SET_POINTER (declarations_p[i], child_p);
 } /* bc_data_header_set_child */
 
 /**
@@ -423,8 +441,9 @@ bc_load_bytecode_with_idx_map (const uint8_t *bytecode_and_idx_map_p, /**< buffe
                           (lit_id_hash_table *) lit_id_hash_table_buffer_p,
                           instrs_p,
                           (vm_instr_counter_t) instructions_number,
-                          NULL,
-                          0,
+                          NULL, /* FIXME: declarations */
+                          0, /* FIXME: func scopes count*/
+                          0, /* FIXME: var declarations count */
                           /* FIXME: scope_p->strict_mode */ false,
                           /* FIXME: scope_p->ref_arguments */ false,
                           /* FIXME: scope_p->ref_eval */ false,

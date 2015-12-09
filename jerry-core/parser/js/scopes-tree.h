@@ -100,6 +100,7 @@ vm_instr_counter_t scopes_tree_count_instructions (scopes_tree);
 vm_instr_counter_t scopes_tree_count_instructions_in_single_scope (scopes_tree t);
 bool scopes_tree_variable_declaration_exists (scopes_tree, lit_cpointer_t);
 vm_instr_t *scopes_tree_raw_data (scopes_tree, uint8_t *, size_t, lit_id_hash_table *);
+void scopes_tree_dump_var_decls (scopes_tree, lit_cpointer_t *);
 vm_instr_t *scopes_tree_dump_single_scope (scopes_tree, uint8_t *, size_t, lit_id_hash_table *);
 void scopes_tree_set_strict_mode (scopes_tree, bool);
 void scopes_tree_set_arguments_used (scopes_tree);
