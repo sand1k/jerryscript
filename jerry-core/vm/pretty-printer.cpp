@@ -302,6 +302,11 @@ pp_op_meta (const bytecode_data_header_t *bytecode_data_p,
       }
       break;
     }
+    case VM_OP_FUNC_EXPR_REF:
+    {
+      printf ("%s = function ();", VAR (1));
+      break;
+    }
     case VM_OP_FUNC_EXPR_N:
     {
       if (opm.op.data.func_expr_n.arg_list == 0)

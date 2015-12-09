@@ -1043,12 +1043,7 @@ dump_function_end_for_rewrite (void)
 void
 rewrite_function_end (vm_instr_counter_t pos)
 {
-  vm_instr_counter_t oc;
-  {
-    vm_instr_counter_t instrs_in_subscopes = (vm_instr_counter_t) (scopes_tree_count_instructions (current_scope_p)
-                                                                   - scopes_tree_instrs_num (current_scope_p));
-    oc = (vm_instr_counter_t) (get_diff_from (pos) + instrs_in_subscopes);
-  }
+  vm_instr_counter_t oc = scopes_tree_count_instructions_in_single_scope (current_scope_p);
 
   vm_idx_t id1, id2;
   split_instr_counter (oc, &id1, &id2);
