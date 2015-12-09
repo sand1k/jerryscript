@@ -612,22 +612,25 @@ vm_run_from_pos (const bytecode_data_header_t *header_p, /**< byte-code data hea
   const vm_instr_t *curr = &instrs_p[start_pos];
   JERRY_ASSERT (curr->op_idx == VM_OP_REG_VAR_DECL);
 
-  mem_cpointer_t *func_decls_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_decls_cp);
-  for (uint16_t func_decl_index = 0;
-       func_decl_index < header_p->func_decls_count && ecma_is_completion_value_empty (completion);
-       func_decl_index++)
+  mem_cpointer_t *func_scopes_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_scopes_cp);
+  for (uint16_t func_scope_index = 0;
+       func_scope_index < header_p->func_scopes_count && ecma_is_completion_value_empty (completion);
+       func_scope_index++)
   {
     bytecode_data_header_t *func_bc_header_p = MEM_CP_GET_NON_NULL_POINTER (bytecode_data_header_t,
-                                                                            func_decls_p [func_decl_index]);
+                                                                            func_scopes_p [func_scope_index]);
 
     vm_instr_counter_t instr_pos = 0;
 
-    completion = vm_function_declaration (func_bc_header_p,
-                                          is_strict,
-                                          is_eval_code,
-                                          &instr_pos,
-                                          lex_env_p);
-    // JERRY_ASSERT (instr_pos == func_bc_header_p->instrs_count);
+    if (func_bc_header_p->instrs_p [instr_pos].op_idx == VM_OP_FUNC_DECL_N)
+    {
+      completion = vm_function_declaration (func_bc_header_p,
+                                            is_strict,
+                                            is_eval_code,
+                                            &instr_pos,
+                                            lex_env_p);
+      JERRY_ASSERT (instr_pos == func_bc_header_p->instrs_count);
+    }
   }
 
   if (!ecma_is_completion_value_empty (completion))
