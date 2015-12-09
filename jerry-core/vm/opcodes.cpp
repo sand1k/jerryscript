@@ -494,15 +494,41 @@ vm_function_declaration (const bytecode_data_header_t *bytecode_header_p, /**< b
 
   vm_instr_counter_t instr_pos = *in_out_instr_pos_p;
 
-  vm_instr_t func_decl_instr = function_instrs_p[instr_pos];
-  JERRY_ASSERT (func_decl_instr.op_idx == VM_OP_FUNC_DECL_N);
+  vm_instr_t func_header_instr = function_instrs_p[instr_pos];
 
-  const vm_idx_t function_name_idx = func_decl_instr.data.func_decl_n.name_lit_idx;
-  const ecma_length_t params_number = func_decl_instr.data.func_decl_n.arg_list;
+  bool is_func_decl;
+  vm_idx_t function_name_idx;
+  ecma_length_t params_number;
 
-  lit_cpointer_t function_name_lit_cp = bc_get_literal_cp_by_uid (function_name_idx,
-                                                                  bytecode_header_p,
-                                                                  instr_pos++);
+  if (func_header_instr.op_idx == VM_OP_FUNC_DECL_N)
+  {
+    is_func_decl = true;
+
+    function_name_idx = func_header_instr.data.func_decl_n.name_lit_idx;
+    params_number = func_header_instr.data.func_decl_n.arg_list;
+  }
+  else
+  {
+    is_func_decl = false;
+
+    function_name_idx = func_header_instr.data.func_expr_n.name_lit_idx;
+    params_number = func_header_instr.data.func_expr_n.arg_list;
+  }
+
+  lit_cpointer_t function_name_lit_cp = NOT_A_LITERAL;
+
+  if (function_name_idx != VM_IDX_EMPTY)
+  {
+    function_name_lit_cp = bc_get_literal_cp_by_uid (function_name_idx,
+                                                     bytecode_header_p,
+                                                     instr_pos);
+  }
+  else
+  {
+    JERRY_ASSERT (!is_func_decl);
+  }
+
+  instr_pos++;
 
   ecma_completion_value_t ret_value;
 
@@ -522,25 +548,67 @@ vm_function_declaration (const bytecode_data_header_t *bytecode_header_p, /**< b
     formal_params_collection_p = NULL;
   }
 
-  const vm_instr_counter_t function_code_end_oc = (vm_instr_counter_t) (
-    vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FUNCTION_END,
-                                     bytecode_header_p,
-                                     instr_pos) + instr_pos);
+  const vm_instr_counter_t function_code_end_oc = vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FUNCTION_END,
+                                                                                   bytecode_header_p,
+                                                                                   instr_pos);
   instr_pos++;
 
-  const bool is_configurable_bindings = is_eval_code;
+  if (is_func_decl)
+  {
+    const bool is_configurable_bindings = is_eval_code;
 
-  ecma_string_t *function_name_string_p = ecma_new_ecma_string_from_lit_cp (function_name_lit_cp);
+    ecma_string_t *function_name_string_p = ecma_new_ecma_string_from_lit_cp (function_name_lit_cp);
 
-  ret_value = ecma_op_function_declaration (lex_env_p,
+    ret_value = ecma_op_function_declaration (lex_env_p,
+                                              function_name_string_p,
+                                              bytecode_header_p,
+                                              instr_pos,
+                                              formal_params_collection_p,
+                                              is_strict,
+                                              is_configurable_bindings);
+
+    ecma_deref_ecma_string (function_name_string_p);
+  }
+  else
+  {
+    ecma_object_t *scope_p;
+    ecma_string_t *function_name_string_p = NULL;
+
+    bool is_named_func_expr = (function_name_idx != VM_IDX_EMPTY);
+
+    if (is_named_func_expr)
+    {
+      scope_p = ecma_create_decl_lex_env (lex_env_p);
+
+      JERRY_ASSERT (function_name_lit_cp.packed_value != MEM_CP_NULL);
+
+      function_name_string_p = ecma_new_ecma_string_from_lit_cp (function_name_lit_cp);
+      ecma_op_create_immutable_binding (scope_p, function_name_string_p);
+    }
+    else
+    {
+      scope_p = lex_env_p;
+      ecma_ref_object (scope_p);
+    }
+
+    ecma_object_t *func_obj_p = ecma_op_create_function_object (formal_params_collection_p,
+                                                                scope_p,
+                                                                is_strict,
+                                                                bytecode_header_p,
+                                                                instr_pos);
+
+    ret_value = ecma_make_normal_completion_value (ecma_make_object_value (func_obj_p));
+
+    if (is_named_func_expr)
+    {
+      ecma_op_initialize_immutable_binding (scope_p,
                                             function_name_string_p,
-                                            bytecode_header_p,
-                                            instr_pos,
-                                            formal_params_collection_p,
-                                            is_strict,
-                                            is_configurable_bindings);
+                                            ecma_make_object_value (func_obj_p));
+      ecma_deref_ecma_string (function_name_string_p);
+    }
 
-  ecma_deref_ecma_string (function_name_string_p);
+    ecma_deref_object (scope_p);
+  }
 
   *in_out_instr_pos_p = function_code_end_oc;
 
@@ -548,27 +616,30 @@ vm_function_declaration (const bytecode_data_header_t *bytecode_header_p, /**< b
 } /* vm_function_declaration */
 
 /**
- * 'Function declaration' opcode handler.
+ * 'Function declaration header' opcode handler.
  *
  * @return completion value
  *         returned value must be freed with ecma_free_completion_value.
  */
 ecma_completion_value_t
 opfunc_func_decl_n (vm_instr_t instr __attr_unused___, /**< instruction */
-                    vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
+                    vm_frame_ctx_t *frame_ctx_p __attr_unused___) /**< interpreter context */
 {
-  /*
-   * FIXME:
-   *       Remove after turning on separate dumping of functions that are declared in function expressions
-   */
-  return vm_function_declaration (frame_ctx_p->bytecode_header_p,
-                                  frame_ctx_p->is_strict,
-                                  frame_ctx_p->is_eval_code,
-                                  &frame_ctx_p->pos,
-                                  frame_ctx_p->lex_env_p);
-
   JERRY_UNREACHABLE ();
 } /* opfunc_func_decl_n */
+
+/**
+ * 'Function expression header' opcode handler.
+ *
+ * @return completion value
+ *         returned value must be freed with ecma_free_completion_value.
+ */
+ecma_completion_value_t
+opfunc_func_expr_n (vm_instr_t instr __attr_unused___, /**< instruction */
+                    vm_frame_ctx_t *frame_ctx_p __attr_unused___) /**< interpreter context */
+{
+  JERRY_UNREACHABLE ();
+} /* opfunc_func_expr_n */
 
 /**
  * 'Function expression' opcode handler.
@@ -577,89 +648,49 @@ opfunc_func_decl_n (vm_instr_t instr __attr_unused___, /**< instruction */
  *         returned value must be freed with ecma_free_completion_value.
  */
 ecma_completion_value_t
-opfunc_func_expr_n (vm_instr_t instr, /**< instruction */
-                    vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
+opfunc_func_expr_ref (vm_instr_t instr, /**< instruction */
+                      vm_frame_ctx_t *frame_ctx_p) /**< interpreter context */
 {
   const vm_instr_counter_t lit_oc = frame_ctx_p->pos;
 
   frame_ctx_p->pos++;
 
-  const vm_idx_t dst_var_idx = instr.data.func_expr_n.lhs;
-  const vm_idx_t function_name_lit_idx = instr.data.func_expr_n.name_lit_idx;
-  const ecma_length_t params_number = instr.data.func_expr_n.arg_list;
-  const bool is_named_func_expr = (function_name_lit_idx != VM_IDX_EMPTY);
+  const vm_idx_t dst_var_idx = instr.data.func_expr_ref.lhs;
+  const vm_idx_t idx1 = instr.data.func_expr_ref.idx1;
+  const vm_idx_t idx2 = instr.data.func_expr_ref.idx2;
+
+  uint16_t index = (uint16_t) jrt_set_bit_field_value (jrt_set_bit_field_value (0, idx1, 0, JERRY_BITSINBYTE),
+                                                       idx2, JERRY_BITSINBYTE, JERRY_BITSINBYTE);
+
+  const bytecode_data_header_t *header_p = frame_ctx_p->bytecode_header_p;
+  mem_cpointer_t *func_scopes_p = MEM_CP_GET_POINTER (mem_cpointer_t, header_p->func_scopes_cp);
+  JERRY_ASSERT (index < header_p->func_scopes_count);
+
+  const bytecode_data_header_t *func_expr_bc_header_p = MEM_CP_GET_NON_NULL_POINTER (const bytecode_data_header_t,
+                                                                                     func_scopes_p [index]);
+
+  vm_instr_counter_t instr_pos = 0;
+
+  JERRY_ASSERT (func_expr_bc_header_p->instrs_p [instr_pos].op_idx == VM_OP_FUNC_EXPR_N);
 
   ecma_completion_value_t ret_value = ecma_make_empty_completion_value ();
 
-  vm_instr_counter_t function_code_end_oc;
+  ECMA_TRY_CATCH (func_obj_value,
+                  vm_function_declaration (func_expr_bc_header_p,
+                                           frame_ctx_p->is_strict,
+                                           frame_ctx_p->is_eval_code,
+                                           &instr_pos,
+                                           frame_ctx_p->lex_env_p),
+                  ret_value);
 
-  ecma_collection_header_t *formal_params_collection_p;
+  JERRY_ASSERT (ecma_is_constructor (func_obj_value));
 
-  if (params_number != 0)
-  {
-    formal_params_collection_p = ecma_new_strings_collection (NULL, 0);
+  ret_value = set_variable_value (frame_ctx_p, lit_oc, dst_var_idx, func_obj_value);
 
-    frame_ctx_p->pos = vm_fill_params_list (frame_ctx_p->bytecode_header_p,
-                                            frame_ctx_p->pos,
-                                            params_number,
-                                            formal_params_collection_p);
-  }
-  else
-  {
-    formal_params_collection_p = NULL;
-  }
-
-  function_code_end_oc = (vm_instr_counter_t) (vm_read_instr_counter_from_meta (OPCODE_META_TYPE_FUNCTION_END,
-                                                                                frame_ctx_p->bytecode_header_p,
-                                                                                frame_ctx_p->pos)
-                                               + frame_ctx_p->pos);
-  frame_ctx_p->pos++;
-
-  ecma_object_t *scope_p;
-  ecma_string_t *function_name_string_p = NULL;
-  if (is_named_func_expr)
-  {
-    scope_p = ecma_create_decl_lex_env (frame_ctx_p->lex_env_p);
-
-    lit_cpointer_t lit_cp = bc_get_literal_cp_by_uid (function_name_lit_idx,
-                                                      frame_ctx_p->bytecode_header_p,
-                                                      lit_oc);
-    JERRY_ASSERT (lit_cp.packed_value != MEM_CP_NULL);
-
-    function_name_string_p = ecma_new_ecma_string_from_lit_cp (lit_cp);
-    ecma_op_create_immutable_binding (scope_p, function_name_string_p);
-  }
-  else
-  {
-    scope_p = frame_ctx_p->lex_env_p;
-    ecma_ref_object (scope_p);
-  }
-
-  ecma_object_t *func_obj_p = ecma_op_create_function_object (formal_params_collection_p,
-                                                              scope_p,
-                                                              frame_ctx_p->is_strict,
-                                                              frame_ctx_p->bytecode_header_p,
-                                                              frame_ctx_p->pos);
-
-  ret_value = set_variable_value (frame_ctx_p, lit_oc,
-                                  dst_var_idx,
-                                  ecma_make_object_value (func_obj_p));
-
-  if (is_named_func_expr)
-  {
-    ecma_op_initialize_immutable_binding (scope_p,
-                                          function_name_string_p,
-                                          ecma_make_object_value (func_obj_p));
-    ecma_deref_ecma_string (function_name_string_p);
-  }
-
-  ecma_deref_object (func_obj_p);
-  ecma_deref_object (scope_p);
-
-  frame_ctx_p->pos = function_code_end_oc;
+  ECMA_FINALIZE (func_obj_value);
 
   return ret_value;
-} /* opfunc_func_expr_n */
+} /* opfunc_func_expr_ref */
 
 /**
  * Get 'this' argument value and call flags mask for function call

@@ -451,6 +451,27 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
 
   scopes_tree func_scope = scopes_tree_init (parent_scope, SCOPE_TYPE_FUNCTION);
 
+  jsp_operand_t func;
+
+  if (is_function_expression)
+  {
+    func = tmp_operand ();
+
+    uint16_t index = (uint16_t) (linked_list_get_length (parent_scope->t.children) - 1u);
+
+    vm_idx_t idx1 = (vm_idx_t) jrt_extract_bit_field (index, 0, JERRY_BITSINBYTE);
+    vm_idx_t idx2 = (vm_idx_t) jrt_extract_bit_field (index, JERRY_BITSINBYTE, JERRY_BITSINBYTE);
+
+    dump_binary_op (VM_OP_FUNC_EXPR_REF,
+                    func,
+                    jsp_operand_t::make_idx_const_operand (idx1),
+                    jsp_operand_t::make_idx_const_operand (idx2));
+  }
+  else
+  {
+    func = empty_operand ();
+  }
+
   dumper_set_scope (func_scope);
   scopes_tree_set_strict_mode (func_scope, scopes_tree_strict_mode (parent_scope));
 
@@ -489,8 +510,6 @@ jsp_start_parse_function_scope (jsp_operand_t func_name,
   }
 
   skip_token ();
-
-  const jsp_operand_t func = is_function_expression ? tmp_operand () : empty_operand ();
 
   rewrite_varg_header_set_args_count (func, formal_parameters_num, varg_header_pos);
 
@@ -615,7 +634,7 @@ jsp_find_function_end (void)
 }
 
 static void
-jsp_finish_parse_function_scope (bool is_function_expression)
+jsp_finish_parse_function_scope (void)
 {
   scopes_tree func_scope = dumper_get_scope ();
   JERRY_ASSERT (func_scope != NULL && func_scope->type == SCOPE_TYPE_FUNCTION);
@@ -631,12 +650,6 @@ jsp_finish_parse_function_scope (bool is_function_expression)
   rewrite_function_end (function_end_pos);
 
   dumper_set_scope (parent_scope);
-
-  if (is_function_expression)
-  {
-    scopes_tree_merge_subscope (dumper_get_scope (), func_scope);
-    scopes_tree_free (func_scope);
-  }
 }
 
 typedef struct
@@ -2415,7 +2428,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (is_source_elements_list_end)
       {
-        jsp_finish_parse_function_scope (true);
+        jsp_finish_parse_function_scope ();
 
         state_p->state = JSP_STATE_EXPR_MEMBER;
       }
@@ -2479,7 +2492,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
 
       if (is_source_elements_list_end)
       {
-        jsp_finish_parse_function_scope (true);
+        jsp_finish_parse_function_scope ();
 
         jsp_operand_t prop_name = state_p->u.expression.u.accessor_prop_decl.prop_name;
         jsp_operand_t func = state_p->u.expression.operand;
@@ -4757,7 +4770,7 @@ jsp_parse_source_element_list (jsp_parse_mode_t parse_mode)
     }
     else if (state_p->state == JSP_STATE_FUNC_DECL_FINISH)
     {
-      jsp_finish_parse_function_scope (false);
+      jsp_finish_parse_function_scope ();
       JSP_COMPLETE_STATEMENT_PARSE ();
     }
     else if (state_p->state == JSP_STATE_STAT_NAMED_LABEL)
