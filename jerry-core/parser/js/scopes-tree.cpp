@@ -465,7 +465,6 @@ generate_instr (linked_list instr_list, /**< instruction list */
         case OPCODE_META_TYPE_FINALLY:
         case OPCODE_META_TYPE_END_TRY_CATCH_FINALLY:
         case OPCODE_META_TYPE_CALL_SITE_INFO:
-        case OPCODE_META_TYPE_SCOPE_CODE_FLAGS:
         {
           change_uid (om_p, lit_ids, 0x000);
           break;
@@ -606,7 +605,6 @@ count_new_literals_in_instr (op_meta *om_p) /**< instruction */
         case OPCODE_META_TYPE_FINALLY:
         case OPCODE_META_TYPE_END_TRY_CATCH_FINALLY:
         case OPCODE_META_TYPE_CALL_SITE_INFO:
-        case OPCODE_META_TYPE_SCOPE_CODE_FLAGS:
         {
           insert_uids_to_lit_id_map (om_p, 0x000);
           break;
@@ -999,6 +997,8 @@ scopes_tree_init (scopes_tree parent, /**< parent scope */
   tree->contains_try = false;
   tree->contains_delete = false;
   tree->contains_functions = false;
+  tree->is_args_moved_to_regs = false;
+  tree->is_no_lex_env = false;
   tree->instrs = linked_list_init (sizeof (op_meta));
   tree->var_decls = linked_list_init (sizeof (op_meta));
   return tree;

@@ -75,6 +75,10 @@ typedef struct
   bool contains_delete: 1; /**< flag, indicationg whether 'delete' operator is contained in the scope
                             *   (not depends on subscopes) */
   bool contains_functions: 1; /**< flag, indicating that the scope contains a function declaration / expression */
+  bool is_args_moved_to_regs : 1; /**< the function's arguments are moved to registers,
+                                   *   so should be initialized in vm registers,
+                                   *   and not in lexical environment */
+  bool is_no_lex_env : 1; /**< no lex. env. is necessary for the scope */
 } scopes_tree_int;
 
 typedef scopes_tree_int *scopes_tree;

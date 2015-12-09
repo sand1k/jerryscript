@@ -556,48 +556,6 @@ pp_op_meta (const bytecode_data_header_t *bytecode_data_p,
           printf ("end try");
           break;
         }
-        case OPCODE_META_TYPE_SCOPE_CODE_FLAGS:
-        {
-          if (opm.op.data.meta.data_1 != VM_IDX_REWRITE_GENERAL_CASE
-              && opm.op.data.meta.data_1 != VM_IDX_EMPTY)
-          {
-            vm_idx_t scope_flags = opm.op.data.meta.data_1;
-
-            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_STRICT)
-            {
-              printf ("[use strict] ");
-              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_STRICT);
-            }
-            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER)
-            {
-              printf ("[no 'arguments'] ");
-              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_NOT_REF_ARGUMENTS_IDENTIFIER);
-            }
-            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER)
-            {
-              printf ("[no 'eval'] ");
-              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_NOT_REF_EVAL_IDENTIFIER);
-            }
-            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS)
-            {
-              printf ("[arguments are placed on registers] ");
-              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_ARGUMENTS_ON_REGISTERS);
-            }
-            if (scope_flags & OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV)
-            {
-              printf ("[no lexical environment should be created for the scope] ");
-              scope_flags &= (vm_idx_t) ~(OPCODE_SCOPE_CODE_FLAGS_NO_LEX_ENV);
-            }
-
-            JERRY_ASSERT (scope_flags == 0);
-          }
-          else
-          {
-            printf ("[to be rewritten]");
-          }
-
-          break;
-        }
         default:
         {
           JERRY_UNREACHABLE ();
