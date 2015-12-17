@@ -100,18 +100,19 @@ scopes_tree_variable_declaration_exists (scopes_tree tree, /**< scope */
  * Fill variable declaration list of bytecode header
  */
 void
-scopes_tree_dump_var_decls (scopes_tree scope_p, /**< scopes tree */
+scopes_tree_dump_var_decls (scopes_tree scope, /**< scopes tree */
                             lit_cpointer_t *var_decls_p) /**< pointer to bytecode header's declarations table,
                                                           *   where variables' lit_cp's should be stored */
 {
-  for (uint32_t i = 0; i < scopes_tree_var_decls_num (scope_p); ++i)
+  for (uint32_t i = 0; i < scopes_tree_var_decls_num (scope); ++i)
   {
-    op_meta var_decl_op_meta = *(op_meta *) linked_list_element (scope_p->var_decls, i);
+    op_meta var_decl_op_meta = *(op_meta *) linked_list_element (scope->var_decls, i);
     var_decls_p[i] = var_decl_op_meta.lit_id[0];
   }
 
-  scopes_tree_var_decls_num (scope_p);
+  scopes_tree_var_decls_num (scope);
 } /* scopes_tree_dump_var_decls */
+
 /**
  * Set up a flag, indicating that scope should be executed in strict mode
  */
