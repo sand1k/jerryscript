@@ -88,13 +88,19 @@ bc_get_literal_cp_by_uid (uint8_t,
 /*
  * Snapshot-related
  */
-bool bc_save_bytecode_with_idx_map (uint8_t *, size_t, size_t *, const bytecode_data_header_t *,
-                                    const lit_mem_to_snapshot_id_map_entry_t *, uint32_t,
-                                    uint32_t *, uint32_t *);
+uint32_t
+bc_find_lit_offset (lit_cpointer_t, const lit_mem_to_snapshot_id_map_entry_t *, uint32_t);
+
+bool
+bc_align_data_in_output_buffer (uint32_t *, uint8_t *, size_t, size_t *);
+
+bool
+bc_save_bytecode_data (uint8_t *, size_t, size_t *, const bytecode_data_header_t *,
+                       const lit_mem_to_snapshot_id_map_entry_t *, uint32_t, uint32_t *);
 
 const bytecode_data_header_t *
-bc_load_bytecode_with_idx_map (const uint8_t *, uint32_t, uint32_t,
-                               const lit_mem_to_snapshot_id_map_entry_t *, uint32_t, bool);
+bc_load_bytecode_data (const uint8_t *, size_t,
+                       const lit_mem_to_snapshot_id_map_entry_t *, uint32_t, bool, uint32_t);
 #endif /* JERRY_ENABLE_SNAPSHOT */
 
 #endif /* BYTECODE_DATA_H */

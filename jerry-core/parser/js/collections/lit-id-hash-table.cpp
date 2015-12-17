@@ -218,17 +218,8 @@ lit_id_hash_table_dump_for_snapshot (uint8_t *buffer_p, /**< buffer to dump to *
     {
       lit_cpointer_t lit_cp = table_p->buckets[block_index][block_idx_pair_index];
 
-      uint32_t lit_index;
-      for (lit_index = 0; lit_index < literals_num; lit_index++)
-      {
-        if (lit_map_p[lit_index].literal_id.packed_value == lit_cp.packed_value)
-        {
-          break;
-        }
-      }
-      JERRY_ASSERT (lit_index < literals_num);
+      uint32_t offset = bc_find_lit_offset (lit_cp, lit_map_p, literals_num);
 
-      uint32_t offset = lit_map_p[lit_index].literal_offset;
       if (!jrt_write_to_buffer_by_offset (buffer_p, buffer_size, in_out_buffer_offset_p, offset))
       {
         return 0;
