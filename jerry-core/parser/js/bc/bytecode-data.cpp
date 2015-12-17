@@ -21,17 +21,21 @@
 static bytecode_data_header_t *first_bytecode_header_p = NULL;
 
 static void
-bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
-                      lit_id_hash_table *lit_id_hash_table_p,
-                      vm_instr_t *bytecode_p,
-                      mem_cpointer_t *declarations_p,
-                      uint16_t func_scopes_count,
-                      uint16_t var_decls_count,
-                      bool is_strict,
-                      bool is_ref_arguments_identifier,
-                      bool is_ref_eval_identifier,
-                      bool is_arguments_moved_to_regs,
-                      bool is_no_lex_env)
+bc_add_bytecode_data (bytecode_data_header_t *bc_header_p, /**< byte-code scope data header */
+                      lit_id_hash_table *lit_id_hash_table_p, /**< (idx, block id) -> literal hash table */
+                      vm_instr_t *bytecode_p, /**< byte-code instructions array */
+                      mem_cpointer_t *declarations_p, /**< array of function / variable declarations */
+                      uint16_t func_scopes_count, /**< number of function declarations / expressions
+                                                   *   located immediately in the corresponding scope */
+                      uint16_t var_decls_count, /**< number of variable declarations immediately in the scope */
+                      bool is_strict, /**< is the scope's code strict mode code? */
+                      bool is_ref_arguments_identifier, /**< does the scope's code
+                                                        *    reference 'arguments' identifier? */
+                      bool is_ref_eval_identifier, /**< does the scope's code
+                                                    *   reference 'eval' identifier? */
+                      bool is_arguments_moved_to_regs, /**< is it function scope, for which arguments
+                                                        *   are located on registers, not in variables? */
+                      bool is_no_lex_env) /**< is lexical environment unused in the scope? */
 {
   MEM_CP_SET_POINTER (bc_header_p->lit_id_hash_cp, lit_id_hash_table_p);
   bc_header_p->instrs_p = bytecode_p;
@@ -49,7 +53,7 @@ bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
 } /* bc_add_bytecode_data */
 
 static void
-bc_free_bytecode_data (bytecode_data_header_t *bytecode_data_p)
+bc_free_bytecode_data (bytecode_data_header_t *bytecode_data_p) /**< byte-code scope data header */
 {
   bytecode_data_header_t *next_to_handle_list_p = bytecode_data_p;
 
@@ -88,7 +92,7 @@ bc_free_bytecode_data (bytecode_data_header_t *bytecode_data_p)
  * Deletes bytecode and associated hash table
  */
 void
-bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
+bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p) /**< byte-code scope data header */
 {
   bytecode_data_header_t *prev_header_p = NULL;
   bytecode_data_header_t *cur_header_p = first_bytecode_header_p;
@@ -118,15 +122,15 @@ bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
   }
 } /* bc_remove_bytecode_data */
 
-vm_instr_t bc_get_instr (const bytecode_data_header_t *bytecode_data_p,
-                         vm_instr_counter_t oc)
+vm_instr_t bc_get_instr (const bytecode_data_header_t *bytecode_data_p, /**< byte-code scope data header */
+                         vm_instr_counter_t oc) /**< instruction position */
 {
   JERRY_ASSERT (oc < bytecode_data_p->instrs_count);
   return bytecode_data_p->instrs_p[oc];
 }
 
 void
-bc_print_instrs (const bytecode_data_header_t *bytecode_data_p)
+bc_print_instrs (const bytecode_data_header_t *bytecode_data_p) /**< byte-code scope data header */
 {
 #ifdef JERRY_ENABLE_PRETTY_PRINTER
   for (vm_instr_counter_t loc = 0; loc < bytecode_data_p->instrs_count; loc++)
@@ -152,7 +156,7 @@ bc_print_instrs (const bytecode_data_header_t *bytecode_data_p)
  * @return pointer to bytecode header of the outer most scope
  */
 static bytecode_data_header_t *
-bc_dump_single_scope (scopes_tree scope_p)
+bc_dump_single_scope (scopes_tree scope_p) /**< a node of scopes tree */
 {
   const size_t entries_count = scope_p->max_uniq_literals_num;
   const vm_instr_counter_t instrs_count = scopes_tree_instrs_num (scope_p);
@@ -209,7 +213,7 @@ bc_dump_single_scope (scopes_tree scope_p)
 } /* bc_dump_single_scope */
 
 static bytecode_data_header_t *
-bc_dump_scope_and_prepare_header (scopes_tree scope_p)
+bc_dump_scope_and_prepare_header (scopes_tree scope_p) /**< a node of scopes tree */
 {
   bytecode_data_header_t *header_p = bc_dump_single_scope (scope_p);
   JERRY_ASSERT (header_p->next_header_cp == MEM_CP_NULL);
@@ -246,7 +250,7 @@ bc_dump_scope_and_prepare_header (scopes_tree scope_p)
  * @return pointer to bytecode header of the outer most scope
  */
 bytecode_data_header_t *
-bc_alloc_headers_from_scopes_tree (scopes_tree scope_p)
+bc_alloc_headers_from_scopes_tree (scopes_tree scope_p) /**< a node of scopes tree */
 {
   bytecode_data_header_t *bc_header_p = bc_dump_scope_and_prepare_header (scope_p);
 
@@ -294,7 +298,7 @@ bc_alloc_headers_from_scopes_tree (scopes_tree scope_p)
 } /* bc_alloc_headers_from_scopes_tree */
 
 void
-bc_finalize ()
+bc_finalize (void)
 {
   while (first_bytecode_header_p != NULL)
   {
