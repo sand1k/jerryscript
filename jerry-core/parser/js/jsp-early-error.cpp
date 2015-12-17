@@ -189,7 +189,8 @@ jsp_early_error_check_for_duplication_of_prop_names (bool is_strict, locus loc _
 }
 
 void
-jsp_early_error_emit_error_on_eval_and_arguments (literal_t lit, locus loc)
+jsp_early_error_emit_error_on_eval_and_arguments (literal_t lit, /**< literal to check */
+                                                  locus loc) /**< location of the literal in source code */
 {
   if (lit_literal_equal_type_utf8 (lit,
                                    lit_get_magic_string_utf8 (LIT_MAGIC_STRING_ARGUMENTS),
