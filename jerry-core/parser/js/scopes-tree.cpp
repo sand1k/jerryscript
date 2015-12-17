@@ -191,8 +191,13 @@ scopes_tree_strict_mode (scopes_tree tree)
   return (bool) tree->strict_mode;
 }
 
+/**
+ * Get number of subscopes (immediate function declarations / expressions) of the specified scope
+ *
+ * @return the number
+ */
 size_t
-scopes_tree_child_scopes_num (scopes_tree tree)
+scopes_tree_child_scopes_num (scopes_tree tree) /**< a scopes tree node */
 {
   size_t num = 0;
 
