@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
+#include "bytecode-data.h"
 #include "jrt.h"
 #include "opcodes.h"
 #include "opcodes-ecma-support.h"
-#include "bytecode-data.h"
 
 /**
  * Note:
