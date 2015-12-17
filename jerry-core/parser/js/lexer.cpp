@@ -1265,6 +1265,12 @@ lexer_parse_comment (void)
   return false;
 } /* lexer_parse_comment */
 
+/**
+ * Skip any whitespace and comment tokens
+ *
+ * @return true - if a newline token was skipped,
+ *         false - otherwise
+ */
 static bool
 lexer_skip_whitespace_and_comments (void)
 {
@@ -1534,6 +1540,11 @@ lexer_parse_token (bool maybe_regexp, /**< read '/' as regexp? */
   PARSE_ERROR (JSP_EARLY_ERROR_SYNTAX, "Illegal character", lit_utf8_iterator_get_pos (&src_iter));
 } /* lexer_parse_token */
 
+/**
+ * Construct next token from current source code position and increment the position
+ *
+ * @return the constructed token
+ */
 token
 lexer_next_token (bool maybe_regexp, /**< read '/' as regexp? */
                   bool is_strict) /**< strict mode is on (true) / off (false) */
@@ -1582,7 +1593,7 @@ lexer_next_token (bool maybe_regexp, /**< read '/' as regexp? */
   }
 
   return sent_token;
-}
+} /* lexer_next_token */
 
 void
 lexer_seek (lit_utf8_iterator_pos_t locus)
@@ -1809,8 +1820,13 @@ lexer_token_type_to_string (jsp_token_type_t tt)
   }
 }
 
+/**
+ * Get type of specified token
+ *
+ * @return token type
+ */
 jsp_token_type_t __attr_always_inline___
-lexer_get_token_type (token t)
+lexer_get_token_type (token t) /**< the token */
 {
   JERRY_ASSERT (t.type >= TOKEN_TYPE__BEGIN && t.type <= TOKEN_TYPE__END);
 
