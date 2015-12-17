@@ -51,7 +51,7 @@ bc_add_bytecode_data (bytecode_data_header_t *bc_header_p,
 static void
 bc_free_bytecode_data (bytecode_data_header_t *bytecode_data_p)
 {
-  bytecode_data_header_t* next_to_handle_list_p = bytecode_data_p;
+  bytecode_data_header_t *next_to_handle_list_p = bytecode_data_p;
 
   while (next_to_handle_list_p != NULL)
   {
@@ -90,16 +90,16 @@ bc_free_bytecode_data (bytecode_data_header_t *bytecode_data_p)
 void
 bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
 {
-  bytecode_data_header_t *prev_header = NULL;
+  bytecode_data_header_t *prev_header_p = NULL;
   bytecode_data_header_t *cur_header_p = first_bytecode_header_p;
 
   while (cur_header_p != NULL)
   {
     if (cur_header_p == bytecode_data_p)
     {
-      if (prev_header)
+      if (prev_header_p)
       {
-        prev_header->next_header_cp = cur_header_p->next_header_cp;
+        prev_header_p->next_header_cp = cur_header_p->next_header_cp;
       }
       else
       {
@@ -113,7 +113,7 @@ bc_remove_bytecode_data (const bytecode_data_header_t *bytecode_data_p)
       break;
     }
 
-    prev_header = cur_header_p;
+    prev_header_p = cur_header_p;
     cur_header_p = MEM_CP_GET_POINTER (bytecode_data_header_t, cur_header_p->next_header_cp);
   }
 } /* bc_remove_bytecode_data */
@@ -172,9 +172,9 @@ bc_dump_single_scope (scopes_tree scope_p)
   uint8_t *buffer_p = (uint8_t *) mem_heap_alloc_block (bytecode_size + header_and_tables_size,
                                                         MEM_HEAP_ALLOC_LONG_TERM);
 
-  lit_id_hash_table *lit_id_hash = lit_id_hash_table_init (buffer_p + sizeof (bytecode_data_header_t),
-                                                           hash_table_size,
-                                                           entries_count, blocks_count);
+  lit_id_hash_table *lit_id_hash_p = lit_id_hash_table_init (buffer_p + sizeof (bytecode_data_header_t),
+                                                             hash_table_size,
+                                                             entries_count, blocks_count);
 
   mem_cpointer_t *declarations_p = (mem_cpointer_t *) (buffer_p + sizeof (bytecode_data_header_t) + hash_table_size);
 
@@ -182,7 +182,7 @@ bc_dump_single_scope (scopes_tree scope_p)
 
   vm_instr_t *bytecode_p = (vm_instr_t *) (buffer_p + header_and_tables_size);
 
-  JERRY_ASSERT (scope_p->max_uniq_literals_num >= lit_id_hash->current_bucket_pos);
+  JERRY_ASSERT (scope_p->max_uniq_literals_num >= lit_id_hash_p->current_bucket_pos);
 
   bytecode_data_header_t *header_p = (bytecode_data_header_t *) buffer_p;
 
@@ -192,7 +192,7 @@ bc_dump_single_scope (scopes_tree scope_p)
   }
 
   bc_add_bytecode_data (header_p,
-                        lit_id_hash, bytecode_p,
+                        lit_id_hash_p, bytecode_p,
                         declarations_p,
                         (uint16_t) func_scopes_count,
                         var_decls_count,
@@ -208,7 +208,7 @@ bc_dump_single_scope (scopes_tree scope_p)
   return header_p;
 } /* bc_dump_single_scope */
 
-static bytecode_data_header_t*
+static bytecode_data_header_t *
 bc_dump_scope_and_prepare_header (scopes_tree scope_p)
 {
   bytecode_data_header_t *header_p = bc_dump_single_scope (scope_p);
@@ -250,7 +250,7 @@ bc_alloc_headers_from_scopes_tree (scopes_tree scope_p)
 {
   bytecode_data_header_t *bc_header_p = bc_dump_scope_and_prepare_header (scope_p);
 
-  bytecode_data_header_t* next_to_handle_list_p = bc_header_p;
+  bytecode_data_header_t *next_to_handle_list_p = bc_header_p;
 
   while (next_to_handle_list_p != NULL)
   {
